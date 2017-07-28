@@ -22,7 +22,7 @@
     
     ***** END LICENSE BLOCK *****
 */
-const CONNECTOR_API_VERSION = 2;
+const CONNECTOR_API_VERSION = 3;
 
 Zotero.Server.Connector = {
 	_waitingForSelection: {},

@@ -793,9 +793,11 @@ Services.scriptloader.loadSubScript("resource://zotero/polyfill.js");
 			
 			// Initialize various services
 			Zotero.Integration.init();
+			Zotero.ConnectorNotifier.init();
 			
 			if(Zotero.Prefs.get("httpServer.enabled")) {
 				Zotero.Server.init();
+				Zotero.Server.SSE.Connector.init();
 			}
 			
 			yield Zotero.Fulltext.init();

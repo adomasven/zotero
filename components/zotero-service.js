@@ -131,7 +131,9 @@ const xpcomFilesLocal = [
 	'users',
 	'translation/translate_item',
 	'translation/translators',
-	'server_connector'
+	'connector/connectorNotifier',
+	'connector/server_connector',
+	'connector/server_connectorSse'
 ];
 
 /** XPCOM files to be loaded only for connector translation and DB access **/
