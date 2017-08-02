@@ -27,7 +27,8 @@ const CONNECTOR_API_VERSION = 3;
 Zotero.Server.Connector = {
 	_waitingForSelection: {},
 	
-	getSaveTarget: function () {
+	// TODO: move somewhere else. Like ZoteroPane, but somewhere more structured
+	getPaneSelection: function () {
 		var zp = Zotero.getActiveZoteroPane(),
 			library = null,
 			collection = null,
@@ -311,7 +312,7 @@ Zotero.Server.Connector.SavePage.prototype = {
 			return;
 		}
 		
-		var { library, collection, editable } = Zotero.Server.Connector.getSaveTarget();
+		var { library, collection, editable } = Zotero.Server.Connector.getPaneSelection();
 		var libraryID = library.libraryID;
 		
 		// set handlers for translation
@@ -369,7 +370,7 @@ Zotero.Server.Connector.SaveItem.prototype = {
 	init: Zotero.Promise.coroutine(function* (options) {
 		var data = options.data;
 		
-		var { library, collection, editable } = Zotero.Server.Connector.getSaveTarget();
+		var { library, collection, editable } = Zotero.Server.Connector.getPaneSelection();
 		var libraryID = library.libraryID;
 		
 		// If library isn't editable (or directly editable, in the case of My Publications), switch to
@@ -458,7 +459,7 @@ Zotero.Server.Connector.SaveSnapshot.prototype = {
 		
 		Zotero.Server.Connector.Data[data["url"]] = "<html>"+data["html"]+"</html>";
 		
-		var { library, collection, editable } = Zotero.Server.Connector.getSaveTarget();
+		var { library, collection, editable } = Zotero.Server.Connector.getPaneSelection();
 		var libraryID = library.libraryID;
 		
 		// If library isn't editable (or directly editable, in the case of My Publications), switch to
@@ -729,7 +730,7 @@ Zotero.Server.Connector.GetSelectedCollection.prototype = {
 	 * @param {Function} sendResponseCallback function to send HTTP response
 	 */
 	init: function(postData, sendResponseCallback) {
-		var { library, collection, editable } = Zotero.Server.Connector.getSaveTarget();
+		var { library, collection, editable } = Zotero.Server.Connector.getPaneSelection();
 		var response = {
 			libraryID: library.libraryID,
 			libraryName: library.name,

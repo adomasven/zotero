@@ -39,10 +39,14 @@ Zotero.Server.SSE.Connector = {
 		});
 	},
 	
-	addListener: function(listener) {
+	addListener: Zotero.Promise.coroutine(function* (listener) {
 		this._listeners.push(listener);
 		Zotero.debug(`SSE.Connector listener added. Total: ${this._listeners.length}`);
-	},
+		// Send out initialization data on the channel
+		let initData = yield Zotero.ConnectorNotifier.getInitData();
+		var data = `data: ${JSON.stringify({data: initData, event: 'init'})}\n\n`;
+		listener.notify(data);
+	}),
 	
 	removeListener: function(listener) {
 		this._listeners = this._listeners.filter((l) => l !== listener);

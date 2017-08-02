@@ -48,21 +48,12 @@ Zotero.ConnectorNotifier = {
 		}
 	},
 	
-	_notifySelectItem: function(ids) {
-		let items = Zotero.Items.get(ids);
-		this.notifyListeners('select', {items: items.map((i) => ({itemID: i.itemID, title: i.getDisplayTitle()}))})
+	_notifySelectItem: function() {
+		this.notifyListeners('select', this._getSelectedItemData());
 	},
 	
 	_notifySelectCollection: function() {
-		var zp = Zotero.getActiveZoteroPane();
-		var libraryID = zp.getSelectedLibraryID();
-		var collection = zp.getSelectedCollection();
-		let data = {collection: {id: collection.id, name: collection.name}};
-		if (libraryID) {
-			let library = Zotero.Libraries.get(libraryID);
-			data.library = {name: library.name, id: libraryID};
-		}
-		this.notifyListeners('select', data)
+		this.notifyListeners('select', this._getSelectedCollectionData());
 	},
 	
 	notifyListeners: function(event, data) {
@@ -80,4 +71,29 @@ Zotero.ConnectorNotifier = {
 		this._listeners = this._listeners.filter((l) => l !== listener);
 		Zotero.debug(`ConnectorNotifier listener removed. Total: ${this._listeners.length}`);
 	},
+	
+	_getSelectedCollectionData: function() {
+		var {library, collection, editable} = Zotero.Server.Connector.getPaneSelection();
+		let data = {collection: {id: collection.id, name: collection.name}};
+		data.library = {
+			name: library.name,
+			id: library.libraryID,
+			editable: editable,
+			filesEditable: library.filesEditable
+		};
+		return data;
+	},
+	
+	_getSelectedItemData: function() {
+		var zp = Zotero.getActiveZoteroPane();
+		return {items: zp.getSelectedItems().map((i) => ({
+			itemID: i.itemID,
+			title: i.getDisplayTitle(),
+			isAttachment: i.isAttachment()
+		}))};
+	},
+	
+	getInitData: Zotero.Promise.coroutine(function* () {
+		return {selected: Object.assign(this._getSelectedCollectionData(), this._getSelectedItemData())};
+	}),
 };
