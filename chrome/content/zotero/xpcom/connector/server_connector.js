@@ -373,9 +373,8 @@ Zotero.Server.Connector.SaveItem.prototype = {
 		var { library, collection, editable } = Zotero.Server.Connector.getPaneSelection();
 		var libraryID = library.libraryID;
 		
-		// If library isn't editable (or directly editable, in the case of My Publications), switch to
-		// My Library if present and editable, and otherwise fail
-		if (!library.editable || library.libraryType == 'publications') {
+		// If library isn't editable (or directly editable, in the case of My Publications) fail
+		if (!editable || library.libraryType == 'publications') {
 			Zotero.logError("Can't add item to read-only library " + library.name);
 			return [500, "application/json", JSON.stringify({libraryEditable: false})];
 		}
@@ -464,32 +463,11 @@ Zotero.Server.Connector.SaveSnapshot.prototype = {
 		
 		// If library isn't editable (or directly editable, in the case of My Publications), switch to
 		// My Library if present and editable, and otherwise fail
-		if (!library.editable || library.libraryType == 'publications') {
-			let userLibrary = Zotero.Libraries.userLibrary;
-			if (userLibrary && userLibrary.editable) {
-				let zp = Zotero.getActiveZoteroPane();
-				if (zp) {
-					yield zp.collectionsView.selectLibrary(userLibrary.id);
-				}
-				library = userLibrary;
-				libraryID = userLibrary.id;
-				collection = null;
-			}
-			else {
-				Zotero.logError("Can't add item to read-only library " + library.name);
-				return 500;
-			}
+		if (!editable || library.libraryType == 'publications') {
+			Zotero.logError("Can't add item to read-only library " + library.name);
+			return [500, "application/json", JSON.stringify({libraryEditable: false})];
 		}
-		
-		// determine whether snapshot can be saved
-		var filesEditable;
-		if (libraryID) {
-			let group = Zotero.Groups.getByLibraryID(libraryID);
-			filesEditable = group.filesEditable;
-		}
-		else {
-			filesEditable = true;
-		}
+		let filesEditable = library.filesEditable;
 		
 		var cookieSandbox = data.url
 			? new Zotero.CookieSandbox(
@@ -547,6 +525,113 @@ Zotero.Server.Connector.SaveSnapshot.prototype = {
 								parentItemID: itemID
 							});
 						}
+						
+						deferred.resolve(201);
+					} catch(e) {
+						Zotero.debug(e, 1);
+						deferred.resolve(500);
+						throw e;
+					}
+				}),
+				null, null, false, cookieSandbox
+			);
+			return deferred.promise;
+		}
+	})
+}
+
+/**
+ * Attaches a snapshot to the currently selected item
+ *
+ * Accepts:
+ *		uri - The URI of the page to be saved
+ *		cookie - document.cookie or equivalent
+ * Returns:
+ *		Nothing (200 OK response)
+ */
+Zotero.Server.Connector.AttachSnapshot = function() {};
+Zotero.Server.Endpoints["/connector/attachSnapshot"] = Zotero.Server.Connector.AttachSnapshot;
+Zotero.Server.Connector.AttachSnapshot.prototype = {
+	supportedMethods: ["POST"],
+	supportedDataTypes: ["application/json"],
+	permitBookmarklet: true,
+	
+	/**
+	 * Save snapshot
+	 */
+	init: Zotero.Promise.coroutine(function* (options) {
+		var data = options.data;
+		
+		Zotero.Server.Connector.Data[data["url"]] = "<html>"+data["html"]+"</html>";
+		
+		var { library, collection, editable } = Zotero.Server.Connector.getPaneSelection();
+		var libraryID = library.libraryID;
+		
+		// If library isn't editable and filesEditable (or directly editable, in the case of My Publications) fail
+		if (!editable || !library.filesEditable || library.libraryType == 'publications') {
+			Zotero.logError("Can't add item to read-only library " + library.name);
+			return [500, "application/json", JSON.stringify({libraryEditable: false})];
+		}
+		
+		let items = zp.getSelectedItems();
+		if (items.length == 1) var item = items[0];
+		else {
+			return [500, "application/json", JSON.stringify({itemsSelected: items.length})];
+		}
+		
+		var cookieSandbox = data.url
+			? new Zotero.CookieSandbox(
+				null,
+				data.url,
+				data.detailedCookies ? "" : data.cookie || "",
+				options.headers["User-Agent"]
+			)
+			: null;
+		if(cookieSandbox && data.detailedCookies) {
+			cookieSandbox.addCookiesFromHeader(data.detailedCookies);
+		}
+		
+		if (data.link) {
+			delete Zotero.Server.Connector.Data[data.url];
+			yield Zotero.Attachments.linkFromURL({
+				title: data.title,
+				url: data.url,
+				contentType: data.pdf ? "application/pdf" : "text/html",
+				parentItemID: item.itemID,
+			});
+			return 201;
+		}
+		else if (data.pdf) {
+			delete Zotero.Server.Connector.Data[data.url];
+			
+			try {
+				yield Zotero.Attachments.importFromURL({
+					libraryID,
+					url: data.url,
+					contentType: "application/pdf",
+					parentItemID: item.itemID,
+					cookieSandbox
+				});
+				return 201;
+			}
+			catch (e) {
+				Zotero.logError(e);
+				return 500;
+			}
+		}
+		else {
+			let deferred = Zotero.Promise.defer();
+			Zotero.HTTP.processDocuments(
+				["zotero://connector/" + encodeURIComponent(data.url)],
+				Zotero.Promise.coroutine(function* (doc) {
+					delete Zotero.Server.Connector.Data[data.url];
+					
+					try {
+						// save snapshot
+						yield Zotero.Attachments.importFromDocument({
+							document: doc,
+							parentItemID: item.itemID,
+						});
 						
 						deferred.resolve(201);
 					} catch(e) {

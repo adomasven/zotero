@@ -338,22 +338,14 @@ describe("Connector Server", function () {
 			assert.isTrue(collection.hasItem(item.id));
 		});
 		
-		it("should save a webpage item to My Library if a read-only library is selected", function* () {
+		it("should respond with 500 if read-only library is selected", function* () {
 			var group = yield createGroup({
 				editable: false
 			});
 			yield selectLibrary(win, group.libraryID);
 			yield waitForItemsLoad(win);
 			
-			// saveSnapshot saves parent and child before returning
-			var ids1, ids2;
-			var promise = waitForItemEvent('add').then(function (ids) {
-				ids1 = ids;
-				return waitForItemEvent('add').then(function (ids) {
-					ids2 = ids;
-				});
-			});
-			yield Zotero.HTTP.request(
+			let req = yield Zotero.HTTP.request(
 				'POST',
 				connectorServerPath + "/connector/saveSnapshot",
 				{
@@ -363,29 +355,24 @@ describe("Connector Server", function () {
 					body: JSON.stringify({
 						url: "http://example.com",
 						html: "<html><head><title>Title</title><body>Body</body></html>"
-					})
+					}),
+					successCodes: false
 				}
 			);
+			assert.equal(req.status, 500);
+			assert.isFalse(JSON.parse(req.responseText).libraryEditable);
 			
-			assert.isTrue(promise.isFulfilled());
-			
-			// Check parent item
-			assert.lengthOf(ids1, 1);
-			var item = Zotero.Items.get(ids1[0]);
-			assert.equal(Zotero.ItemTypes.getName(item.itemTypeID), 'webpage');
-			assert.equal(item.getField('title'), 'Title');
-			assert.equal(item.libraryID, Zotero.Libraries.userLibraryID);
-			// Item should've been saved to My Library
-			assert.equal(item.libraryID, Zotero.Libraries.userLibraryID);
-			
-			// My Library should've been selected
+			// The selection should remain
 			assert.equal(
-				win.ZoteroPane.collectionsView.getSelectedLibraryID(), Zotero.Libraries.userLibraryID
+				win.ZoteroPane.collectionsView.getSelectedLibraryID(), group.libraryID
 			);
 		});
 	});
 	
 	describe("/connector/savePage", function() {
+		before(function* () {
+			yield selectLibrary(win, Zotero.Libraries.userLibraryID);
+		});
 		// TEMP: Wait for indexing to complete, which happens after a 1-second delay, after a 201 has
 		// been returned to the connector. Would be better to make sure indexing has completed.
 		afterEach(function* () {

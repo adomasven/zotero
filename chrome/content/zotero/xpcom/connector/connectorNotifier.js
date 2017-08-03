@@ -89,7 +89,7 @@ Zotero.ConnectorNotifier = {
 		return {items: zp.getSelectedItems().map((i) => ({
 			itemID: i.itemID,
 			title: i.getDisplayTitle(),
-			isAttachment: i.isAttachment()
+			type: Zotero.ItemTypes.getName(i.itemTypeID)
 		}))};
 	},
 	
