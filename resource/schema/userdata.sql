@@ -1,4 +1,4 @@
--- 96
+-- 97
 
 -- Copyright (c) 2009 Center for History and New Media
 --                    George Mason University, Fairfax, Virginia, USA
@@ -388,7 +388,8 @@ CREATE TABLE proxies (
     proxyID INTEGER PRIMARY KEY,
     multiHost INT,
     autoAssociate INT,
-    scheme TEXT
+    scheme TEXT,
+    dotsToHyphens INT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE proxyHosts (

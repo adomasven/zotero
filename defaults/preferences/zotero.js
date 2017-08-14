@@ -164,6 +164,7 @@ pref("extensions.zotero.proxies.transparent", true);
 pref("extensions.zotero.proxies.disableByDomain", false);
 pref("extensions.zotero.proxies.disableByDomainString", ".edu");
 pref("extensions.zotero.proxies.showRedirectNotification", true);
+pref("extensions.zotero.proxies.dateModified", 0);
 
 // Data layer purging
 pref("extensions.zotero.purge.creators", false);

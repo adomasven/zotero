@@ -94,6 +94,12 @@ Zotero.ConnectorNotifier = {
 	},
 	
 	getInitData: Zotero.Promise.coroutine(function* () {
-		return {selected: Object.assign(this._getSelectedCollectionData(), this._getSelectedItemData())};
+		return {
+			selected: Object.assign(this._getSelectedCollectionData(), this._getSelectedItemData()),
+			proxies: {
+				proxies: Zotero.Proxies.proxies.map((p) => Object.assign(p.toJSON(), {hosts: p.hosts})),
+				dateModified: Zotero.Prefs.get('proxies.dateModified')*1000
+			}
+		};
 	}),
 };

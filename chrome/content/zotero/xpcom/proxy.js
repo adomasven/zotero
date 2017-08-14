@@ -309,7 +309,28 @@ Zotero.Proxies = new function() {
 			}
 		}
 	}
-	
+
+	/**
+	 * N.B. Deletes currently stored proxies completely!
+	 *
+	 * Intended to be used when updating the proxy list from the connector.
+	 */
+	this.overwriteFromJSON = Zotero.Promise.coroutine(function* (proxyJSON) {
+		let proxies = proxyJSON.map(function(json) {
+			let proxy = new Zotero.Proxy(json);
+			proxy.hosts = json.hosts;
+			return proxy;
+		});
+		
+		yield Zotero.DB.executeTransaction(function* () {
+			yield Zotero.DB.queryAsync('DELETE from proxyHosts');
+			yield Zotero.DB.queryAsync('DELETE from proxies');
+			Zotero.Proxies.proxies = [];
+			Zotero.Proxies.hosts = {};
+		});
+		yield Zotero.Promise.all(proxies.map(proxy => proxy.save(true)));
+	})
+		
 	/**
 	 * Refreshes host map; necessary when proxies are changed or deleted
 	 */
@@ -586,10 +607,7 @@ Zotero.Proxy.prototype._loadFromRow = function (row) {
 	this.multiHost = row.scheme && row.scheme.indexOf('%h') != -1 || !!row.multiHost;
 	this.autoAssociate = !!row.autoAssociate;
 	this.scheme = row.scheme;
-	// Database query results will throw as this option is only present when the proxy comes along with the translator
-	if ('dotsToHyphens' in row) {
-		this.dotsToHyphens = !!row.dotsToHyphens;
-	}
+	this.dotsToHyphens = !!row.dotsToHyphens;
 	
 	if (this.scheme) {
 		this.compileRegexp();
@@ -600,7 +618,7 @@ Zotero.Proxy.prototype.toJSON = function() {
 	if (!this.scheme) {
 		throw Error('Cannot convert proxy to JSON - no scheme');
 	}
-	return {id: this.id, scheme: this.scheme, dotsToHyphens: this.dotsToHyphens};
+	return {id: this.id, scheme: this.scheme, dotsToHyphens: this.dotsToHyphens, autoAssociate: this.autoAssociate};
 }
 
 /**
@@ -724,15 +742,17 @@ Zotero.Proxy.prototype.save = Zotero.Promise.coroutine(function* (transparent) {
 		yield Zotero.DB.executeTransaction(function* () {
 			if(this.proxyID) {
 				yield Zotero.DB.queryAsync(
-					"UPDATE proxies SET multiHost = ?, autoAssociate = ?, scheme = ? WHERE proxyID = ?",
-					[this.multiHost ? 1 : 0, this.autoAssociate ? 1 : 0, this.scheme, this.proxyID]
+					"UPDATE proxies SET multiHost = ?, autoAssociate = ?, scheme = ? WHERE proxyID = ?, dotsToHyphens = ?",
+					[this.multiHost ? 1 : 0, this.autoAssociate ? 1 : 0, this.scheme, this.proxyID, this.dotsToHyphens ? 1 : 0]
 				);
 				yield Zotero.DB.queryAsync("DELETE FROM proxyHosts WHERE proxyID = ?", [this.proxyID]);
 			} else {
 				let id = Zotero.ID.get('proxies');
 				yield Zotero.DB.queryAsync(
-					"INSERT INTO proxies (proxyID, multiHost, autoAssociate, scheme) VALUES (?, ?, ?, ?)",
-					[id, this.multiHost ? 1 : 0, this.autoAssociate ? 1 : 0, this.scheme]
+					"INSERT INTO proxies (proxyID, multiHost, autoAssociate, scheme, dotsToHyphens) " +
+					"VALUES (?, ?, ?, ?, ?)",
+					[id, this.multiHost ? 1 : 0, this.autoAssociate ? 1 : 0,
+						this.scheme, this.dotsToHyphens ? 1 : 0]
 				);
 				this.proxyID = id;
 			}
@@ -747,6 +767,8 @@ Zotero.Proxy.prototype.save = Zotero.Promise.coroutine(function* (transparent) {
 				);
 			}
 		}.bind(this));
+		// Doesn't fit in a pref integer value with ms.
+		Zotero.Prefs.set('proxies.dateModified', Date.now()/1000);
 	}
 	
 	if(newProxy) {

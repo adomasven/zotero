@@ -37,7 +37,7 @@ Zotero.Schema = new function(){
 	
 	// If updating from this userdata version or later, don't show "Upgrading database…" and don't make
 	// DB backup first. This should be set to false when breaking compatibility or making major changes.
-	const minorUpdateFrom = 95;
+	const minorUpdateFrom = false;
 	
 	var _dbVersions = [];
 	var _schemaVersions = [];
@@ -2467,6 +2467,10 @@ Zotero.Schema = new function(){
 			
 			else if (i == 96) {
 				yield Zotero.DB.queryAsync("REPLACE INTO fileTypeMIMETypes VALUES(7, 'application/vnd.ms-powerpoint')");
+			}
+			
+			else if (i == 97) {
+				yield Zotero.DB.queryAsync("ALTER TABLE proxies ADD COLUMN dotsToHyphens INT NOT NULL DEFAULT 0");
 			}
 			
 			// If breaking compatibility or doing anything dangerous, clear minorUpdateFrom
