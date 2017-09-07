@@ -30,7 +30,8 @@ Zotero.Notifier = new function(){
 	var _types = [
 		'collection', 'search', 'share', 'share-items', 'item', 'file',
 		'collection-item', 'item-tag', 'tag', 'setting', 'group', 'trash',
-		'bucket', 'relation', 'feed', 'feedItem', 'sync', 'api-key', 'collectionTreeRow'
+		'bucket', 'relation', 'feed', 'feedItem', 'sync', 'api-key', 'collectionTreeRow',
+		'translators', 'styles'
 	];
 	var _inTransaction;
 	var _queue = {};

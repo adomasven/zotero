@@ -32,7 +32,7 @@ Zotero.ConnectorNotifier = {
 	_notifierID: null,
 
 	init: function() {
-		this._notifierID = Zotero.Notifier.registerObserver(this, ['collectionTreeRow', 'item'], 'Connector Notifier')
+		this._notifierID = Zotero.Notifier.registerObserver(this, ['collectionTreeRow', 'item', 'translators'], 'Connector Notifier')
 	},
 	
 	notify: function(event, targetType, ids, extraData) {
@@ -45,6 +45,9 @@ Zotero.ConnectorNotifier = {
 					this._notifySelectCollection(ids);
 					break;
 			}
+		}
+		if (event === 'modify' && targetType === 'translators') {
+			this.notifyListeners('translators', null);
 		}
 	},
 	
