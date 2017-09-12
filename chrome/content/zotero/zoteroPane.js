@@ -55,7 +55,6 @@ var ZoteroPane = new function()
 	this.contextPopupShowing = contextPopupShowing;
 	this.openNoteWindow = openNoteWindow;
 	this.viewSelectedAttachment = viewSelectedAttachment;
-	this.reportErrors = reportErrors;
 	this.displayErrorMessage = displayErrorMessage;
 	
 	this.document = document;
@@ -4427,7 +4426,7 @@ var ZoteroPane = new function()
 			if (typeof buttonText == 'undefined') {
 				var buttonText = Zotero.getString('errorReport.reportError');
 				var buttonCallback = function () {
-					ZoteroPane.reportErrors();
+					Zotero.Errors.showReportDialog();
 				};
 			}
 			else {
@@ -4628,21 +4627,7 @@ var ZoteroPane = new function()
 			Zotero.debug(e, 1);
 		});
 	}
-	
-	
-	function reportErrors() {
-		var ww = Components.classes["@mozilla.org/embedcomp/window-watcher;1"]
-				   .getService(Components.interfaces.nsIWindowWatcher);
-		var data = {
-			msg: Zotero.getString('errorReport.followingReportWillBeSubmitted'),
-			errorData: Zotero.getErrors(true),
-			askForSteps: true
-		};
-		var io = { wrappedJSObject: { Zotero: Zotero, data:  data } };
-		var win = ww.openWindow(null, "chrome://zotero/content/errorReport.xul",
-					"zotero-error-report", "chrome,centerscreen,modal", io);
-	}
-	
+
 	/*
 	 * Display an error message saying that an error has occurred and Firefox
 	 * needs to be restarted.

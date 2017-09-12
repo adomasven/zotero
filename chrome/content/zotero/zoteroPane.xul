@@ -48,7 +48,7 @@
 	<script src="locateMenu.js" type="application/javascript;version=1.8"/>
 	
 	<commandset id="mainCommandSet">
-		<command id="cmd_zotero_reportErrors" oncommand="ZoteroPane_Local.reportErrors();"/>
+		<command id="cmd_zotero_reportErrors" oncommand="Zotero.Errors.showReportDialog();"/>
 		<command id="cmd_zotero_import" oncommand="Zotero_File_Interface.importFile();"/>
 		<command id="cmd_zotero_importFromClipboard" oncommand="Zotero_File_Interface.importFromClipboard();"/>
 		<command id="cmd_zotero_exportLibrary" oncommand="Zotero_File_Interface.exportFile();"/>

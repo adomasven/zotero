@@ -369,7 +369,7 @@ Zotero.Utilities.Internal = {
 		if (typeof buttonText == 'undefined') {
 			buttonText = Zotero.getString('errorReport.reportError');
 			buttonCallback = function () {
-				win.ZoteroPane.reportErrors();
+				Zotero.Errors.showReportDialog();
 			}
 		}
 		// If secondary button is explicitly null, just use an alert

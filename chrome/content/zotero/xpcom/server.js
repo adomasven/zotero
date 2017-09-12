@@ -559,7 +559,7 @@ Zotero.Server.DataListener.prototype._requestFinished = function(response) {
 		intlStream.init(this.oStream, "UTF-8", 1024, "?".charCodeAt(0));
 		
 		// write response
-		Zotero.debug(response, 5);
+		Zotero.debug(response.replace(/\r?\n/g, '\\n'), 5);
 		intlStream.writeString(response);
 	} finally {	
 		intlStream.close();
