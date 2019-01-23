@@ -31,4 +31,5 @@
 	<script src="chrome://zotero/content/include.js"></script>
 	
 	<script src="tagSelectorContainer.js"></script>
+	<script src="collectionTree.js"></script>
 </overlay>
