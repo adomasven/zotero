@@ -352,9 +352,6 @@ var ZoteroPane = new function()
 		
 		this.uninitContainers();
 		
-		if(this.collectionsView) this.collectionsView.unregister();
-		if(this.itemsView) this.itemsView.unregister();
-		
 		observerService.removeObserver(_reloadObserver, "zotero-reloaded");
 	}
 	
@@ -771,10 +768,10 @@ var ZoteroPane = new function()
 	this.newItem = Zotero.Promise.coroutine(function* (typeID, data, row, manual)
 	{
 		if ((row === undefined || row === null) && this.getCollectionTreeRow()) {
-			row = this.getCollectionTreeRow();
+			row = this.collectionsView.focusedIdx;
 			
 			// Make sure currently selected view is editable
-			if (!row.editable) {
+			if (!this.canEdit(row)) {
 				this.displayCannotEditLibraryMessage();
 				return;
 			}
@@ -979,8 +976,11 @@ var ZoteroPane = new function()
 
 	this.initCollectionsTree = function() {
 		var collectionsTree = document.getElementById('zotero-collections-tree');
-		ZoteroPane.collectionsView = await Zotero.CollectionTree.init(collectionsTree);
-		collectionsTree.view = ZoteroPane.collectionsView;
+		ZoteroPane.collectionsView = Zotero.CollectionTree.init(collectionsTree, {
+			onFocus: () => ZoteroPane.onCollectionSelected(),
+			onContext: e => ZoteroPane.onCollectionsContextMenuOpen(e),
+			dragAndDrop: true
+		});	
 	}
 
 	this.initTagSelector = function () {

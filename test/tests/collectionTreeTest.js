@@ -1,6 +1,6 @@
 "use strict";
 
-describe("Zotero.CollectionTreeView", function() {
+describe("Zotero.CollectionTree", function() {
 	var win, zp, cv, userLibraryID;
 	
 	before(function* () {
@@ -46,13 +46,15 @@ describe("Zotero.CollectionTreeView", function() {
 			
 			// Open group 1 and close group 2
 			if (!cv.isContainerOpen(group1Row)) {
-				yield cv.toggleOpenState(group1Row);
+				cv.toggleOpenState(group1Row);
 			}
 			if (cv.isContainerOpen(group2Row)) {
-				yield cv.toggleOpenState(group2Row);
+				cv.toggleOpenState(group2Row);
 			}
-			// Don't wait for delayed save
+			
 			cv._saveOpenStates();
+			// #_saveOpenStates is debounced
+			yield Zotero.Promise.delay(500);
 			
 			group1Row = cv.getRowIndexByID(group1.treeViewID);
 			group2Row = cv.getRowIndexByID(group2.treeViewID);
@@ -79,30 +81,22 @@ describe("Zotero.CollectionTreeView", function() {
 	describe("collapse/expand", function () {
 		it("should close and open My Library repeatedly", function* () {
 			yield cv.selectLibrary(userLibraryID);
-			var row = cv.selection.currentIndex;
+			var row = cv.focusedIdx;
 			
 			cv.collapseLibrary(userLibraryID);
-			var nextRow = cv.getRow(row + 1);
-			assert.equal(cv.selection.currentIndex, row);
-			assert.ok(nextRow.isSeparator());
+			assert.equal(cv.focusedIdx, row);
 			assert.isFalse(cv.isContainerOpen(row));
 			
-			yield cv.expandLibrary(userLibraryID);
-			nextRow = cv.getRow(row + 1);
-			assert.equal(cv.selection.currentIndex, row);
-			assert.ok(!nextRow.isSeparator());
+			cv.expandLibrary(userLibraryID);
+			assert.equal(cv.focusedIdx, row);
 			assert.ok(cv.isContainerOpen(row));
 			
 			cv.collapseLibrary(userLibraryID);
-			nextRow = cv.getRow(row + 1);
-			assert.equal(cv.selection.currentIndex, row);
-			assert.ok(nextRow.isSeparator());
+			assert.equal(cv.focusedIdx, row);
 			assert.isFalse(cv.isContainerOpen(row));
 			
-			yield cv.expandLibrary(userLibraryID);
-			nextRow = cv.getRow(row + 1);
-			assert.equal(cv.selection.currentIndex, row);
-			assert.ok(!nextRow.isSeparator());
+			cv.expandLibrary(userLibraryID);
+			assert.equal(cv.focusedIdx, row);
 			assert.ok(cv.isContainerOpen(row));
 		})
 	})
@@ -112,7 +106,7 @@ describe("Zotero.CollectionTreeView", function() {
 		
 		before(function* () {
 			yield cv.selectLibrary(userLibraryID);
-			libraryRow = cv.selection.currentIndex;
+			libraryRow = cv.focusedIdx;
 		});
 		
 		beforeEach(function* () {
@@ -127,29 +121,32 @@ describe("Zotero.CollectionTreeView", function() {
 		
 		it("should open a library and respect stored container state", function* () {
 			// Collapse B
-			yield cv.toggleOpenState(cv.getRowIndexByID(col2.treeViewID));
-			yield cv._saveOpenStates();
+			cv.toggleOpenState(cv.getRowIndexByID(col2.treeViewID));
+			cv._saveOpenStates();
+			// #_saveOpenStates is debounced
+			yield Zotero.Promise.delay(500);
 			
 			// Close and reopen library
-			yield cv.toggleOpenState(libraryRow);
-			yield cv.expandLibrary(userLibraryID);
-			
-			assert.ok(cv.getRowIndexByID(col1.treeViewID))
-			assert.ok(cv.getRowIndexByID(col2.treeViewID))
-			assert.isFalse(cv.getRowIndexByID(col3.treeViewID))
+			cv.toggleOpenState(libraryRow);
+			cv.expandLibrary(userLibraryID);
+
+			assert.isTrue(cv.isContainerOpen(libraryRow));
+			assert.isTrue(cv.isContainerOpen(cv.getRowIndexByID(col1.treeViewID)));
+			assert.isFalse(cv.isContainerOpen(cv.getRowIndexByID(col2.treeViewID)));
 		});
 		
 		it("should open a library and all subcollections in recursive mode", function* () {
-			yield cv.toggleOpenState(cv.getRowIndexByID(col2.treeViewID));
-			yield cv._saveOpenStates();
+			cv.toggleOpenState(cv.getRowIndexByID(col2.treeViewID));
+			cv._saveOpenStates();
+			// #_saveOpenStates is debounced
+			yield Zotero.Promise.delay(500);
 			
 			// Close and reopen library
-			yield cv.toggleOpenState(libraryRow);
-			yield cv.expandLibrary(userLibraryID, true);
-			
-			assert.ok(cv.getRowIndexByID(col1.treeViewID))
-			assert.ok(cv.getRowIndexByID(col2.treeViewID))
-			assert.ok(cv.getRowIndexByID(col3.treeViewID))
+			cv.toggleOpenState(libraryRow);
+			cv.expandLibrary(userLibraryID, true);
+
+			assert.isTrue(cv.isContainerOpen(cv.getRowIndexByID(col1.treeViewID)));
+			assert.isTrue(cv.isContainerOpen(cv.getRowIndexByID(col2.treeViewID)));
 		});
 		
 		it("should open a group and show top-level collections", function* () {
@@ -162,18 +159,20 @@ describe("Zotero.CollectionTreeView", function() {
 			var col5 = yield createDataObject('collection', { libraryID, parentID: col4.id });
 			
 			// Close everything
-			[col4, col1, group].forEach(o => cv._closeContainer(cv.getRowIndexByID(o.treeViewID)));
+			[col4, col1, group].forEach(o => cv.toggleOpenState(cv.getRowIndexByID(o.treeViewID), false));
 			
-			yield cv.expandLibrary(libraryID);
-			assert.isNumber(cv.getRowIndexByID(col1.treeViewID));
-			assert.isNumber(cv.getRowIndexByID(col2.treeViewID));
-			assert.isNumber(cv.getRowIndexByID(col3.treeViewID));
-			assert.isFalse(cv.getRowIndexByID(col4.treeViewID));
-			assert.isFalse(cv.getRowIndexByID(col5.treeViewID));
+			cv.expandLibrary(libraryID);
+			
+			assert.isTrue(cv.isContainerOpen(cv.getRowIndexByID('L'+libraryID)));
+			assert.isFalse(cv.isContainerOpen(cv.getRowIndexByID(col1.treeViewID)));
+			assert.isFalse(cv.isContainerOpen(cv.getRowIndexByID(col2.treeViewID)));
+			assert.isFalse(cv.isContainerOpen(cv.getRowIndexByID(col3.treeViewID)));
+			assert.isFalse(cv.isContainerOpen(cv.getRowIndexByID(col4.treeViewID)));
+			assert.isFalse(cv.isContainerOpen(cv.getRowIndexByID(col5.treeViewID)));
 		});
 	});
 	
-	describe("#expandToCollection()", function () {
+	describe("#expandToRow()", function () {
 		it("should expand a collection to a subcollection", function* () {
 			var collection1 = yield createDataObject('collection');
 			var collection2 = createUnsavedDataObject('collection');
@@ -184,7 +183,8 @@ describe("Zotero.CollectionTreeView", function() {
 			var row = cv.getRowIndexByID("C" + collection1.id);
 			assert.isFalse(cv.isContainerOpen(row));
 			
-			yield cv.expandToCollection(collection2.id);
+			cv.expandToRow("C" + collection2.id);
+			cv.forceUpdate();
 			
 			// Make sure parent row position hasn't changed
 			assert.equal(cv.getRowIndexByID("C" + collection1.id), row);
@@ -196,7 +196,7 @@ describe("Zotero.CollectionTreeView", function() {
 	describe("#selectByID()", function () {
 		it("should select the trash", function* () {
 			yield cv.selectByID("T1");
-			var row = cv.selection.currentIndex;
+			var row = cv.focusedIdx;
 			var treeRow = cv.getRow(row);
 			assert.ok(treeRow.isTrash());
 			assert.equal(treeRow.ref.libraryID, userLibraryID);
@@ -206,7 +206,7 @@ describe("Zotero.CollectionTreeView", function() {
 	describe("#selectWait()", function () {
 		it("shouldn't hang if row is already selected", function* () {
 			var row = cv.getRowIndexByID("T" + userLibraryID);
-			cv.selection.select(row);
+			yield cv.selectWait(row);
 			yield Zotero.Promise.delay(50);
 			yield cv.selectWait(row);
 		})
@@ -288,14 +288,14 @@ describe("Zotero.CollectionTreeView", function() {
 			yield cv.selectLibrary(group.libraryID);
 			yield waitForItemsLoad(win);
 			
-			assert.isFalse(cv.selectedTreeRow.editable);
+			assert.isFalse(cv.focused.editable);
 			var cmd = win.document.getElementById('cmd_zotero_newStandaloneNote');
 			assert.isTrue(cmd.getAttribute('disabled') == 'true');
 			
 			group.editable = true;
 			yield group.saveTx();
 			
-			assert.isTrue(cv.selectedTreeRow.editable);
+			assert.isTrue(cv.focused.editable);
 			assert.isFalse(cmd.getAttribute('disabled') == 'true');
 		});
 		
@@ -375,7 +375,7 @@ describe("Zotero.CollectionTreeView", function() {
 			assert.isAbove(aRow, 0);
 			assert.isAbove(bRow, 0);
 			// skipSelect is implied for multiple collections, so library should still be selected
-			assert.equal(cv.selection.currentIndex, 0);
+			assert.equal(cv.focusedIdx, 0);
 		});
 		
 		
@@ -432,7 +432,7 @@ describe("Zotero.CollectionTreeView", function() {
 			// since otherwise they'll interfere with the count
 			yield getGroup();
 			
-			var originalRowCount = cv.rowCount;
+			var originalRowCount = cv._rows.length;
 			
 			var group = yield createGroup();
 			yield createDataObject('collection', { libraryID: group.libraryID });
@@ -442,7 +442,7 @@ describe("Zotero.CollectionTreeView", function() {
 			yield createDataObject('collection', { libraryID: group.libraryID });
 			
 			// Group, collections, Duplicates, Unfiled, and trash
-			assert.equal(cv.rowCount, originalRowCount + 9);
+			assert.equal(cv._rows.length, originalRowCount + 9);
 			
 			// Select group
 			yield cv.selectLibrary(group.libraryID);
@@ -452,7 +452,7 @@ describe("Zotero.CollectionTreeView", function() {
 			try {
 				yield group.eraseTx();
 				
-				assert.equal(cv.rowCount, originalRowCount);
+				assert.equal(cv._rows.length, originalRowCount);
 				// Make sure the tree wasn't refreshed
 				sinon.assert.notCalled(spy);
 			}
@@ -482,7 +482,9 @@ describe("Zotero.CollectionTreeView", function() {
 			yield cv.selectLibrary(feed.libraryID);
 			waitForDialog();
 			var id = feed.treeViewID;
+			let promise = waitForCollectionTree(win);
 			yield win.ZoteroPane.deleteSelectedCollection();
+			yield promise;
 			assert.isFalse(cv.getRowIndexByID(id))
 		})
 	});
@@ -493,8 +495,8 @@ describe("Zotero.CollectionTreeView", function() {
 			var collection = await createDataObject('collection');
 			await cv.selectItem(item.id);
 			await waitForItemsLoad(win);
-			assert.equal(cv.selection.currentIndex, 0);
-			assert.sameMembers(zp.itemsView.getSelectedItems(true), [item.id]);
+			assert.equal(cv.focusedIdx, 0);
+			assert.sameMembers(zp.itemsView.getSelectedItems(), [item]);
 		});
 	});
 	
@@ -505,12 +507,12 @@ describe("Zotero.CollectionTreeView", function() {
 			var item2 = await createDataObject('item');
 			await cv.selectItems([item1.id, item2.id]);
 			await waitForItemsLoad(win);
-			assert.equal(cv.selection.currentIndex, 0);
+			assert.equal(cv.focusedIdx, 0);
 			assert.sameMembers(zp.itemsView.getSelectedItems(true), [item1.id, item2.id]);
 		});
 	});
 	
-	describe("#drop()", function () {
+	describe("#onDrop()", function () {
 		/**
 		 * Simulate a drag and drop
 		 *
@@ -521,7 +523,7 @@ describe("Zotero.CollectionTreeView", function() {
 		 *     value returned after the drag. Otherwise, an 'add' event will be waited for, and
 		 *     an object with 'ids' and 'extraData' will be returned.
 		 */
-		var drop = Zotero.Promise.coroutine(function* (objectType, targetRow, ids, promise, action = 'copy') {
+		var onDrop = Zotero.Promise.coroutine(function* (objectType, targetRow, ids, promise, action = 'copy') {
 			if (typeof targetRow == 'string') {
 				var row = cv.getRowIndexByID(targetRow);
 				var orient = 0;
@@ -529,40 +531,41 @@ describe("Zotero.CollectionTreeView", function() {
 			else {
 				var { row, orient } = targetRow;
 			}
+			let treeRow = cv.getRow(row);
 			
-			var stub = sinon.stub(Zotero.DragDrop, "getDragTarget");
-			stub.returns(cv.getRow(row));
 			if (!promise) {
 				promise = waitForNotifierEvent("add", objectType);
 			}
-			yield cv.drop(row, orient, {
-				dropEffect: action,
-				effectAllowed: action,
-				mozSourceNode: win.document.getElementById(`zotero-${objectType}s-tree`).treeBoxObject.treeBody,
-				types: {
-					contains: function (type) {
-						return type == `zotero/${objectType}`;
-					}
-				},
-				getData: function (type) {
-					if (type == `zotero/${objectType}`) {
-						return ids.join(",");
+			yield cv.onDrop(treeRow, {
+				persist: () => 0,
+				target: {ownerDocument: {defaultView: win}},
+				dataTransfer: {
+					dropEffect: action,
+					effectAllowed: action,
+					mozSourceNode: objectType == 'item' && win.document.getElementById(`zotero-${objectType}s-tree`).treeBoxObject.treeBody,
+					types: {
+						contains: function (type) {
+							return type == `zotero/${objectType}`;
+						}
+					},
+					getData: function (type) {
+						if (type == `zotero/${objectType}`) {
+							return ids.join(",");
+						}
 					}
 				}
 			});
 			
 			// Add observer to wait for add
 			var result = yield promise;
-			stub.restore();
 			return result;
 		});
 		
 		
 		var canDrop = Zotero.Promise.coroutine(function* (type, targetRowID, ids) {
 			var row = cv.getRowIndexByID(targetRowID);
+			let treeRow = cv.getRow(row);
 			
-			var stub = sinon.stub(Zotero.DragDrop, "getDragTarget");
-			stub.returns(cv.getRow(row));
 			var dt = {
 				dropEffect: 'copy',
 				effectAllowed: 'copy',
@@ -578,11 +581,10 @@ describe("Zotero.CollectionTreeView", function() {
 					}
 				}
 			};
-			var canDrop = cv.canDropCheck(row, 0, dt);
+			var canDrop = cv.canDropCheck(treeRow, dt);
 			if (canDrop) {
 				canDrop = yield cv.canDropCheckAsync(row, 0, dt);
 			}
-			stub.restore();
 			return canDrop;
 		});
 		
@@ -604,7 +606,7 @@ describe("Zotero.CollectionTreeView", function() {
 					}
 				}, 'collection-item', 'test');
 				
-				yield drop('item', 'C' + collection.id, [item.id], deferred.promise);
+				yield onDrop('item', 'C' + collection.id, [item.id], deferred.promise);
 				
 				Zotero.Notifier.unregisterObserver(observerID);
 				
@@ -636,7 +638,7 @@ describe("Zotero.CollectionTreeView", function() {
 					}
 				}, 'collection-item', 'test');
 				
-				yield drop('item', 'C' + collection2.id, [item.id], deferred.promise, 'move');
+				yield onDrop('item', 'C' + collection2.id, [item.id], deferred.promise, 'move');
 				
 				Zotero.Notifier.unregisterObserver(observerID);
 				
@@ -683,7 +685,7 @@ describe("Zotero.CollectionTreeView", function() {
 						}
 					}, 'item', 'test');
 					
-					yield drop('item', 'P' + libraryID, [item.id], deferred.promise);
+					yield onDrop('item', 'P' + libraryID, [item.id], deferred.promise);
 					
 					Zotero.Notifier.unregisterObserver(observerID);
 					stub.restore();
@@ -721,7 +723,7 @@ describe("Zotero.CollectionTreeView", function() {
 						}
 					}, 'item', 'test');
 					
-					yield drop('item', 'P' + libraryID, [item.id], deferred.promise);
+					yield onDrop('item', 'P' + libraryID, [item.id], deferred.promise);
 					
 					Zotero.Notifier.unregisterObserver(observerID);
 					stub.restore();
@@ -760,7 +762,7 @@ describe("Zotero.CollectionTreeView", function() {
 						}
 					}, 'item', 'test');
 					
-					yield drop('item', 'P' + libraryID, [item.id], deferred.promise);
+					yield onDrop('item', 'P' + libraryID, [item.id], deferred.promise);
 					
 					Zotero.Notifier.unregisterObserver(observerID);
 					stub.restore();
@@ -799,7 +801,7 @@ describe("Zotero.CollectionTreeView", function() {
 						}
 					}, 'item', 'test');
 					
-					yield drop('item', 'P' + libraryID, [item.id], deferred.promise);
+					yield onDrop('item', 'P' + libraryID, [item.id], deferred.promise);
 					
 					Zotero.Notifier.unregisterObserver(observerID);
 					stub.restore();
@@ -821,7 +823,7 @@ describe("Zotero.CollectionTreeView", function() {
 					parentItemID: item.id
 				});
 				
-				var ids = (yield drop('item', 'L' + group.libraryID, [item.id])).ids;
+				var ids = (yield onDrop('item', 'L' + group.libraryID, [item.id])).ids;
 				
 				yield cv.selectLibrary(group.libraryID);
 				yield waitForItemsLoad(win);
@@ -864,7 +866,7 @@ describe("Zotero.CollectionTreeView", function() {
 				attachment.setField('title', attachmentTitle);
 				yield attachment.saveTx();
 				
-				yield drop('item', 'L' + group.libraryID, [item.id]);
+				yield onDrop('item', 'L' + group.libraryID, [item.id]);
 				assert.isFalse(yield canDrop('item', 'L' + group.libraryID, [item.id]));
 			})
 			
@@ -893,7 +895,7 @@ describe("Zotero.CollectionTreeView", function() {
 				var collection = yield createDataObject('collection', { libraryID: group.libraryID });
 				
 				var item = yield createDataObject('item', false, { skipSelect: true });
-				yield drop('item', 'L' + group.libraryID, [item.id]);
+				yield onDrop('item', 'L' + group.libraryID, [item.id]);
 				
 				var droppedItem = yield item.getLinkedItem(group.libraryID);
 				droppedItem.setCollections([collection.id]);
@@ -911,7 +913,7 @@ describe("Zotero.CollectionTreeView", function() {
 						}
 					}
 				}, 'trash', 'test');
-				yield drop('item', 'L' + group.libraryID, [item.id], deferred.promise);
+				yield onDrop('item', 'L' + group.libraryID, [item.id], deferred.promise);
 				Zotero.Notifier.unregisterObserver(observerID);
 				
 				assert.isFalse(droppedItem.deleted);
@@ -945,7 +947,7 @@ describe("Zotero.CollectionTreeView", function() {
 					}
 				}, 'collection', 'test');
 				
-				yield drop(
+				yield onDrop(
 					'collection',
 					{
 						row: 0,
@@ -1001,7 +1003,7 @@ describe("Zotero.CollectionTreeView", function() {
 					}
 				}, 'collection', 'test');
 				
-				yield drop(
+				yield onDrop(
 					'collection',
 					{
 						row: colIndexE,
@@ -1065,7 +1067,7 @@ describe("Zotero.CollectionTreeView", function() {
 					}
 				}, 'collection', 'test');
 				
-				yield drop(
+				yield onDrop(
 					'collection',
 					{
 						row: colIndexD,
@@ -1118,7 +1120,7 @@ describe("Zotero.CollectionTreeView", function() {
 					}
 				}, 'collection', 'test');
 				
-				await drop(
+				await onDrop(
 					'collection',
 					'L' + group.libraryID,
 					[collectionA.id],
@@ -1185,7 +1187,7 @@ describe("Zotero.CollectionTreeView", function() {
 				var deferred = Zotero.Promise.defer();
 				var itemIds;
 
-				var ids = (yield drop('item', 'C' + collection.id, [feedItem.id])).ids;
+				var ids = (yield onDrop('item', 'C' + collection.id, [feedItem.id])).ids;
 				
 				// Check that the translated item was the one that was created after drag
 				var item;

@@ -566,14 +566,14 @@ describe("ZoteroPane", function() {
 			assert.isFalse(cv.getRowIndexByID(id));
 			yield zp.setVirtual(userLibraryID, 'duplicates', true, true);
 			// Duplicate Items should be selected
-			assert.equal(cv.selectedTreeRow.id, id);
+			assert.equal(cv.focused.id, id);
 			// Should be missing from pref
 			assert.isUndefined(JSON.parse(Zotero.Prefs.get('duplicateLibraries'))[userLibraryID])
 			
 			// Clicking should select both items
 			var row = cv.getRowIndexByID(id);
 			assert.ok(row);
-			assert.equal(cv.selection.currentIndex, row);
+			assert.equal(cv.focusedIdx, row);
 			yield waitForItemsLoad(win);
 			var iv = zp.itemsView;
 			row = iv.getRowIndexByID(item1.id);
@@ -586,7 +586,7 @@ describe("ZoteroPane", function() {
 			assert.isFalse(cv.getRowIndexByID(id));
 			yield zp.setVirtual(userLibraryID, 'unfiled', true, true);
 			// Unfiled Items should be selected
-			assert.equal(cv.selectedTreeRow.id, id);
+			assert.equal(cv.focused.id, id);
 			// Should be missing from pref
 			assert.isUndefined(JSON.parse(Zotero.Prefs.get('unfiledLibraries'))[userLibraryID])
 		});
@@ -598,7 +598,7 @@ describe("ZoteroPane", function() {
 			
 			var libraryRow = cv.getRowIndexByID(Zotero.Libraries.userLibrary.treeViewID);
 			if (cv.isContainerOpen(libraryRow)) {
-				yield cv.toggleOpenState(libraryRow);
+				cv.toggleOpenState(libraryRow);
 				cv._saveOpenStates();
 			}
 			
@@ -608,7 +608,7 @@ describe("ZoteroPane", function() {
 			
 			// Library should have been expanded and Duplicate Items selected
 			assert.ok(cv.getRowIndexByID(id));
-			assert.equal(cv.selectedTreeRow.id, id);
+			assert.equal(cv.focused.id, id);
 		});
 		
 		it("should hide a virtual collection in My Library", function* () {
@@ -634,11 +634,11 @@ describe("ZoteroPane", function() {
 			
 			var group = yield createGroup();
 			var groupRow = cv.getRowIndexByID(group.treeViewID);
-			var rowCount = cv.rowCount;
+			var rowCount = cv._rows.length;
 			
 			// Make sure group is open
 			if (!cv.isContainerOpen(groupRow)) {
-				yield cv.toggleOpenState(groupRow);
+				cv.toggleOpenState(groupRow);
 			}
 			
 			// Make sure Duplicate Items is showing
@@ -658,7 +658,7 @@ describe("ZoteroPane", function() {
 			// Group should remain open
 			assert.isTrue(cv.isContainerOpen(groupRow));
 			// Row count should be 1 less
-			assert.equal(cv.rowCount, --rowCount);
+			assert.equal(cv._rows.length, --rowCount);
 			
 			// Hide Unfiled Items
 			id = "U" + group.libraryID;
@@ -674,7 +674,7 @@ describe("ZoteroPane", function() {
 			// Group should remain open
 			assert.isTrue(cv.isContainerOpen(groupRow));
 			// Row count should be 1 less
-			assert.equal(cv.rowCount, --rowCount);
+			assert.equal(cv._rows.length, --rowCount);
 		});
 	});
 	
