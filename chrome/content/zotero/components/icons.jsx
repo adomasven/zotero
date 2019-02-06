@@ -70,6 +70,7 @@ i('Twisty', (
 		<path d="M8 13.4c-.5 0-.9-.2-1.2-.6L.4 5.2C0 4.7-.1 4.3.2 3.7S1 3 1.6 3h12.8c.6 0 1.2.1 1.4.7.3.6.2 1.1-.2 1.6l-6.4 7.6c-.3.4-.7.5-1.2.5z"/>
 	</svg>
 ));
+i('Cross', "chrome://zotero/skin/cross.png");
 
 // TreeItems
 i('TreeitemArtwork', 'chrome://zotero/skin/treeitem-artwork.png');

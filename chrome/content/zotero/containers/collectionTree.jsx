@@ -294,6 +294,8 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			}
 			this._virtualCollectionLibraries.unfiled =
 					Zotero.Prefs.getVirtualCollectionState('unfiled');
+			this._virtualCollectionLibraries.retracted =
+				Zotero.Prefs.getVirtualCollectionState('retracted');
 			
 			var newRows = [];
 			var added = 0;
@@ -935,6 +937,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			return;
 		}
 		event.dataTransfer.setData("zotero/collection", treeRow.ref.id);
+		Zotero.debug("Dragging collection " + treeRow.id);
 	}
 
 	onDragOver(treeRow, event) {
@@ -1053,7 +1056,8 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	canDropCheck(treeRow, dataTransfer) {
 		let orient = Zotero.DragDrop.currentOrientation;
 		let row = this._rowMap[treeRow.id];
-		//Zotero.debug("Row is " + row + "; orient is " + orient);
+		// TEMP
+		Zotero.debug("Row is " + row + "; orient is " + orient);
 		
 		var dragData = Zotero.DragDrop.getDataFromDataTransfer(dataTransfer);
 		if (!dragData) {
@@ -1883,6 +1887,9 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			
 			case 'publications':
 				iconCls = Icons.IconTreeitemJournalArticle;
+
+			case 'retracted':
+				iconCls = Icons.IconCross;
 		}
 		
 		collectionType = Zotero.Utilities.capitalize(collectionType);
@@ -2034,6 +2041,8 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			var showDuplicates = this.hideSources.indexOf('duplicates') == -1
 					&& this._virtualCollectionLibraries.duplicates[libraryID] !== false;
 			var showUnfiled = this._virtualCollectionLibraries.unfiled[libraryID] !== false;
+			var showRetracted = this._virtualCollectionLibraries.retracted[libraryID] !== false
+				&& Zotero.Retractions.libraryHasRetractedItems(libraryID);
 			var showPublications = libraryID == Zotero.Libraries.userLibraryID;
 			var showTrash = this.hideSources.indexOf('trash') == -1;
 		}
@@ -2041,6 +2050,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			var savedSearches = [];
 			var showDuplicates = false;
 			var showUnfiled = false;
+			var showRetracted = false;
 			var showPublications = false;
 			var showTrash = false;
 		}
@@ -2052,7 +2062,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 					|| (isCollection && !this._containerState[treeRow.id]))) {
 			rows[row].isOpen = false;
 		} else {
-			var startOpen = !!(collections.length || savedSearches.length || showDuplicates || showUnfiled || showTrash);
+			var startOpen = !!(collections.length || savedSearches.length || showDuplicates || showUnfiled || showRetracted || showTrash);
 			
 			// // If this isn't a manual open, set the initial state depending on whether
 			// // there are child nodes
@@ -2116,6 +2126,18 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			s.addCondition('unfiled', 'true');
 			rows.splice(row + 1 + newRows, 0,
 				new Zotero.CollectionTreeRow(this, 'unfiled', s, level + 1, treeRow));
+			newRows++;
+		}
+
+		// Retracted items
+		if (showRetracted) {
+			let s = new Zotero.Search;
+			s.libraryID = libraryID;
+			s.name = Zotero.getString('pane.collections.retracted');
+			s.addCondition('libraryID', 'is', libraryID);
+			s.addCondition('retracted', 'true');
+			rows.splice(row + 1 + newRows, 0,
+				new Zotero.CollectionTreeRow(this, 'retracted', s, level + 1, treeRow));
 			newRows++;
 		}
 		
