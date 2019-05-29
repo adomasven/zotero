@@ -386,7 +386,8 @@ var ZoteroPane = new function()
 			this.buildItemTypeSubMenu();
 		}
 		_madeVisible = true;
-		
+
+		yield ZoteroPane.collectionsView.makeVisible();
 		this.unserializePersist();
 		this.updateLayout();
 		this.updateToolbarPosition();
@@ -768,7 +769,7 @@ var ZoteroPane = new function()
 	this.newItem = Zotero.Promise.coroutine(function* (typeID, data, row, manual)
 	{
 		if ((row === undefined || row === null) && this.getCollectionTreeRow()) {
-			row = this.collectionsView.focusedIdx;
+			row = this.collectionsView.selection.pivot;
 			
 			// Make sure currently selected view is editable
 			if (!this.canEdit(row)) {
@@ -977,7 +978,7 @@ var ZoteroPane = new function()
 	this.initCollectionsTree = function() {
 		var collectionsTree = document.getElementById('zotero-collections-tree');
 		ZoteroPane.collectionsView = Zotero.CollectionTree.init(collectionsTree, {
-			onFocus: () => ZoteroPane.onCollectionSelected(),
+			onSelectionChange: Zotero.Utilities.debounce(() => ZoteroPane.onCollectionSelected(), 100),
 			onContext: e => ZoteroPane.onCollectionsContextMenuOpen(e),
 			dragAndDrop: true
 		});	
@@ -1005,6 +1006,9 @@ var ZoteroPane = new function()
 				this.setTagScope();
 			}
 			this.tagSelector.handleResize();
+		}
+		if (this.collectionsView) {
+			this.collectionsView.forceUpdateOnce();
 		}
 	}, 100);
 	
@@ -1075,6 +1079,7 @@ var ZoteroPane = new function()
 		try {
 			var collectionTreeRow = this.getCollectionTreeRow();
 			if (!collectionTreeRow) {
+				Zotero.debug('ZoteroPane.onCollectionSelected: No selected collection found');
 				return;
 			}
 			
@@ -1251,7 +1256,8 @@ var ZoteroPane = new function()
 	
 	
 	this.getCollectionTreeRow = function () {
-		return this.collectionsView.focused;
+		return this.collectionsView && this.collectionsView.selection.count
+			&& this.collectionsView.getRow(this.collectionsView.selection.pivot);
 	}
 	
 	
@@ -3599,7 +3605,7 @@ var ZoteroPane = new function()
 				
 				// Currently selected row
 				if (row === undefined && this.collectionsView && this.getCollectionTreeRow()) {
-					row = this.collectionsView.focusedIdx;
+					row = this.collectionsView.selection.pivot;
 				}
 				
 				if (row && !this.canEdit(row)) {
@@ -3719,7 +3725,7 @@ var ZoteroPane = new function()
 					
 					// Currently selected row
 					if (row === undefined) {
-						row = ZoteroPane_Local.collectionsView.focusedIdx;
+						row = ZoteroPane_Local.collectionsView.selection.pivot;
 					}
 					
 					if (!ZoteroPane_Local.canEdit(row)) {
@@ -4155,7 +4161,7 @@ var ZoteroPane = new function()
 	this.canEdit = function (row) {
 		// Currently selected row
 		if (row === undefined) {
-			row = this.collectionsView.focusedIdx;
+			row = this.collectionsView.selection.pivot;
 		}
 		
 		var collectionTreeRow = this.collectionsView.getRow(row);
@@ -4172,7 +4178,7 @@ var ZoteroPane = new function()
 	this.canEditLibrary = function (row) {
 		// Currently selected row
 		if (row === undefined) {
-			row = this.collectionsView.focusedIdx;
+			row = this.collectionsView.selection.pivot;
 		}
 		
 		var collectionTreeRow = this.collectionsView.getRow(row);
@@ -4190,7 +4196,7 @@ var ZoteroPane = new function()
 	this.canEditFiles = function (row) {
 		// Currently selected row
 		if (row === undefined) {
-			row = this.collectionsView.focusedIdx;
+			row = this.collectionsView.selection.pivot;
 		}
 		
 		var collectionTreeRow = this.collectionsView.getRow(row);
