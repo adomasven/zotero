@@ -26,6 +26,7 @@
 'use strict';
 
 const noop = () => {};
+
 function getDragTargetOrient(event) {
 	let elem = event.target;
 	let {y, height} = elem.getBoundingClientRect();
@@ -38,7 +39,42 @@ function getDragTargetOrient(event) {
 	else return 1;
 }
 
-export {
-	noop, getDragTargetOrient
-};
+function createDragHandler({ handleDrag, handleDragStop }) {
+	function onKeyDown(event) {
+		if (event.key == 'Escape') {
+			event.stopPropagation();
+			onDragStop(event);
+		}
+	}
 
+	function onDragStart() {
+		document.addEventListener('mousemove', handleDrag);
+		document.addEventListener('mouseup', onDragStop, { capture: true });
+		document.addEventListener('mouseleave', onDragStop);
+		window.addEventListener('blur', onDragStop);
+
+		// Register on first child because global bindings are bound
+		// on document and we need to stop the propagation in
+		// case we handle it here!
+		document.children[0].addEventListener('keydown', onKeyDown);
+	}
+
+	function onDragStop(event) {
+		document.removeEventListener('mousemove', handleDrag);
+		document.removeEventListener('mouseup', onDragStop, { capture: true });
+		document.removeEventListener('mouseleave', onDragStop);
+		window.removeEventListener('blur', onDragStop);
+		document.children[0].removeEventListener('keydown', onKeyDown);
+
+		handleDragStop(event, event === null || event.type !== 'mouseup');
+	}
+
+	return {
+		start: onDragStart,
+		stop: onDragStop
+	}
+}
+
+export {
+	noop, getDragTargetOrient, createDragHandler
+};

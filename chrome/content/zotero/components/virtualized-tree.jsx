@@ -28,6 +28,10 @@
 const React = require('react');
 const ReactVirtualized = require('react-virtualized');
 
+/**
+ * Loosely corresponds to nsITreeSelection
+ * We've taken the liberty to make pivot and currentIndex the same thing
+ */
 class TreeSelection {
 	constructor(tree) {
 		this._tree = tree;
@@ -51,12 +55,25 @@ class TreeSelection {
 		}
 	}
 	
-	get count() {
-		return this.selected.size;
+	clearSelection() {
+		this.selected = new Set();
 	}
-	
+
 	select(index) {
 		this._tree._onSelection(index);
+	}
+	
+	rangedSelect(from, to, augment) {
+		if (!augment) {
+			this.clearSelection();
+		}
+		for (; from <= to; from++) {
+			this.selected.add(from);
+		}
+	}
+	
+	get count() {
+		return this.selected.size;
 	}
 	
 	get selectEventsSuppressed() {
@@ -71,7 +88,7 @@ class TreeSelection {
 	}
 }
 
-class VirtualizedTree extends React.PureComponent {
+class VirtualizedTree extends React.Component {
 	constructor() {
 		super(...arguments);
 		
@@ -341,7 +358,6 @@ class VirtualizedTree extends React.PureComponent {
 				onKeyDown: this._onKeyDown,
 				onDragOver: this._onDragOver,
 				"aria-label": this.props.label,
-				"aria-labelledby": this.props.labelledby,
 				"aria-activedescendant": this.props.rowCount && this.props.getAriaLabel
 					&& this.props.getAriaLabel(this.selection.pivot),
 			}
@@ -399,3 +415,4 @@ function oncePerAnimationFrame(fn) {
 }
 
 module.exports = VirtualizedTree;
+module.exports.TreeSelection = TreeSelection;

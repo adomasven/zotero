@@ -23,6 +23,8 @@
 	***** END LICENSE BLOCK *****
 */
 
+(function () {
+
 'use strict';
 
 const React = require('react');
@@ -166,7 +168,8 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			this._editing = null;
 		}
 		this.forceUpdateOnce();
-		this.props.onSelectionChange && this.props.onSelectionChange();
+		this.props.onSelectionChange && this.props.onSelectionChange(this.prevSelection);
+		this.prevSelection = selection.pivot;
 	}
 	
 	handleActivate = (index) => {
@@ -272,7 +275,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 				rowCount: this._rows.length,
 				rowHeight: itemHeight,
 				id: "collection-tree",
-				rowRenderer: ({ index, key, style }, { selection, onMouseDown }) => {
+				rowRenderer: ({ index, key, style }, { selection }) => {
 					let treeRow = this.getRow(index);
 					let depth = treeRow.level;
 					let icon = this.getIcon(treeRow);
@@ -305,7 +308,6 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 							this.selection.select(index);
 							this.props.onContext && this.props.onContext(e);
 						},
-						onMouseDown: onMouseDown,
 						draggable: treeRow != this._editing,
 					};
 					
@@ -2634,3 +2636,5 @@ Zotero.CollectionTreeCache = {
 		this.lastResults = null;
 	}
 }
+
+})();
