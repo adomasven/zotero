@@ -26,7 +26,7 @@
 'use strict';
 
 const React = require('react');
-const { FixedSizeList: List } = require('react-window');
+const JSWindow = require('./js-window');
 const { injectIntl } = require('react-intl');
 const VirtualizedTree = require('./virtualized-tree');
 const cx = require('classnames');
@@ -40,6 +40,7 @@ class VirtualizedTable extends VirtualizedTree {
 			resizing: null
 		};
 		this._resizingColumn = null;
+		this._jsWindowID = `virtualized-table-list-${Zotero.Utilities.randomString(5)}`;
 	}
 	
 	_handleResizerDragStart(index, event) {
@@ -123,78 +124,21 @@ class VirtualizedTable extends VirtualizedTree {
 
 		return children;
 	}
+	
+	componentDidMount() {
+		this._jsWindow = new JSWindow({
+			itemCount: this.props.rowCount,
+			itemHeight: this.props.rowHeight,
+			height: this.props.height,
+			renderItem: this.props.children,
+			targetElement: document.getElementById(this._jsWindowID),
+		});
+		this._jsWindow.initialize();
+		this._jsWindow.render();
+	}
 
 	render() {
-		// if (this.selection.pivot >= this.props.rowCount) {
-		// 	this.selection.pivot = this.props.rowCount - 1;
-		// }
-		// let rowRendererArgs = {
-		// 	selection: this.selection,
-		// };
-		// let props = {
-		// 	rowRenderer: (reactVirtualizedObj) => {
-		// 		return (<div onMouseDown={e => this._onMouseDown(e, reactVirtualizedObj.index)}>
-		// 			{this.props.rowRenderer(reactVirtualizedObj, rowRendererArgs)}
-		// 		</div>);
-		// 	},
-		// 	// headerRowRenderer: ({ style, columns, className }) => {
-		// 	// 	return (
-		// 	// 		<div
-		// 	// 			className={className}
-		// 	// 			style={style}
-		// 	// 			onContextMenu={this.props.onColumnPickerMenu}>
-		// 	// 			{columns}
-		// 	// 			<div
-		// 	// 				className={"ReactVirtualized__Table__headerColumn column-picker"}
-		// 	// 				style={{ flex: "0 0 20px" }}
-		// 	// 				onMouseDown={this.props.onColumnPickerMenu}>
-		// 	// 				[]
-		// 	// 			</div>
-		// 	// 		</div>
-		// 	// 	);
-		// 	// },
-		// 	rowGetter: this.props.rowGetter,
-		// 	ref: this._listRef,
-		// 	containerProps: {
-		// 		onClick: (e) => {
-		// 			if (!this.props.editing && this.props.id && e.target.id == this.props.id) {
-		// 				// Focus should always remain on the tree container itself.
-		// 				e.target.focus();
-		// 			}
-		// 		},
-		// 		onKeyDown: this._onKeyDown,
-		// 		onDragOver: this._onDragOver,
-		// 		"aria-label": this.props.label,
-		// 		"aria-labelledby": this.props.labelledby,
-		// 		"aria-activedescendant": this.props.rowCount && this.props.getAriaLabel
-		// 			&& this.props.getAriaLabel(this.selection.pivot),
-		// 	},
-		// 	children: this._getColumns(),
-		// 	headerHeight: 28
-		// };
-		// if (!Zotero.isElectron) {
-		// 	// N.B. Reduces the rendering performance while scrolling but removes the
-		// 	// delay between scrolling and clicking
-		// 	// See https://github.com/bvaughn/react-virtualized/issues/564#issuecomment-277789650
-		// 	// Related to requestAnimationFrame not being available in required modules within XUL
-		// 	// See https://github.com/bvaughn/react-virtualized/pull/742
-		// 	// Untested in React, but should not be required
-		// 	props.containerStyle = {
-		// 		pointerEvents: "auto"
-		// 	};
-		// }
-		// for (let key of ['width', 'height', 'autoWidth', 'autoHeight', 'id',
-		// 			'className', 'rowCount', 'rowHeight', 'headerHeight']) {
-		// 	if (key in this.props) {
-		// 		props[key] = this.props[key];
-		// 	}
-		// }
-		// props.className = (props.className || "") + ' tree';
-		// if (this.state.resizing) {
-		// 	props.className += ' resizing';
-		// }
 		let columns = this.state.columns.map((column, index) => {
-			let width = column.width;
 			let label = this.props.intl.formatMessage({ id: column.label });
 			return (<React.Fragment key={label + 'column'}>
 				<Draggable
@@ -212,21 +156,14 @@ class VirtualizedTable extends VirtualizedTree {
 				</span>
 			</React.Fragment>);
 		});
-		let props = {
-			className: 'virtualized-table-body',
-			height: this.props.height,
-			itemCount: this.props.rowCount,
-			itemSize: this.props.rowHeight,
-			itemData: this.state.columns,
-			itemKey: this.props.itemKey,
-			width: "100%",
-			children: this.props.children,
-		};
 		let classes = cx(["virtualized-table", { resizing: this.state.resizing }]);
+		if (this._jsWindow) {
+			(async () => this._jsWindow.render())();
+		}
 		return (
 			<div className={classes}>
 				<div className="virtualized-table-header">{columns}</div>
-				<List {...props}/>
+				<div id={this._jsWindowID} className="virtualized-table-body"/>
 			</div>
 		);
 	}

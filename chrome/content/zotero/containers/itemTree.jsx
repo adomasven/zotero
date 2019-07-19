@@ -26,6 +26,7 @@
 (function () {
 const React = require('react');
 const ReactDom = require('react-dom');
+const { renderToStaticMarkup } = require('react-dom-server');
 const { div } = require('react-dom-factories');
 const PropTypes = require('prop-types');
 const { IntlProvider } = require('react-intl');
@@ -276,6 +277,40 @@ const COLUMNS = [
 ];
 
 function makeItemRenderer(itemTree) {
+	function renderPrimaryCell(index, label, column) {
+		let span = renderCell(index, label, column);
+		let icon = renderToStaticMarkup(itemTree._getIcon(index));
+		let arrow = renderToStaticMarkup(<IconTwisty className="arrow"/>);
+		span.innerHTML = `${arrow}${icon}${span.innerHTML}`;
+		return span;
+	}
+	
+	function renderCell(index, label, column) {
+		let span = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+		span.className = `cell ${column.className}`;
+		span.innerHTML = `${label}`;
+		return span;
+	}
+	
+	return function (index) {
+		let rowData = itemTree._rowGetter({ index });
+		let div = document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
+		div.className = "row";
+		
+		for (let column of itemTree._columns) {
+			if (column.hidden) continue;
+			
+			if (column.primary) {
+				div.appendChild(renderPrimaryCell(index, rowData[column.dataKey], column));
+			}
+			else {
+				div.appendChild(renderCell(index, rowData[column.dataKey], column));
+			}
+		}
+		
+		return div;
+	};
+	
 	return class extends React.Component {
 		constructor(props) {
 			super(props);
@@ -321,6 +356,7 @@ function makeItemRenderer(itemTree) {
 		}
 		
 		render() {
+			return <div className="row" style={this.props.style}>{this.props.index}</div>
 			let { index, data: columns } = this.props;
 			let rowData = itemTree._rowGetter({ index });
 			
