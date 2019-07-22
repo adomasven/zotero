@@ -78,16 +78,15 @@ module.exports = class {
 		if (itemCount > 0) {
 			for (let index = startIndex; index <= stopIndex; index++) {
 				if (this._renderedRows.has(index)) continue;
-				let elem = renderItem(index);
+				let elem = renderItem(index, startIndex, stopIndex, innerElem);
 				elem.style.top = this._getItemPosition(index);
 				elem.style.position = "absolute";
-				innerElem.append(elem);
 				this._renderedRows.set(index, elem);
 			}
 		}
 		for (let [index, elem] of this._renderedRows.entries()) {
 			if (index < startIndex || index > stopIndex) {
-				elem.remove();
+				// elem.remove();
 				this._renderedRows.delete(index);
 			}
 		}

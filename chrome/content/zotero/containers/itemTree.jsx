@@ -277,10 +277,13 @@ const COLUMNS = [
 ];
 
 function makeItemRenderer(itemTree) {
+	let rowCache = {};
+	
 	function renderPrimaryCell(index, label, column) {
 		let span = renderCell(index, label, column);
 		let icon = renderToStaticMarkup(itemTree._getIcon(index));
 		let arrow = renderToStaticMarkup(<IconTwisty className="arrow"/>);
+		span.classList.add('primary');
 		span.innerHTML = `${arrow}${icon}${span.innerHTML}`;
 		return span;
 	}
@@ -288,11 +291,48 @@ function makeItemRenderer(itemTree) {
 	function renderCell(index, label, column) {
 		let span = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
 		span.className = `cell ${column.className}`;
-		span.innerHTML = `${label}`;
+		span.innerHTML = `<span>${label}</span>`;
 		return span;
 	}
 	
-	return function (index) {
+	function recycleRow(index, div) {
+		let rowData = itemTree._rowGetter({ index });
+		
+		for (let i = 0; i < div.children.length; i++) {
+			let column = itemTree._columns[i];
+			let child = div.children[i];
+			if (child.classList.contains('primary')) {
+				div.replaceChild(renderPrimaryCell(index, rowData[column.dataKey], column), child);
+			}
+			else {
+				child.children[0].innerText = rowData[column.dataKey];
+			}
+		}
+		
+		return div;
+	}
+	
+	return function (index, startIndex, endIndex, appendElem) {
+		let renderedIndices = Object.keys(rowCache);
+		let smallestRendered = Math.min(...renderedIndices);
+		let recycleIndex = null;
+		if (smallestRendered < startIndex) {
+			recycleIndex = smallestRendered;
+		}
+		if (recycleIndex === null) {
+			let largestRendered = Math.max(...renderedIndices);
+			if (largestRendered > endIndex) {
+				recycleIndex = largestRendered;
+			}
+		}
+		if (recycleIndex !== null) {
+			Zotero.debug('Recycling row ' + recycleIndex);
+			let recycledRow = recycleRow(index, rowCache[recycleIndex]);
+			delete rowCache[recycleIndex];
+			rowCache[index] = recycledRow;
+			return recycledRow;
+		}
+		
 		let rowData = itemTree._rowGetter({ index });
 		let div = document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
 		div.className = "row";
@@ -308,80 +348,12 @@ function makeItemRenderer(itemTree) {
 			}
 		}
 		
+		rowCache[index] = div;
+		
+		appendElem.appendChild(div);
+		
 		return div;
 	};
-	
-	return class extends React.Component {
-		constructor(props) {
-			super(props);
-			// For row invalidation
-			itemTree.getRow(props.index).reactRow = this;
-		}
-		
-		shouldComponentUpdate() {
-			return false;
-		}
-		
-		_renderPrimaryCell(label, className) {
-			let { index } = this.props;
-			let depth = 0;
-			let icon = itemTree._getIcon(index);
-			let props = {
-				style: {
-					paddingLeft: 5 + (CHILD_INDENT * depth) + 'px',
-				},
-				className: `cell primary ${className}`
-			};
-
-
-			let arrowProps = {
-				// onMouseDown: async (e) => {
-				// 	e.stopPropagation();
-				// 	e.preventDefault();
-				// 	await this.toggleOpenState(index);
-				// 	this.forceUpdate();
-				// },
-				className: 'arrow',
-			};
-			// arrowProps.className += this.isContainerOpen(index) ? ' open' : '';
-			let arrow = <IconTwisty {...arrowProps}/>;
-			// if (!this.isContainer(index) || this.isContainerEmpty(index)) {
-			// 	arrow = <span className='spacer-arrow'></span>;
-			// }
-			return (<div {...props}>
-				{arrow}
-				{icon}
-				{label}
-			</div>);
-		}
-		
-		render() {
-			return <div className="row" style={this.props.style}>{this.props.index}</div>
-			let { index, data: columns } = this.props;
-			let rowData = itemTree._rowGetter({ index });
-			
-			let props = {};
-			let cells = [];
-			for (let column of columns) {
-				if (column.hidden) continue;
-				
-				if (column.primary) {
-					cells.push(this._renderPrimaryCell(
-						rowData[column.dataKey],
-						column.className
-					));
-				}
-				else {
-					props.className = `cell ${column.className}`;
-					cells.push(<div {...props}>{rowData[column.dataKey]}</div>);
-				}
-			}
-
-			return (<div className="row" style={this.props.style}>
-				{cells}
-			</div>);
-		}
-	}
 }
 
 Zotero.ItemTree = class ItemTree extends React.Component {
