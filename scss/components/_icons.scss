@@ -2,7 +2,11 @@
   width: 16px;
 }
 
-.icon > span {
+.icon.twisty {
+  width: 0px;
+}
+
+.icon {
   width: 16px;
   height: 16px;
   display: inline-block;

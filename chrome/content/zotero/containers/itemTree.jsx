@@ -281,8 +281,12 @@ function makeItemRenderer(itemTree) {
 	
 	function renderPrimaryCell(index, label, column) {
 		let span = renderCell(index, label, column);
-		let icon = renderToStaticMarkup(itemTree._getIcon(index));
-		let arrow = renderToStaticMarkup(<IconTwisty className="arrow"/>);
+		// let icon = renderToStaticMarkup(itemTree._getIcon(index));
+		let icon = `<span class="icon" style="background-image: url(${itemTree._rows[index].ref.getImageSrc()})"></span>`;
+		// let arrow = renderToStaticMarkup(<IconTwisty className="arrow"/>);
+		let arrow = `<span class="icon icon-twisty arrow"><svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+		<path d="M8 13.4c-.5 0-.9-.2-1.2-.6L.4 5.2C0 4.7-.1 4.3.2 3.7S1 3 1.6 3h12.8c.6 0 1.2.1 1.4.7.3.6.2 1.1-.2 1.6l-6.4 7.6c-.3.4-.7.5-1.2.5z"/>
+	</svg></span>`;
 		span.classList.add('primary');
 		span.innerHTML = `${arrow}${icon}${span.innerHTML}`;
 		return span;

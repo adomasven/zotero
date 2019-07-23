@@ -13,7 +13,7 @@ const Icon = (props) => {
 };
 
 Icon.propTypes = {
-	children: element.isRequired,
+	children: element,
 	className: string,
 	name: string.isRequired
 }
@@ -36,16 +36,14 @@ function i(name, svgOrSrc, hasHiDPI=true) {
 			props.name = name.toLowerCase();
 			
 			if (typeof svgOrSrc == 'string') {
+				if (!props.style) props.style = {};
+				props.style.backgroundImage = `url(${svgOrSrc})`;
 				// We use css background-image.
 				// This is a performance optimization for fast-scrolling trees.
 				// If we use img elements they are slow to render
 				// and produce pop-in when fast-scrolling.
 				return (
-					<Icon {...props}>
-						<span style={{
-							backgroundImage: `url(${svgOrSrc})`,
-						}}/>
-					</Icon>
+					<Icon {...props} />
 				)
 			}
 
