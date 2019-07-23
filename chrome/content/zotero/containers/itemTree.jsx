@@ -291,7 +291,7 @@ function makeItemRenderer(itemTree) {
 	function renderCell(index, label, column) {
 		let span = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
 		span.className = `cell ${column.className}`;
-		span.innerHTML = `<span>${label}</span>`;
+		span.innerText = label;
 		return span;
 	}
 	
@@ -305,7 +305,7 @@ function makeItemRenderer(itemTree) {
 				div.replaceChild(renderPrimaryCell(index, rowData[column.dataKey], column), child);
 			}
 			else {
-				child.children[0].innerText = rowData[column.dataKey];
+				child.innerText = rowData[column.dataKey];
 			}
 		}
 		
@@ -326,7 +326,7 @@ function makeItemRenderer(itemTree) {
 			}
 		}
 		if (recycleIndex !== null) {
-			Zotero.debug('Recycling row ' + recycleIndex);
+			// Zotero.debug('Recycling row ' + recycleIndex);
 			let recycledRow = recycleRow(index, rowCache[recycleIndex]);
 			delete rowCache[recycleIndex];
 			rowCache[index] = recycledRow;

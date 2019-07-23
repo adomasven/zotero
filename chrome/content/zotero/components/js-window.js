@@ -82,6 +82,7 @@ module.exports = class {
 				elem.style.top = this._getItemPosition(index);
 				elem.style.position = "absolute";
 				this._renderedRows.set(index, elem);
+				// innerElem.appendChild(elem);
 			}
 		}
 		for (let [index, elem] of this._renderedRows.entries()) {
@@ -90,6 +91,7 @@ module.exports = class {
 				this._renderedRows.delete(index);
 			}
 		}
+		
 	}
 	
 	update(options) {
