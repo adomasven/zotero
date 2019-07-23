@@ -317,25 +317,25 @@ function makeItemRenderer(itemTree) {
 	}
 	
 	return function (index, startIndex, endIndex, appendElem) {
-		let renderedIndices = Object.keys(rowCache);
-		let smallestRendered = Math.min(...renderedIndices);
-		let recycleIndex = null;
-		if (smallestRendered < startIndex) {
-			recycleIndex = smallestRendered;
-		}
-		if (recycleIndex === null) {
-			let largestRendered = Math.max(...renderedIndices);
-			if (largestRendered > endIndex) {
-				recycleIndex = largestRendered;
-			}
-		}
-		if (recycleIndex !== null) {
-			// Zotero.debug('Recycling row ' + recycleIndex);
-			let recycledRow = recycleRow(index, rowCache[recycleIndex]);
-			delete rowCache[recycleIndex];
-			rowCache[index] = recycledRow;
-			return recycledRow;
-		}
+		// let renderedIndices = Object.keys(rowCache);
+		// let smallestRendered = Math.min(...renderedIndices);
+		// let recycleIndex = null;
+		// if (smallestRendered < startIndex) {
+		// 	recycleIndex = smallestRendered;
+		// }
+		// if (recycleIndex === null) {
+		// 	let largestRendered = Math.max(...renderedIndices);
+		// 	if (largestRendered > endIndex) {
+		// 		recycleIndex = largestRendered;
+		// 	}
+		// }
+		// if (recycleIndex !== null) {
+		// 	// Zotero.debug('Recycling row ' + recycleIndex);
+		// 	let recycledRow = recycleRow(index, rowCache[recycleIndex]);
+		// 	delete rowCache[recycleIndex];
+		// 	rowCache[index] = recycledRow;
+		// 	return recycledRow;
+		// }
 		
 		let rowData = itemTree._rowGetter({ index });
 		let div = document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
