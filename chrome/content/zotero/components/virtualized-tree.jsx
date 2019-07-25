@@ -29,14 +29,14 @@ const React = require('react');
 const ReactVirtualized = require('react-virtualized');
 
 /**
- * Loosely corresponds to nsITreeSelection
- * We've taken the liberty to make pivot and currentIndex the same thing
+ * Somewhat corresponds to nsITreeSelection
  */
 class TreeSelection {
 	constructor(tree) {
 		this._tree = tree;
 		Object.assign(this, {
 			pivot: 0,
+			_focused: 0,
 			selected: new Set([0]),
 			_selectEventsSuppressed: false
 		});
@@ -47,28 +47,86 @@ class TreeSelection {
 	}
 	
 	toggleSelect(index) {
+		if (this.selectEventsSuppressed) return;
+		
 		if (this.selected.has(index)) {
 			this.selected.delete(index);
 		}
 		else {
 			this.selected.add(index);
 		}
+		if (this._tree.invalidate) {
+			this._tree.invalidateRow(index);
+		}
+		this.pivot = index;
+		this._focused = index;
+		this._updateTree();
 	}
 	
 	clearSelection() {
+		if (this.selectEventsSuppressed) return;
+
 		this.selected = new Set();
+		if (this._tree.invalidate) {
+			this._tree.invalidate();
+		}
 	}
 
 	select(index) {
-		this._tree._onSelection(index);
+		if (this.selectEventsSuppressed) return;
+
+		let toInvalidate = Array.from(this.selected);
+		toInvalidate.push(index);
+		this.selected = new Set([index]);
+		this._focused = index;
+		this.pivot = index;
+		this._tree.scrollToRow(index);
+		this._updateTree();
+		if (this._tree.invalidate) {
+			toInvalidate.forEach(this._tree.invalidateRow.bind(this._tree));
+		}
 	}
 	
-	rangedSelect(from, to, augment) {
+	_rangedSelect(from, to, augment) {
 		if (!augment) {
 			this.clearSelection();
 		}
-		for (; from <= to; from++) {
-			this.selected.add(from);
+		for (let i = from; i <= to; i++) {
+			this.selected.add(i);
+		}
+	}
+	
+	rangedSelect(from, to, augment) {
+		if (this.selectEventsSuppressed) return;
+
+		this._rangedSelect(from, to, augment);
+		if (this._tree.invalidate) {
+			if (augment) {
+				this._tree.invalidateRange(from, to);
+			}
+			else {
+				this._tree.invalidate();
+			}
+		}
+		this._updateTree();
+	}
+	
+	shiftSelect(index) {
+		if (this.selectEventsSuppressed) return;
+
+		let from = Math.min(index, this.pivot);
+		let to = Math.max(index, this.pivot);
+		this._focused = index;
+		this._rangedSelect(from, to);
+		if (this._tree.invalidate) {
+			this._tree.invalidateRange(from, to);
+		}
+		this._updateTree();
+	}
+	
+	_updateTree() {
+		if (!this.selectEventsSuppressed && this._tree.props.onSelectionChange) {
+			this._tree.props.onSelectionChange(this);
 		}
 	}
 	
@@ -76,15 +134,34 @@ class TreeSelection {
 		return this.selected.size;
 	}
 	
+	get focused() {
+		return this._focused;
+	}
+	
+	set focused(value) {
+		if (this.selectEventsSuppressed) return;
+
+		let oldValue = this._focused;
+		this._focused = value;
+		this._updateTree();
+		if (this._tree.invalidate) {
+			this._tree.invalidateRow(oldValue);
+			this._tree.invalidateRow(value);
+		}
+	}
+	
 	get selectEventsSuppressed() {
 		return this._selectEventsSuppressed;
 	}
 	
 	set selectEventsSuppressed(val) {
-		if (this._selectEventsSuppressed && !val) {
-			this._tree.props.onSelectionChange && this._tree.props.onSelectionChange(this);
+		this._selectEventsSuppressed = val;
+		if (!val) {
+			this._updateTree();
+			if (this._tree.invalidate) {
+				this._tree.invalidate();
+			}
 		}
-		return this._selectEventsSuppressed = val;
 	}
 }
 
@@ -161,7 +238,7 @@ class VirtualizedTree extends React.Component {
 	 */
 	_onJumpSelect(direction, selectTo) {
 		let numRows = Math.floor(this.props.height / this.props.rowHeight);
-		let destination =this.selection.pivot + (direction * numRows);
+		let destination = this.selection.focused + (direction * numRows);
 		destination = Math.min(destination, this.props.rowCount - 1);
 		destination = Math.max(0, destination);
 		this.onSelection(destination, selectTo);
@@ -184,7 +261,7 @@ class VirtualizedTree extends React.Component {
 
 		switch (e.key) {
 			case "ArrowUp":
-				let prevSelect = this.selection.pivot - 1;
+				let prevSelect = this.selection.focused - 1;
 				while (prevSelect > 0 && !this.props.isSelectable(prevSelect)) {
 					prevSelect--;
 				}
@@ -193,7 +270,7 @@ class VirtualizedTree extends React.Component {
 				break;
 
 			case "ArrowDown":
-				let nextSelect = this.selection.pivot + 1;
+				let nextSelect = this.selection.focused + 1;
 				while (nextSelect < this.props.rowCount && !this.props.isSelectable(nextSelect)) {
 					nextSelect++;
 				}
@@ -221,11 +298,11 @@ class VirtualizedTree extends React.Component {
 		
 		switch (e.key) {
 			case "ArrowLeft":
-				let parentIndex = this.props.getParentIndex(this.selection.pivot);
-				if (this.props.isContainer(this.selection.pivot)
-						&& !this.props.isContainerEmpty(this.selection.pivot)
-						&& this.props.isContainerOpen(this.selection.pivot)) {
-					this.props.toggleOpenState(this.selection.pivot);
+				let parentIndex = this.props.getParentIndex(this.selection.focused);
+				if (this.props.isContainer(this.selection.focused)
+						&& !this.props.isContainerEmpty(this.selection.focused)
+						&& this.props.isContainerOpen(this.selection.focused)) {
+					this.props.toggleOpenState(this.selection.focused);
 				}
 				else if (parentIndex != -1) {
 					this.onSelection(parentIndex);
@@ -233,12 +310,12 @@ class VirtualizedTree extends React.Component {
 				break;
 
 			case "ArrowRight":
-				if (this.props.isContainer(this.selection.pivot)
-						&& !this.props.isContainerEmpty(this.selection.pivot)) {
-					if (!this.props.isContainerOpen(this.selection.pivot)) {
-						this.props.toggleOpenState(this.selection.pivot);
+				if (this.props.isContainer(this.selection.focused)
+						&& !this.props.isContainerEmpty(this.selection.focused)) {
+					if (!this.props.isContainerOpen(this.selection.focused)) {
+						this.props.toggleOpenState(this.selection.focused);
 					} else {
-						this.onSelection(this.selection.pivot + 1);
+						this.onSelection(this.selection.focused + 1);
 					}
 				}
 				break;
@@ -257,7 +334,7 @@ class VirtualizedTree extends React.Component {
 
 	_activateNode = () => {
 		if (this.props.onActivate) {
-			this.props.onActivate(this.selection.pivot);
+			this.props.onActivate(this.selection.focused);
 		}
 	}
 
@@ -287,56 +364,52 @@ class VirtualizedTree extends React.Component {
 	 *        nodes). Ignored if `item` is undefined.
 	 *
 	 * @param {Boolean} selectTo
-	 * 		  If true will select from pivot up to index (does not update pivot)
+	 * 		  If true will select from focused up to index (does not update focused)
 	 *
 	 * @param {Boolean} addToSelection
 	 * 		  If true will add to selection
 	 *
 	 * @param {Boolean} movePivot
-	 * 		  Will move pivot without adding anything to the selection
+	 * 		  Will move focused without adding anything to the selection
 	 */
 	_onSelection(index, selectTo, addToSelection, movePivot) {
+		if (this.selection.selectEventsSuppressed) return;
+		
 		// Normal selection
 		if (!selectTo && !addToSelection) {
 			while (index > 0 && !this.props.isSelectable(index)) {
 				index--;
 			}
-			this.selection.selected = new Set([index]);
-			this.selection.pivot = index;
+			this.selection.select(index);
 		}
-		// If index is not selectible and this is not normal selection we return
+		// If index is not selectable and this is not normal selection we return
 		else if (!this.props.isSelectable(index)) {
 			return;
 		}
 		else if (movePivot) {
-			this.selection.pivot = index;
+			this.selection.focused = index;
 		}
 		// Additive selection
 		else if (addToSelection && this.props.multiSelect) {
 			this.selection.toggleSelect(index);
-			this.selection.pivot = index;
 		}
 		// Range selection
 		else if (this.props.multiSelect) {
-			let startIndex = Math.min(index, this.selection.pivot);
-			let endIndex = Math.max(index, this.selection.pivot);
-			let selected = Array(endIndex - startIndex).fill(startIndex).map((x, y) => x + y);
-			this.selection.selected = new Set(selected);
+			let startIndex = Math.min(index, this.selection.focused);
+			let endIndex = Math.max(index, this.selection.focused);
+			this.selection.rangedSelect(startIndex, endIndex);
 		}
 		// None of the previous conditions were satisfied, so nothing changes
 		else {
 			return;
 		}
 
-		if (!this.selection.selectEventsSuppressed && this.props.onSelectionChange) {
-			this.props.onSelectionChange(this.selection);
-			this.scrollToRow(index);
-		}
+		this.scrollToRow(index);
 	}
 	
 	render() {
-		if (this.selection.pivot >= this.props.rowCount) {
-			this.selection.pivot = this.props.rowCount - 1;
+		if (this.selection.focused >= this.props.rowCount) {
+			this.selection.focused = this.props.rowCount - 1;
 		}
 		let rowRendererArgs = {
 			selection: this.selection,
@@ -359,7 +432,7 @@ class VirtualizedTree extends React.Component {
 				onDragOver: this._onDragOver,
 				"aria-label": this.props.label,
 				"aria-activedescendant": this.props.rowCount && this.props.getAriaLabel
-					&& this.props.getAriaLabel(this.selection.pivot),
+					&& this.props.getAriaLabel(this.selection.focused),
 			}
 		};
 		if (!Zotero.isElectron) {

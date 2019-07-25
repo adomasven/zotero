@@ -2,11 +2,7 @@
   width: 16px;
 }
 
-.icon.twisty {
-  width: 0px;
-}
-
-.icon {
+.icon-bg {
   width: 16px;
   height: 16px;
   display: inline-block;
@@ -16,8 +12,4 @@
 
 .icon.icon-downchevron > img {
   width: 7px;
-}
-
-.icon {
-  display: inline-block;
 }

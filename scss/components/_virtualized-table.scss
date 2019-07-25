@@ -1,5 +1,9 @@
 .virtualized-table {
   width: 100%;
+
+  &:focus {
+    outline: none;
+  }
   
   &.resizing {
     cursor: col-resize;
@@ -15,7 +19,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     overflow: hidden;
-    background-color: -moz-field;
     flex-grow: 1;
     flex-shrink: 1;
   }
@@ -35,7 +38,7 @@
   align-items: center;
   width: 100%;
   border-bottom: 1px solid #ccc;
-  background-image: linear-gradient(#fff, #f7f7f7);
+  background-image: linear-gradient(#fff, #fafafa);
   height: 1.7em;
   overflow: hidden;
  
@@ -46,14 +49,47 @@
   .resizer {
     background: linear-gradient(#ddd, #ddd) no-repeat center/1px 100%; 
     cursor: col-resize;
-    width: 5px;
     height: 4em;
     content: "\00a0";
     display: block;
     position: absolute;
     top: -1em;
-    left: -5px
+    left: -5px;
+    flex: 0 0 5px;
   }
+  
+  .cell {
+    display: flex;
+    position: relative;
+    height: 100%;
+    align-items: center;
+
+    &:hover {
+      background: #fff;
+    }
+    
+    .sort-indicator {
+      -moz-appearance: toolbarbutton-dropdown;
+      display: block;
+      position: absolute;
+      right: 5px;
+      transform: scale(1.25);
+      
+      &.ascending {
+        transform: scale(1.25) rotate(180deg);
+      }
+    }
+  }
+}
+
+.virtualized-table-body .js-window {
+  background: repeating-linear-gradient(
+    0deg,
+    -moz-OddTreeRow,
+    -moz-OddTreeRow 22px,
+    -moz-EvenTreeRow 22px,
+    -moz-EvenTreeRow 44px
+  );
 }
 
 

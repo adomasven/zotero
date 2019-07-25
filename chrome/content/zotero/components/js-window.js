@@ -44,26 +44,35 @@ module.exports = class {
 	}
 	
 	initialize() {
-		const { height, itemHeight, itemCount, targetElement } = this;
+		const { targetElement } = this;
 		this.innerElem = document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
 		this.innerElem.className = "js-window";
-		this.innerElem.style.cssText = `
-			position: relative;
-			height: ${itemHeight * itemCount}px;
-		`;
-		this.innerElem.addEventListener('scroll', this._handleScroll);
 
 		targetElement.appendChild(this.innerElem);
-		targetElement.style.cssText = `
-			height: ${height}px;
-			width: ${targetElement.clientWidth}px;
-			overflow: auto;
-		`;
 		targetElement.addEventListener('scroll', this._handleScroll);
+		
+		this.update();
 	}
 	
 	destroy() {
 		this.targetElement.removeEventListener('scroll', this._handleScroll);
+	}
+	
+	rerenderItem(index) {
+		if (!this._renderedRows.has(index)) return;
+		let elem = this.renderItem(index);
+		elem.style.top = this._getItemPosition(index) + "px";
+		elem.style.position = "absolute";
+		this.innerElem.replaceChild(elem, this._renderedRows.get(index));
+		this._renderedRows.set(index, elem);
+	}
+
+	invalidate() {
+		for (let elem of this._renderedRows.values()) {
+			elem.remove();
+		}
+		this._renderedRows = new Map();
+		this.render();
 	}
 	
 	render() {
@@ -78,11 +87,11 @@ module.exports = class {
 		if (itemCount > 0) {
 			for (let index = startIndex; index <= stopIndex; index++) {
 				if (this._renderedRows.has(index)) continue;
-				let elem = renderItem(index, startIndex, stopIndex, innerElem);
-				elem.style.top = this._getItemPosition(index);
+				let elem = renderItem(index);
+				elem.style.top = this._getItemPosition(index) + "px";
 				elem.style.position = "absolute";
-				this._renderedRows.set(index, elem);
 				innerElem.appendChild(elem);
+				this._renderedRows.set(index, elem);
 			}
 		}
 		for (let [index, elem] of this._renderedRows.entries()) {
@@ -91,49 +100,58 @@ module.exports = class {
 				this._renderedRows.delete(index);
 			}
 		}
-		
 	}
 	
-	update(options) {
-		this._renderedRows = new Set();
+	update(options = {}) {
 		Object.assign(this, options);
+		const { height, itemHeight, itemCount, targetElement, innerElem } = this;
+		innerElem.style.cssText = `
+			position: relative;
+			height: ${itemHeight * itemCount}px;
+		`;
+
+		targetElement.style.cssText = `
+			height: ${height}px;
+			max-width: 100%;
+			overflow: auto;
+		`;
+
+		this.scrollDirection = 0;
+		this.scrollOffset = targetElement.scrollTop;
+		this.invalidate();
 	}
 	
-	// scrollTo(scrollOffset: number): void {
-	// 	scrollOffset = Math.max(0, scrollOffset);
-    //
-	// 	this.setState(prevState => {
-	// 		if (prevState.scrollOffset === scrollOffset) {
-	// 			return null;
-	// 		}
-	// 		return {
-	// 			scrollDirection:
-	// 				prevState.scrollOffset < scrollOffset ? 'forward' : 'backward',
-	// 			scrollOffset: scrollOffset,
-	// 			scrollUpdateWasRequested: true,
-	// 		};
-	// 	}, this._resetIsScrollingDebounced);
-	// }
-    //
-	// scrollToItem(index: number, align: ScrollToAlign = 'auto'): void {
-	// 	const { itemCount } = this.props;
-	// 	const { scrollOffset } = this.state;
-    //
-	// 	index = Math.max(0, Math.min(index, itemCount - 1));
-    //
-	// 	this.scrollTo(
-	// 		getOffsetForIndexAndAlignment(
-	// 			this.props,
-	// 			index,
-	// 			align,
-	// 			scrollOffset,
-	// 			this._instanceProps
-	// 		)
-	// 	);
-	// }
+	scrollTo(scrollOffset) {
+		scrollOffset = Math.max(0, scrollOffset);
+		this.scrollOffset = scrollOffset;
+		this.targetElement.scrollTop = scrollOffset;
+		this.render();
+	}
+
+	scrollToRow(index) {
+		const { itemCount, itemHeight, scrollOffset, height } = this;
+
+		index = Math.max(0, Math.min(index, itemCount - 1));
+		let startPosition = this._getItemPosition(index);
+		let endPosition = startPosition + itemHeight;
+		if (startPosition < scrollOffset) {
+			this.scrollTo(startPosition);
+		}
+		else if (endPosition > scrollOffset + height) {
+			this.scrollTo(Math.min(endPosition - height, (itemCount * itemHeight) - height));
+		}
+	}
+	
+	getFirstVisibleRow() {
+		return Math.floor(this.scrollOffset / this.itemHeight);
+	}
+	
+	getPageLength() {
+		return Math.ceil(this.height / this.itemHeight);
+	}
 
 	_getItemPosition = (index) => {
-		return (this.itemHeight * index) + "px";
+		return (this.itemHeight * index);
 	};
 
 	_getRangeToRender() {

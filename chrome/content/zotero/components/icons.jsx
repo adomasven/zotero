@@ -1,8 +1,9 @@
 'use strict';
 
 const React = require('react');
+const { renderToStaticMarkup } = require('react-dom-server');
 const { PureComponent } = React;
-const { element, string } = require('prop-types');
+const { element, string, object } = require('prop-types');
 
 const Icon = (props) => {
 	props = Object.assign({}, props);
@@ -15,7 +16,8 @@ const Icon = (props) => {
 Icon.propTypes = {
 	children: element,
 	className: string,
-	name: string.isRequired
+	name: string.isRequired,
+	style: object
 }
 
 module.exports = { Icon }
@@ -38,6 +40,7 @@ function i(name, svgOrSrc, hasHiDPI=true) {
 			if (typeof svgOrSrc == 'string') {
 				if (!props.style) props.style = {};
 				props.style.backgroundImage = `url(${svgOrSrc})`;
+				props.className = "icon-bg";
 				// We use css background-image.
 				// This is a performance optimization for fast-scrolling trees.
 				// If we use img elements they are slow to render
@@ -66,6 +69,7 @@ function i(name, svgOrSrc, hasHiDPI=true) {
 
 
 i('TagSelectorMenu', "chrome://zotero/skin/tag-selector-menu.png");
+i('SortMarker', "chrome://zotero/skin/tag-selector-menu.png");
 i('DownChevron', "chrome://zotero/skin/searchbar-dropmarker.png");
 i('Twisty', (
 	/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -160,4 +164,26 @@ if (Zotero.isWin) {
 			<path d="M1395 736q0 13-10 23l-466 466q-10 10-23 10t-23-10l-466-466q-10-10-10-23t10-23l50-50q10-10 23-10t23 10l393 393 393-393q10-10 23-10t23 10l50 50q10 10 10 23z"/>
 		</svg>
 	));
+}
+
+let domElementCache = {};
+
+/**
+ * Returns a DOM element for the icon class
+ *
+ * To be used in itemTree where rendering is done without react
+ * for performance reasons
+ * @param {String} icon
+ * @returns {Element}
+ */
+module.exports.getDomElement = function (icon) {
+	if (domElementCache[icon]) return domElementCache[icon].cloneNode(true);
+	if (!module.exports[icon]) {
+		Zotero.debug(`Attempting to get non-existant icon ${icon}`);
+		return "";
+	}
+	let div = document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
+	div.innerHTML = renderToStaticMarkup(React.createElement(module.exports[icon]));
+	domElementCache[icon] = div.firstChild;
+	return domElementCache[icon].cloneNode(true);
 }

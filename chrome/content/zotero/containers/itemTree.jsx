@@ -26,13 +26,12 @@
 (function () {
 const React = require('react');
 const ReactDom = require('react-dom');
-const { renderToStaticMarkup } = require('react-dom-server');
 const { div } = require('react-dom-factories');
 const PropTypes = require('prop-types');
 const { IntlProvider } = require('react-intl');
 const VirtualizedTable = require('components/virtualized-table');
-const { IconTwisty } = require('components/icons');
 const Icons = require('components/icons');
+const getDomIcon = Icons.getDomElement;
 const { getDragTargetOrient } = require('components/utils');
 const cx = require('classnames');
 
@@ -277,18 +276,13 @@ const COLUMNS = [
 ];
 
 function makeItemRenderer(itemTree) {
-	let rowCache = {};
-	
 	function renderPrimaryCell(index, label, column) {
 		let span = renderCell(index, label, column);
-		// let icon = renderToStaticMarkup(itemTree._getIcon(index));
-		let icon = `<span class="icon" style="background-image: url(${itemTree._rows[index].ref.getImageSrc()})"></span>`;
-		// let arrow = renderToStaticMarkup(<IconTwisty className="arrow"/>);
-		let arrow = `<span class="icon icon-twisty arrow"><svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-		<path d="M8 13.4c-.5 0-.9-.2-1.2-.6L.4 5.2C0 4.7-.1 4.3.2 3.7S1 3 1.6 3h12.8c.6 0 1.2.1 1.4.7.3.6.2 1.1-.2 1.6l-6.4 7.6c-.3.4-.7.5-1.2.5z"/>
-	</svg></span>`;
+		let icon = itemTree._getIcon(index);
+		let arrow = getDomIcon("IconTwisty");
+		arrow.classList.add('arrow');
+		span.prepend(arrow, icon);
 		span.classList.add('primary');
-		span.innerHTML = `${arrow}${icon}${span.innerHTML}`;
 		return span;
 	}
 	
@@ -299,47 +293,13 @@ function makeItemRenderer(itemTree) {
 		return span;
 	}
 	
-	function recycleRow(index, div) {
-		let rowData = itemTree._rowGetter({ index });
-		
-		for (let i = 0; i < div.children.length; i++) {
-			let column = itemTree._columns[i];
-			let child = div.children[i];
-			if (child.classList.contains('primary')) {
-				div.replaceChild(renderPrimaryCell(index, rowData[column.dataKey], column), child);
-			}
-			else {
-				child.innerText = rowData[column.dataKey];
-			}
-		}
-		
-		return div;
-	}
-	
-	return function (index, startIndex, endIndex, appendElem) {
-		// let renderedIndices = Object.keys(rowCache);
-		// let smallestRendered = Math.min(...renderedIndices);
-		// let recycleIndex = null;
-		// if (smallestRendered < startIndex) {
-		// 	recycleIndex = smallestRendered;
-		// }
-		// if (recycleIndex === null) {
-		// 	let largestRendered = Math.max(...renderedIndices);
-		// 	if (largestRendered > endIndex) {
-		// 		recycleIndex = largestRendered;
-		// 	}
-		// }
-		// if (recycleIndex !== null) {
-		// 	// Zotero.debug('Recycling row ' + recycleIndex);
-		// 	let recycledRow = recycleRow(index, rowCache[recycleIndex]);
-		// 	delete rowCache[recycleIndex];
-		// 	rowCache[index] = recycledRow;
-		// 	return recycledRow;
-		// }
-		
-		let rowData = itemTree._rowGetter({ index });
+	return function (index, selection) {
+		let rowData = itemTree._getRowData({ index });
 		let div = document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
 		div.className = "row";
+		if (selection.isSelected(index)) {
+			div.classList.add('selected');
+		}
 		
 		for (let column of itemTree._columns) {
 			if (column.hidden) continue;
@@ -351,10 +311,6 @@ function makeItemRenderer(itemTree) {
 				div.appendChild(renderCell(index, rowData[column.dataKey], column));
 			}
 		}
-		
-		rowCache[index] = div;
-		
-		appendElem.appendChild(div);
 		
 		return div;
 	};
@@ -371,9 +327,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			</IntlProvider>
 		);
 		ReactDom.render(elem, domEl);
-		// (async function () {
-		// 	ref.makeVisible();
-		// })();
 		
 		return ref;
 	}
@@ -381,6 +334,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	constructor(props) {
 		super(props);
 		
+		this.id = "item-tree-" + Zotero.Utilities.randomString(5);
 		this._rows = [];
 		this._rowMap = {};
 		
@@ -410,22 +364,26 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			this.collectionTreeRow.view.itemTreeView = this;
 		}
 		
-		this.ItemRenderer = makeItemRenderer(this);
+		this.renderItem = makeItemRenderer(this);
 
 		this.onLoad = this._createEventBinding('load', true, true);
 		this.onSelect = this._createEventBinding('select');
 		this.onRefresh = this._createEventBinding('refresh');
 
-		this._cssSuffix = '-' + Zotero.Utilities.randomString(5);
-		this._columns = this._getColumns(this._cssSuffix);
 
+		this._initializeColumnStyleMap();
+	}
+	
+	_initializeColumnStyleMap() {
+		this._cssSuffix = '-' + Zotero.Utilities.randomString(5);
+		
 		this._stylesheet = document.createElementNS("http://www.w3.org/1999/xhtml", 'style');
 		this._columnStyleMap = {};
 		document.children[0].appendChild(this._stylesheet);
-		for (let i = 0; i < this._columns.length; i++) {
-			let column = this._columns[i];
-			this._stylesheet.sheet.insertRule(`.${column.className} {flex-basis: 100px}`, i);
-			this._columnStyleMap[column.dataKey] = [i, column.className];
+		for (let i = 0; i < COLUMNS.length; i++) {
+			let column = COLUMNS[i];
+			this._stylesheet.sheet.insertRule(`.${column.dataKey + this._cssSuffix} {flex-basis: 100px}`, i);
+			this._columnStyleMap[column.dataKey] = [i, column.dataKey + this._cssSuffix];
 		}
 	}
 	
@@ -677,10 +635,10 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			);
 			newSearchItems = new Set(newSearchItems);
 			
-			if (!this.selection.selectEventsSuppressed) {
-				var unsuppress = this.selection.selectEventsSuppressed = true;
-				// this._treebox.beginUpdateBatch();
-			}
+			// if (this.selection && !this.selection.selectEventsSuppressed) {
+			// 	var unsuppress = this.selection.selectEventsSuppressed = true;
+			// 	// this._treebox.beginUpdateBatch();
+			// }
 			var savedSelection = this.getSelectedItems(true);
 			
 			var newCellTextCache = {};
@@ -776,10 +734,10 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			// if (!skipExpandMatchParents) {
 			// 	this.expandMatchParents(newSearchParentIDs);
 			// }
-			if (unsuppress) {
-				// this._treebox.endUpdateBatch();
-				this.selection.selectEventsSuppressed = false;
-			}
+			// if (unsuppress) {
+			// 	// this._treebox.endUpdateBatch();
+			// 	this.selection.selectEventsSuppressed = false;
+			// }
 			
 			// Clear My Publications intro text on a refresh with items
 			if (this.collectionTreeRow.isPublications() && this.rowCount) {
@@ -807,8 +765,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		}
 		itemHeight *= Zotero.Prefs.get('fontSize');
 
-		let headerHeight = 28 * Zotero.Prefs.get('fontSize');
-		
 		if (!this.collectionTreeRow) {
 			return div("LOADING");
 		}
@@ -817,26 +773,19 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		return React.createElement(VirtualizedTable,
 			{
 				height: this.domEl.parentElement.clientHeight,
-				width: this.props.width || window.innerWidth,
 				container: this.domEl.parentElement,
 				rowCount: this._rows.length,
 				rowHeight: itemHeight,
-				headerHeight: headerHeight,
-				id: "item-tree",
-				rowGetter: this._rowGetter,
-				rowRenderer: this._rowRenderer,
-				primaryCellRenderer: this._primaryCellRenderer,
-				ref: tree => this.ref = tree,
+				id: this.id,
+				ref: ref => this.tree = ref,
+				treeboxRef: ref => this._treebox = ref,
 				columns: this._columns,
-				children: this.ItemRenderer,
-				itemKey: index => this.getRow(index).id,
+				renderItem: this.renderItem,
 				
 				multiSelect: true,
-				currentViewGroup: this.collectionTreeRow.visibilityGroup,
 				
-				getParentIndex: this.getParentIndex,
 				// getAriaLabel: index => this.getRow(index).getName(),
-				// isSelectable: this.isSelectable,
+				isSelectable: () => true,
 				// isContainer: this.isContainer,
 				// isContainerEmpty: this.isContainerEmpty,
 				// isContainerOpen: this.isContainerOpen,
@@ -850,18 +799,12 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 				// onKeyDown: this.handleKeyDown,
 				// onActivate: this.handleActivate,
 				// onColumnPickerMenu: () => 0,
-				onColumnResize: this.handleColumnResize,
+				onColumnResize: this._resizeColumns,
+				onHeaderClick: this._handleHeaderClick,
 
 				label: Zotero.getString('pane.collections.title'),
 			}
 		);
-	}
-	
-	handleColumnResize = (columns) => {
-		for (let dataKey in columns) {
-			let [styleIndex, _] = this._columnStyleMap[dataKey];
-			this._stylesheet.sheet.cssRules[styleIndex].style.cssText = `flex-basis: ${columns[dataKey]}px`;
-		}
 	}
 	
 	async changeCollectionTreeRow(collectionTreeRow, collapseAll=true) {
@@ -874,9 +817,9 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		}
 		this.collectionTreeRow = collectionTreeRow;
 		this.collectionTreeRow.view.itemTreeView = this;
-		this._columns = this._getColumns(this._cssSuffix);
+		this._columns = this._getColumns();
 		await this.refresh();
-		this.forceUpdate();
+		this.forceUpdate(() => this.selection.select(0));
 	}
 	
 	async selectItems(ids, noRecurse) {
@@ -1002,10 +945,293 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		return rowsToSelect.length;
 	}
 
+	/*
+	 *  Sort the items by the currently sorted column.
+	 */
+	sort(itemIDs) {
+		var t = new Date;
+		
+		// For child items, just close and reopen parents
+		if (itemIDs) {
+			let parentItemIDs = new Set();
+			let skipped = [];
+			for (let itemID of itemIDs) {
+				let row = this._rowMap[itemID];
+				let item = this.getRow(row).ref;
+				let parentItemID = item.parentItemID;
+				if (!parentItemID) {
+					skipped.push(itemID);
+					continue;
+				}
+				parentItemIDs.add(parentItemID);
+			}
+			
+			let parentRows = [...parentItemIDs].map(itemID => this._rowMap[itemID]);
+			parentRows.sort();
+			
+			// for (let i = parentRows.length - 1; i >= 0; i--) {
+			// 	let row = parentRows[i];
+			// 	this._closeContainer(row, true);
+			// 	this.toggleOpenState(row, true);
+			// }
+			this._refreshItemRowMap();
+			
+			let numSorted = itemIDs.length - skipped.length;
+			if (numSorted) {
+				Zotero.debug(`Sorted ${numSorted} child items by parent toggle`);
+			}
+			if (!skipped.length) {
+				return;
+			}
+			itemIDs = skipped;
+			if (numSorted) {
+				Zotero.debug(`${itemIDs.length} items left to sort`);
+			}
+		}
+		
+		var primaryField = this._getSortField();
+		var sortFields = this._getSortFields();
+		var order = this._sortedColumn.sortDirection;
+		var collation = Zotero.getLocaleCollation();
+		var sortCreatorAsString = Zotero.Prefs.get('sortCreatorAsString');
+		
+		Zotero.debug(`Sorting items list by ${sortFields.join(", ")} ${order == 1 ? "ascending" : "descending"} `
+			+ (itemIDs && itemIDs.length
+				? `for ${itemIDs.length} ` + Zotero.Utilities.pluralize(itemIDs.length, ['item', 'items'])
+				: ""));
+		
+		// Set whether rows with empty values should be displayed last,
+		// which may be different for primary and secondary sorting.
+		var emptyFirst = {};
+		switch (primaryField) {
+		case 'title':
+			emptyFirst.title = true;
+			break;
+		
+		// When sorting by title we want empty titles at the top, but if not
+		// sorting by title, empty titles should sort to the bottom so that new
+		// empty items don't get sorted to the middle of the items list.
+		default:
+			emptyFirst.title = false;
+		}
+		
+		// Cache primary values while sorting, since base-field-mapped getField()
+		// calls are relatively expensive
+		var cache = {};
+		sortFields.forEach(x => cache[x] = {});
+		
+		// Get the display field for a row (which might be a placeholder title)
+		function getField(field, row) {
+			var item = row.ref;
+			
+			switch (field) {
+			case 'title':
+				return Zotero.Items.getSortTitle(item.getDisplayTitle());
+			
+			case 'hasAttachment':
+				if (item.isFileAttachment()) {
+					var state = item.fileExistsCached() ? 1 : -1;
+				}
+				else if (item.isRegularItem()) {
+					var state = item.getBestAttachmentStateCached();
+				}
+				else {
+					return 0;
+				}
+				// Make sort order present, missing, empty when ascending
+				if (state === 1) {
+					state = 2;
+				}
+				else if (state === -1) {
+					state = 1;
+				}
+				return state;
+			
+			case 'numNotes':
+				return row.numNotes(false, true) || 0;
+			
+			// Use unformatted part of date strings (YYYY-MM-DD) for sorting
+			case 'date':
+				var val = row.ref.getField('date', true, true);
+				if (val) {
+					val = val.substr(0, 10);
+					if (val.indexOf('0000') == 0) {
+						val = "";
+					}
+				}
+				return val;
+			
+			case 'year':
+				var val = row.ref.getField('date', true, true);
+				if (val) {
+					val = val.substr(0, 4);
+					if (val == '0000') {
+						val = "";
+					}
+				}
+				return val;
+			
+			default:
+				return row.ref.getField(field, false, true);
+			}
+		}
+		
+		var includeTrashed = this.collectionTreeRow.isTrash();
+		
+		function fieldCompare(a, b, sortField) {
+			var aItemID = a.id;
+			var bItemID = b.id;
+			var fieldA = cache[sortField][aItemID];
+			var fieldB = cache[sortField][bItemID];
+			
+			switch (sortField) {
+			case 'firstCreator':
+				return creatorSort(a, b);
+			
+			case 'itemType':
+				var typeA = Zotero.ItemTypes.getLocalizedString(a.ref.itemTypeID);
+				var typeB = Zotero.ItemTypes.getLocalizedString(b.ref.itemTypeID);
+				return (typeA > typeB) ? 1 : (typeA < typeB) ? -1 : 0;
+				
+			default:
+				if (fieldA === undefined) {
+					cache[sortField][aItemID] = fieldA = getField(sortField, a);
+				}
+				
+				if (fieldB === undefined) {
+					cache[sortField][bItemID] = fieldB = getField(sortField, b);
+				}
+				
+				// Display rows with empty values last
+				if (!emptyFirst[sortField]) {
+					if(fieldA === '' && fieldB !== '') return 1;
+					if(fieldA !== '' && fieldB === '') return -1;
+				}
+				
+				if (sortField == 'hasAttachment') {
+					return fieldB - fieldA;
+				}
+				
+				return collation.compareString(1, fieldA, fieldB);
+			}
+		}
+		
+		var rowSort = function (a, b) {
+			for (let i = 0; i < sortFields.length; i++) {
+				let cmp = fieldCompare(a, b, sortFields[i]);
+				if (cmp !== 0) {
+					return cmp;
+				}
+			}
+			return 0;
+		};
+		
+		var creatorSortCache = {};
+		
+		// Regexp to extract the whole string up to an optional "and" or "et al."
+		var andEtAlRegExp = new RegExp(
+			// Extract the beginning of the string in non-greedy mode
+			"^.+?"
+			// up to either the end of the string, "et al." at the end of string
+			+ "(?=(?: " + Zotero.getString('general.etAl').replace('.', '\.') + ")?$"
+			// or ' and '
+			+ "| " + Zotero.getString('general.and') + " "
+			+ ")"
+		);
+		
+		function creatorSort(a, b) {
+			var itemA = a.ref;
+			var itemB = b.ref;
+			//
+			// Try sorting by the first name in the firstCreator field, since we already have it
+			//
+			// For sortCreatorAsString mode, just use the whole string
+			//
+			var aItemID = a.id,
+				bItemID = b.id,
+				fieldA = creatorSortCache[aItemID],
+				fieldB = creatorSortCache[bItemID];
+			var prop = sortCreatorAsString ? 'firstCreator' : 'sortCreator';
+			var sortStringA = itemA[prop];
+			var sortStringB = itemB[prop];
+			if (fieldA === undefined) {
+				let firstCreator = Zotero.Items.getSortTitle(sortStringA);
+				if (sortCreatorAsString) {
+					var fieldA = firstCreator;
+				}
+				else {
+					var matches = andEtAlRegExp.exec(firstCreator);
+					var fieldA = matches ? matches[0] : '';
+				}
+				creatorSortCache[aItemID] = fieldA;
+			}
+			if (fieldB === undefined) {
+				let firstCreator = Zotero.Items.getSortTitle(sortStringB);
+				if (sortCreatorAsString) {
+					var fieldB = firstCreator;
+				}
+				else {
+					var matches = andEtAlRegExp.exec(firstCreator);
+					var fieldB = matches ? matches[0] : '';
+				}
+				creatorSortCache[bItemID] = fieldB;
+			}
+			
+			if (fieldA === "" && fieldB === "") {
+				return 0;
+			}
+			
+			// Display rows with empty values last
+			if (fieldA === '' && fieldB !== '') return 1;
+			if (fieldA !== '' && fieldB === '') return -1;
+			
+			return collation.compareString(1, fieldA, fieldB);
+		}
+		
+		// Need to close all containers before sorting
+		if (!this.selection.selectEventsSuppressed) {
+			var unsuppress = this.selection.selectEventsSuppressed = true;
+		}
+		
+		var savedSelection = this.getSelectedItems(true);
+		// TODO:
+		// var openItemIDs = this._saveOpenState(true);
+		
+		// Sort specific items
+		if (itemIDs) {
+			let idsToSort = new Set(itemIDs);
+			this._rows.sort((a, b) => {
+				// Don't re-sort existing items. This assumes a stable sort(), which is the case in Firefox
+				// but not Chrome/v8.
+				if (!idsToSort.has(a.ref.id) && !idsToSort.has(b.ref.id)) return 0;
+				return rowSort(a, b) * order;
+			});
+		}
+		// Full sort
+		else {
+			this._rows.sort((a, b) => rowSort(a, b) * order);
+		}
+		
+		this._refreshItemRowMap();
+		
+		// this.rememberOpenState(openItemIDs);
+		this._rememberSelection(savedSelection);
+		
+		if (unsuppress) {
+			this.selection.selectEventsSuppressed = false;
+		}
+		
+		this.forceUpdate();
+		
+		var numSorted = itemIDs ? itemIDs.length : this._rows.length;
+		Zotero.debug(`Sorted ${numSorted} ${Zotero.Utilities.pluralize(numSorted, ['item', 'items'])} `
+			+ `in ${new Date - t} ms`);
+	}
+
 	// TODO: consolidate
 	// The caller has to ensure the tree is redrawn
 	ensureRowIsVisible(index) {
-		this.ref && this.ref.scrollToRow(index);
+		this._treebox && this._treebox.scrollToRow(index);
 	}
 
 	ensureRowsAreVisible(indices) {
@@ -1070,11 +1296,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 
 	// TODO: consolidate
 	get selection() {
-		return this.ref ? this.ref.selection : { select: () => 0, selected: [] };
-	}
-
-	set selection(val) {
-		return this.ref.selection = val;
+		return this.tree ? this.tree.selection : null;
 	}
 	
 	get rowCount() {
@@ -1104,7 +1326,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	}
 	
 	getSelectedItems(asIDs) {
-		var items = Array.from(this.selection.selected);
+		var items = this.selection ? Array.from(this.selection.selected) : [];
 		if (asIDs) return items;
 		return items.map(id => this.getRow(id).ref);
 	}
@@ -1130,7 +1352,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		this._rowMap = rowMap;
 	}
 	
-	_rowGetter = ({ index }) => {
+	_getRowData = ({ index }) => {
 		var treeRow = this.getRow(index);
 		var itemID = treeRow.id;
 		
@@ -1207,116 +1429,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		
 		return this._rowCache[itemID] = row;
 	}
-
-	_rowRenderer = ({ index, key, style, className, rowData, columns }, { selection }) => {
-		let treeRow = this.getRow(index);
-		let depth = treeRow.level;
-		let icon = this._getIcon(index);
-		let classes = cx(['tree-node',
-			{
-				focused: selection.isSelected(index),
-				drop: this._dropRow == treeRow.id,
-				unread: rowData.unread
-			},
-			className
-		]);
-
-		// The arrow on macOS is a full icon's width.
-		// For non-userLibrary items that are drawn under headers
-		// we do not draw the arrow and need to move all items 1 level up
-		if (Zotero.isMac && !treeRow.isHeader() && treeRow.ref
-				&& treeRow.ref.libraryID != Zotero.Libraries.userLibraryID) {
-			depth--;
-		}
-
-
-		let props = {
-			style,
-			key,
-			className: classes,
-			// onContextMenu: async (e) => {
-			// 	e.persist();
-			// 	this.selection.select(index);
-			// 	this.props.onContext && this.props.onContext(e);
-			// },
-			draggable: treeRow != this._editing,
-			children: COLUMNS
-		};
-		
-		if (this.props.dragAndDrop) {
-			// props.onDoubleClick = () => this.handleActivate(treeRow);
-			// props.onDragStart = e => this.onDragStart(treeRow, e);
-			// props.onDragOver = e => this.onDragOver(treeRow, e);
-			// props.onDragEnd = e => this.onDragEnd(treeRow, e);
-			// props.onDrop = e => this.onDrop(treeRow, e);
-		}
-
-		let arrowProps = {
-			// onMouseDown: async (e) => {
-			// 	e.stopPropagation();
-			// 	e.preventDefault();
-			// 	await this.toggleOpenState(index);
-			// 	this.forceUpdate();
-			// },
-			className: 'arrow',
-		};
-		// arrowProps.className += this.isContainerOpen(index) ? ' open' : '';
-		// let arrow = <IconTwisty {...arrowProps}/>;
-		// if (!this.isContainer(index) || this.isContainerEmpty(index)) {
-		// 	arrow = <span className='spacer-arrow'></span>;
-		// }
-
-		return (
-			<div {...props}>
-				{columns}
-			</div>
-		);
-	}
-	
-	_primaryCellRenderer = ({ cellData, rowIndex: index }) => {
-		let treeRow = this.getRow(index);
-		let depth = 0;
-		let icon = this._getIcon(index);
-
-		// The arrow on macOS is a full icon's width.
-		// For non-userLibrary items that are drawn under headers
-		// we do not draw the arrow and need to move all items 1 level up
-		// if (Zotero.isMac && !treeRow.isHeader() && treeRow.ref
-		// 		&& treeRow.ref.libraryID != Zotero.Libraries.userLibraryID) {
-		// 	depth--;
-		// }
-
-
-		let props = {
-			style: {
-				paddingLeft: (CHILD_INDENT * depth) + 'px'
-			},
-			className: "cell primary"
-		};
-
-		let arrowProps = {
-			// onMouseDown: async (e) => {
-			// 	e.stopPropagation();
-			// 	e.preventDefault();
-			// 	await this.toggleOpenState(index);
-			// 	this.forceUpdate();
-			// },
-			className: 'arrow',
-		};
-		// arrowProps.className += this.isContainerOpen(index) ? ' open' : '';
-		let arrow = <IconTwisty {...arrowProps}/>;
-		// if (!this.isContainer(index) || this.isContainerEmpty(index)) {
-		// 	arrow = <span className='spacer-arrow'></span>;
-		// }
-
-		return (
-			<span {...props}>
-				{/*{arrow}*/}
-				{/*{icon}*/}
-				{cellData}
-			</span>
-		);
-	}
 	
 	_storeColumnVisibility(visibilityGroup) {
 		let settings = JSON.parse(Zotero.Prefs.get('itemsView.columnVisibility') || '{}');
@@ -1330,33 +1442,220 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		Zotero.Prefs.set('itemsView.columnVisibility', JSON.stringify(settings));
 	}
 	
-	_getColumns(cssSuffix) {
-		// if (!this.collectionTreeRow) {
-		// 	return [];
-		// }
-		// let visibilityGroup = this.collectionTreeRow.visibilityGroup;
-		// let settings = JSON.parse(Zotero.Prefs.get('itemsView.columnVisibility') || '{}');
-		// let setting = settings[visibilityGroup] = {};
+	_getColumns() {
+		if (!this.collectionTreeRow) {
+			return [];
+		}
+		let visibilityGroup = this.collectionTreeRow.visibilityGroup;
+		let settings = JSON.parse(Zotero.Prefs.get('itemsView.columnVisibility') || '{}');
+		let setting = settings[visibilityGroup] = {};
 		let persistSettings = JSON.parse(Zotero.Prefs.get('pane.persist') || {});
 		let columns = [];
-		let defaultColumnWidth = this.domEl.parentElement.clientWidth / COLUMNS.length;
+		let columnWidths = {};
+		let visibleColumns = 0;
 		for (let column of COLUMNS) {
 			let legacyDataKey = "zotero-items-column-" + column.dataKey;
-			let persistSetting = persistSettings[column.legacyDataKey];
+			let persistSetting = persistSettings[legacyDataKey];
+			for (let key in persistSetting) {
+				if (typeof persistSetting[key] == "string") {
+					try {
+						persistSetting[key] = JSON.parse(persistSetting[key]);
+					} catch (e) {}
+				}
+			}
 			column = Object.assign({}, column, persistSetting);
 			// IF no setting OR the column isn't in the setting
 			// AND not in the default group
 			// THEN the column is hidden
-			// if (!(setting[column.dataKey] || setting[legacyDataKey])
-			// 		&& (!column.defaultIn || !column.defaultIn.has(visibilityGroup))) {
-			if (!column.defaultIn) {
+			if (!(setting[column.dataKey] || setting[legacyDataKey])
+					&& (!column.defaultIn || !column.defaultIn.has(visibilityGroup))) {
 				column.hidden = true;
 			}
-			column.width = column.width || defaultColumnWidth;
-			column.className = column.dataKey + cssSuffix;
+			if (!column.hidden) {
+				visibleColumns++;
+			}
+			column.className = column.dataKey + this._cssSuffix;
 			columns.push(column);
 		}
+		for (let column of COLUMNS) {
+			if (!column.hidden) {
+				if (column.width) {
+					columnWidths[column.dataKey] = column.width;
+				}
+				else {
+					columnWidths[column.dataKey] = this.domEl.clientWidth / visibleColumns;
+				}
+			}
+		}
+		this._resizeColumns(columnWidths);
 		return columns;
+	}
+
+	_resizeColumns = (columns) => {
+		for (let dataKey in columns) {
+			let [styleIndex, _] = this._columnStyleMap[dataKey];
+			this._stylesheet.sheet.cssRules[styleIndex].style.cssText = `flex-basis: ${columns[dataKey]}px`;
+		}
+	}
+	
+	_handleHeaderClick = async (index) => {
+		let column = this._columns[index];
+		if (this.collectionTreeRow.isFeed()) {
+			return;
+		}
+		if (column.dataKey == 'hasAttachment') {
+			Zotero.debug("Caching best attachment states");
+			if (!this._cachedBestAttachmentStates) {
+				let t = new Date();
+				for (let i = 0; i < this._rows.length; i++) {
+					let item = this.getRow(i).ref;
+					if (item.isRegularItem()) {
+						await item.getBestAttachmentState();
+					}
+				}
+				Zotero.debug("Cached best attachment states in " + (new Date - t) + " ms");
+				this._cachedBestAttachmentStates = true;
+			}
+		}
+		if (this._sortedColumn && this._sortedColumn.dataKey == column.dataKey) {
+			this._sortedColumn.sortDirection *= -1;
+		}
+		else {
+			if (this._sortedColumn) {
+				delete this._sortedColumn.sortDirection;
+			}
+			this._sortedColumn = column;
+			this._sortedColumn.sortDirection = 1;
+		}
+		
+		this.selection.selectEventsSuppressed = true;
+		var savedSelection = this.getSelectedItems(true);
+		if (savedSelection.length == 1) {
+			var pos = this._rowMap[savedSelection[0]] - this._treebox.getFirstVisibleRow();
+		}
+		this.sort();
+		this._rememberSelection(savedSelection);
+		// If single row was selected, try to keep it in the same place
+		if (savedSelection.length == 1) {
+			var newRow = this._rowMap[savedSelection[0]];
+			// Calculate the last row that would give us a full view
+			var fullTop = Math.max(0, this._rows.length - this._treebox.getPageLength());
+			// Calculate the row that would give us the same position
+			var consistentTop = Math.max(0, newRow - pos);
+			this._treebox.scrollToRow(Math.min(fullTop, consistentTop));
+		}
+		this._treebox.invalidate();
+		this.selection.selectEventsSuppressed = false;
+	}
+
+
+	/*
+	 *  Sets the selection based on saved selection ids
+	 */
+	_rememberSelection(selection) {
+		if (!selection.length) {
+			return;
+		}
+		
+		this.selection.clearSelection();
+		
+		if (!this.selection.selectEventsSuppressed) {
+			var unsuppress = this.selection.selectEventsSuppressed = true;
+			this._treebox.beginUpdateBatch();
+		}
+		
+		try {
+			for (let i = 0; i < selection.length; i++) {
+				if (this._rowMap[selection[i]] != null) {
+					this.selection.toggleSelect(this._rowMap[selection[i]]);
+				}
+				// Try the parent
+				else {
+					var item = Zotero.Items.get(selection[i]);
+					if (!item) {
+						continue;
+					}
+					
+					var parent = item.parentItemID;
+					if (!parent) {
+						continue;
+					}
+					
+					if (this._rowMap[parent] != null) {
+						this._closeContainer(this._rowMap[parent]);
+						this.toggleOpenState(this._rowMap[parent]);
+						this.selection.toggleSelect(this._rowMap[selection[i]]);
+					}
+				}
+			}
+		}
+		// Ignore NS_ERROR_UNEXPECTED from nsITreeSelection::toggleSelect(), apparently when the tree
+		// disappears before it's called (though I can't reproduce it):
+		//
+		// https://forums.zotero.org/discussion/69226/papers-become-invisible-in-the-middle-pane
+		catch (e) {
+			Zotero.logError(e);
+		}
+		
+		if (unsuppress) {
+			this._treebox.endUpdateBatch();
+			this.selection.selectEventsSuppressed = false;
+		}
+	}
+	
+	
+	_getSortField() {
+		if (this.collectionTreeRow.isFeed()) {
+			return 'id';
+		}
+		var column = this._sortedColumn;
+		if (!column) {
+			column = this._columns.find(col => !col.hidden);
+		}
+		// zotero-items-column-_________
+		return column.dataKey;
+	}
+
+
+	_getSortFields() {
+		var fields = [this._getSortField()];
+		var secondaryField = this._getSecondarySortField();
+		if (secondaryField) {
+			fields.push(secondaryField);
+		}
+		try {
+			var fallbackFields = Zotero.Prefs.get('fallbackSort')
+				.split(',')
+				.map((x) => x.trim())
+				.filter((x) => x !== '');
+		}
+		catch (e) {
+			Zotero.debug(e, 1);
+			Components.utils.reportError(e);
+			// This should match the default value for the fallbackSort pref
+			var fallbackFields = ['firstCreator', 'date', 'title', 'dateAdded'];
+		}
+		fields = Zotero.Utilities.arrayUnique(fields.concat(fallbackFields));
+		
+		// If date appears after year, remove it, unless it's the explicit secondary sort
+		var yearPos = fields.indexOf('year');
+		if (yearPos != -1) {
+			let datePos = fields.indexOf('date');
+			if (datePos > yearPos && secondaryField != 'date') {
+				fields.splice(datePos, 1);
+			}
+		}
+		
+		return fields;
+	}
+	
+	_getSecondarySortField() {
+		var primaryField = this._getSortField();
+		var secondaryField = Zotero.Prefs.get('secondarySort.' + primaryField);
+		if (!secondaryField || secondaryField == primaryField) {
+			return false;
+		}
+		return secondaryField;
 	}
 	
 	_getIcon(index) {
@@ -1388,15 +1687,14 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			}
 		}
 		let iconClsName = "IconTreeitem" + Zotero.Utilities.capitalize(itemType);
+		if (!Icons[iconClsName]) {
+			iconClsName = "IconTreeitem";
+		}
 		// N.B. Should use css-image-set in Electron
 		if (window.devicePixelRatio >= 1.25 && ((iconClsName + "2x") in Icons)) {
 			iconClsName += "2x";
 		}
-		let iconCls = Icons[iconClsName];
-		if (!iconCls) {
-			return "";
-		}
-		return React.createElement(iconCls);
+		return getDomIcon(iconClsName);
 	}
 };
 

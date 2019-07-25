@@ -361,7 +361,10 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 				ref: tree => this.ref = tree,
 				
 				getParentIndex: this.getParentIndex,
-				getAriaLabel: index => this.getRow(index).getName(),
+				getAriaLabel: index => {
+					let row = this.getRow(index);
+					return row ? row.getName() : "";
+				},
 				isSelectable: this.isSelectable,
 				multiSelect: false,
 				editing: !!this._editing,
