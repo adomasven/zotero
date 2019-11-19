@@ -50,6 +50,7 @@ const symlinkFiles = [
 	'resource/ace/theme-chrome.js',
 	'resource/ace/theme-monokai.js',
 	'resource/ace/worker-javascript.js',
+	'!resource/citeproc_rs_wasm.js',
 	'update.rdf'
 ];
 
@@ -102,7 +103,8 @@ const jsFiles = [
 	'resource/react.js',
 	'resource/react-dom.js',
 	'resource/react-virtualized.js',
-	'resource/SingleFile/lib/single-file/single-file.js'
+	'resource/SingleFile/lib/single-file/single-file.js',
+	'resource/citeproc_rs_wasm.js',
 ];
 
 const scssFiles = [
