@@ -1077,7 +1077,7 @@ var ZoteroPane = new function()
 	};
 	
 	
-	this.onCollectionSelected = async function (prevSelection) {
+	this.onCollectionSelected = async function () {
 		try {
 			var collectionTreeRow = this.getCollectionTreeRow();
 			if (!collectionTreeRow) {
@@ -1085,39 +1085,19 @@ var ZoteroPane = new function()
 				return;
 			}
 			
-			// if (this.itemsView && this.itemsView.collectionTreeRow.id == collectionTreeRow.id) {
-			// 	Zotero.debug("Collection selection hasn't changed");
-			//	
-			// 	// Update toolbar, in case editability has changed
-			// 	this._updateToolbarIconsForRow(collectionTreeRow);
-			// 	return;
-			// }
-			
-			// if (this.itemsView) {
-			// 	// Wait for existing items view to finish loading before unloading it
-			// 	//
-			// 	// TODO: Cancel loading
-			// 	let promise = this.itemsView.waitForLoad();
-			// 	if (promise.isPending()) {
-			// 		Zotero.debug("Waiting for items view " + this.itemsView.id + " to finish loading");
-			// 		await promise;
-			// 	}
-			//	
-			// 	this.itemsView.unregister();
-			// 	document.getElementById('zotero-items-tree').view = this.itemsView = null;
-			// }
+			if (this.itemsView && this.itemsView.collectionTreeRow && this.itemsView.collectionTreeRow.id == collectionTreeRow.id) {
+				Zotero.debug("Collection selection hasn't changed");
+
+				// Update toolbar, in case editability has changed
+				this._updateToolbarIconsForRow(collectionTreeRow);
+				return;
+			}
 			
 			// Clear quick search and tag selector when switching views
 			document.getElementById('zotero-tb-search').value = "";
 			if (ZoteroPane.tagSelector) {
 				ZoteroPane.tagSelector.clearTagSelection();
 			}
-			
-			// Not necessary with seltype="cell", which calls nsITreeView::isSelectable()
-			/*if (collectionTreeRow.isSeparator()) {
-				document.getElementById('zotero-items-tree').view = this.itemsView = null;
-				return;
-			}*/
 			
 			collectionTreeRow.setSearch('');
 			if (ZoteroPane.tagSelector) {
@@ -1236,15 +1216,15 @@ var ZoteroPane = new function()
 	 *                              or false if not (used for tests, though there could possibly
 	 *                              be a better test for whether the item pane changed)
 	 */
-	this.itemSelected = function (event) {
+	this.itemSelected = function (selection) {
 		return Zotero.Promise.coroutine(function* () {
 			// Don't select item until items list has loaded
 			//
 			// This avoids an error if New Item is used while the pane is first loading.
-			var promise = this.itemsView.waitForLoad();
-			if (promise.isPending()) {
-				yield promise;
-			}
+			// var promise = this.itemsView.waitForLoad();
+			// if (promise.isPending()) {
+			// 	yield promise;
+			// }
 			
 			if (!this.itemsView || !this.itemsView.selection) {
 				Zotero.debug("Items view not available in itemSelected", 2);
@@ -3157,44 +3137,37 @@ var ZoteroPane = new function()
 		}
 	}
 	
-	
+	// TODO upon electron:
+	// Technically just forwards to the react itemsView
+	// but it is not as robust as XUL. Unfortunately we cannot use the original XUL
+	// version since it causes terrible layout issues when mixing XUL and HTML
+	// Keeping this function here since setting this message is technically
+	// the responsibility of the ZoteroPane and should be independent upon itemsView,
+	// which hopefully we will fix once electronero arrives
 	function setItemsPaneMessage(content, lock) {
-		var elem = document.getElementById('zotero-items-pane-message-box');
-		
-		if (elem.getAttribute('locked') == 'true') {
+		if (this._itemsPaneMessageLocked) {
 			return;
 		}
-		
-		elem.textContent = '';
-		if (typeof content == 'string') {
-			let contentParts = content.split("\n\n");
-			for (let part of contentParts) {
-				var desc = document.createElement('description');
-				desc.appendChild(document.createTextNode(part));
-				elem.appendChild(desc);
-			}
-		}
-		else {
-			elem.appendChild(content);
-		}
-		
+
 		// Make message permanent
 		if (lock) {
-			elem.setAttribute('locked', true);
+			this._itemsPaneMessageLocked = true;
 		}
-		
-		document.getElementById('zotero-items-pane-content').selectedIndex = 1;
+
+		if (this.itemsView) {
+			this.itemsView.setItemsPaneMessage(content);
+		}
 	}
-	
 	
 	function clearItemsPaneMessage() {
 		// If message box is locked, don't clear
-		var box = document.getElementById('zotero-items-pane-message-box');
-		if (box.getAttribute('locked') == 'true') {
+		if (this._itemsPaneMessageLocked) {
 			return;
 		}
 		
-		document.getElementById('zotero-items-pane-content').selectedIndex = 0;
+		if (this.itemsView) {
+			this.itemsView.clearItemsPaneMessage();
+		}
 	}
 	
 	
@@ -4819,12 +4792,17 @@ var ZoteroPane = new function()
 	 * Serializes zotero-persist elements to preferences
 	 */
 	this.serializePersist = function() {
-		if(!_unserialized) return;
-		var serializedValues = {};
+		if (!_unserialized) return;
+		try {
+			var serializedValues = JSON.parse(Zotero.Prefs.get('pane.persist'));
+		}
+		catch (e) {
+			serializedValues = {};
+		}
 		for (let el of document.getElementsByAttribute("zotero-persist", "*")) {
-			if(!el.getAttribute) continue;
+			if (!el.getAttribute) continue;
 			var id = el.getAttribute("id");
-			if(!id) continue;
+			if (!id) continue;
 			var elValues = {};
 			for (let attr of el.getAttribute("zotero-persist").split(/[\s,]+/)) {
 				if (el.hasAttribute(attr)) {
@@ -4865,7 +4843,6 @@ var ZoteroPane = new function()
 		var collectionsTree = document.querySelector('#zotero-collections-tree .tree');
 		var itemsPane = document.getElementById("zotero-items-pane");
 		var itemsToolbar = document.getElementById("zotero-items-toolbar");
-		var itemsTree = document.querySelector("#zotero-items-tree .tree");
 		var itemPane = document.getElementById("zotero-item-pane");
 		var itemToolbar = document.getElementById("zotero-item-toolbar");
 		var tagSelector = document.getElementById("zotero-tag-selector");
@@ -4876,9 +4853,8 @@ var ZoteroPane = new function()
 			let borderSize = Zotero.isMac ? 0 : 2;
 			collectionsTree.style.maxWidth = (collectionsPane.boxObject.width - borderSize) + 'px';
 		}
-		if (itemsTree) {
-			let borderSize = Zotero.isMac ? 0 : 2;
-			itemsTree.style.maxWidth = (itemsPane.boxObject.width - borderSize) + 'px';
+		if (ZoteroPane.itemsView) {
+			ZoteroPane.itemsView.updateHeight(itemsPane.boxObject.height);
 		}
 		
 		if (stackedLayout || itemPane.collapsed) {

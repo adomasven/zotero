@@ -49,27 +49,6 @@
 {
 	background: #FFFF99 !important;
 }
-
-#zotero-items-column-hasAttachment, #zotero-items-column-numNotes {
-	min-width: 21px;
-}
-
-#zotero-items-column-hasAttachment {
-	list-style-image: url(chrome://zotero/skin/attach-small.png);
-}
-
-#zotero-items-column-hasAttachment .treecol-icon {
-	width: 13px;
-}
-
-#zotero-items-column-numNotes {
-	list-style-image: url(chrome://zotero/skin/treeitem-note-small.png);
-}
-
-#zotero-items-column-numNotes .treecol-icon {
-	width: 12px;
-}
-
 @media (min-resolution: 1.25dppx) {
 	.tree-columnpicker-icon {
 		list-style-image: url(chrome://zotero/skin/firefox/columnpicker@2x.gif);
@@ -234,12 +213,6 @@
 #zotero-items-tree treechildren::-moz-tree-cell-text(unread),
 #zotero-collections-tree treechildren::-moz-tree-cell-text(unread) {
 	font-weight: bold;
-}
-
-#zotero-items-pane
-{
-	min-width: 290px;
-	min-height: 150px;
 }
 
 /* Used for intro text */

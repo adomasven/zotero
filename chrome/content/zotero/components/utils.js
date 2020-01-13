@@ -66,7 +66,7 @@ function createDragHandler({ handleDrag, handleDragStop }) {
 		window.removeEventListener('blur', onDragStop);
 		document.children[0].removeEventListener('keydown', onKeyDown);
 
-		handleDragStop(event, event === null || event.type !== 'mouseup');
+		handleDragStop(event, !event || event.type !== 'mouseup');
 	}
 
 	return {

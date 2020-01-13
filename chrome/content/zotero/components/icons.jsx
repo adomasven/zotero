@@ -81,6 +81,9 @@ i('Twisty', (
 ));
 i('Cross', "chrome://zotero/skin/cross.png");
 
+i('Attach', "chrome://zotero/skin/attach.png");
+i('AttachSmall', "chrome://zotero/skin/attach-small.png");
+
 // TreeItems
 i('TreeitemArtwork', 'chrome://zotero/skin/treeitem-artwork.png');
 i('TreeitemAttachmentLink', 'chrome://zotero/skin/treeitem-attachment-link.png');

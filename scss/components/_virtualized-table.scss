@@ -1,5 +1,8 @@
 .virtualized-table {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
 
   &:focus {
     outline: none;
@@ -15,12 +18,10 @@
   .cell {
     min-width: 10px;
     cursor: default;
-    padding: 0 5px;
-    text-overflow: ellipsis;
     white-space: nowrap;
-    overflow: hidden;
     flex-grow: 1;
     flex-shrink: 1;
+    box-sizing: border-box;
   }
   
   .row {
@@ -30,34 +31,32 @@
     width: 100%;
     height: 22px;
   }
+  
+  .column-drag-marker {
+    z-index: 99999;
+    position: absolute;
+    top: 0;
+    height: 100%;
+    width: 2px;
+    background-color: #ccc;
+  }
 }
 
 .virtualized-table-header {
   display: flex;
   flex-direction: row;
   align-items: center;
-  width: 100%;
+  width: calc(100% - 11px);
   border-bottom: 1px solid #ccc;
   background-image: linear-gradient(#fff, #fafafa);
   height: 1.7em;
   overflow: hidden;
+  border-right: 1px solid #ddd;
  
   .column-picker {
     text-align: center;
   }
-  
-  .resizer {
-    background: linear-gradient(#ddd, #ddd) no-repeat center/1px 100%; 
-    cursor: col-resize;
-    height: 4em;
-    content: "\00a0";
-    display: block;
-    position: absolute;
-    top: -1em;
-    left: -5px;
-    flex: 0 0 5px;
-  }
-  
+ 
   .cell {
     display: flex;
     position: relative;
@@ -66,6 +65,31 @@
 
     &:hover {
       background: #fff;
+    }
+    
+    &.dragging {
+      color: #666;
+      background: #f8f8f8;
+    }
+     
+    .resizer {
+      background: linear-gradient(#ddd, #ddd) no-repeat center/1px 100%; 
+      cursor: col-resize;
+      height: 100%;
+      content: "\00a0";
+      display: block;
+      position: absolute;
+      left: -5px;
+      min-width: 10px;
+    }
+    
+    .label {
+      margin-left: 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    &.fixed-width > .label {
+      margin-left: 0;
     }
     
     .sort-indicator {
@@ -78,6 +102,20 @@
       &.ascending {
         transform: scale(1.25) rotate(180deg);
       }
+    }
+  }
+}
+
+.virtualized-table-body {
+  flex: 1 0;
+  
+  .cell {
+    padding: 0 5px;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    
+    &:first-child {
+      padding-left: 5px;
     }
   }
 }

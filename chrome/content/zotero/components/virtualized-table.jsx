@@ -30,9 +30,8 @@ const JSWindow = require('./js-window');
 const { injectIntl } = require('react-intl');
 const { TreeSelection } = require('./virtualized-tree');
 const cx = require('classnames');
-const Draggable = require('react-draggable').DraggableCore;
+const Draggable = require('./draggable');
 
-const CELL_PADDING = 10; // px
 const RESIZER_WIDTH = 5; // px
 
 class VirtualizedTable extends React.Component {
@@ -41,10 +40,11 @@ class VirtualizedTable extends React.Component {
 		this.state = {
 			resizing: null
 		};
-		this._resizingColumn = null;
 		this._jsWindowID = `virtualized-table-list-${Zotero.Utilities.randomString(5)}`;
 			
 		this.selection = new TreeSelection(this);
+		
+		this.isHeaderMouseUp = true;
 		
 		this.onSelection = Zotero.Utilities.debounce(this._onSelection, 20);
 	}
@@ -113,7 +113,20 @@ class VirtualizedTable extends React.Component {
 	 * @private
 	 */
 	_onJumpSelect(direction, selectTo) {
-		let numRows = Math.floor(this.props.height / this.props.rowHeight);
+		if (direction == 1) {
+			const lastVisible = this._jsWindow.getLastVisibleRow();
+			if (this.selection.focused != lastVisible) {
+				return this.onSelection(lastVisible, selectTo);
+			}
+		}
+		else {
+			const firstVisible = this._jsWindow.getFirstVisibleRow();
+			if (this.selection.focused != firstVisible) {
+				return this.onSelection(firstVisible, selectTo);
+			}
+		}
+		const height = document.getElementById(this._jsWindowID).clientHeight;
+		const numRows = Math.floor(height / this.props.rowHeight);
 		let destination = this.selection.focused + (direction * numRows);
 		destination = Math.min(destination, this.props.rowCount - 1);
 		destination = Math.max(0, destination);
@@ -170,7 +183,7 @@ class VirtualizedTable extends React.Component {
 			this._onJumpSelect(1, shiftSelect);
 			break;
 			
-		case " ": 
+		case " ":
 			this.onSelection(this.selection.focused, false, true);
 			break;
 		}
@@ -227,7 +240,7 @@ class VirtualizedTable extends React.Component {
 	 * @param index
 	 */
 	scrollToRow(index) {
-		this._jsWindow.scrollToRow(index);
+		this._jsWindow && this._jsWindow.scrollToItem(index);
 	}
 
 	/**
@@ -282,43 +295,158 @@ class VirtualizedTable extends React.Component {
 	
 	// ------------------------ Column Methods ------------------------- //
 	
-	_handleResizerDragStart(index, event) {
-		if (event.button !== 0) return;
-
-		this._resizingColumn = event.target.nextSibling;
+	_handleResizerDragStart = (index, event) => {
+		if (event.button !== 0) return false;
+		event.stopPropagation();
+		this.isHeaderMouseUp = false;
+		const result = this._getResizeColumns(index);
+		// No resizable columns on the left/right
+		if (!result) return false;
+		
 		this.setState({ resizing: index });
 		
 		let onResizeData = {};
 		const columns = this.props.columns.filter(col => !col.hidden);
 		for (let i = 0; i < columns.length; i++) {
-			let elem = this._resizingColumn.parentNode.children[i * 2];
-			onResizeData[columns[i].dataKey] = elem.getBoundingClientRect().width - CELL_PADDING;
+			let elem = event.target.parentNode.parentNode.children[i];
+			onResizeData[columns[i].dataKey] = elem.getBoundingClientRect().width;
 		}
 		this.props.onColumnResize(onResizeData);
 	}
 
 	_handleResizerDrag = (event) => {
-		event.stopImmediatePropagation();
-		const columns = this.props.columns;
-		const index = this.state.resizing;
-		const b = this._resizingColumn;
-		const a = b.previousSibling.previousSibling;
+		event.stopPropagation();
+		const result = this._getResizeColumns();
+		if (!result) return;
+		const [aColumn, bColumn] = result;
+		const a = document.querySelector(`#${this.props.id} .virtualized-table-header .cell.${aColumn.dataKey}`);
+		const b = document.querySelector(`#${this.props.id} .virtualized-table-header .cell.${bColumn.dataKey}`);
 		const aRect = a.getBoundingClientRect();
 		const bRect = b.getBoundingClientRect();
 		const offset = aRect.x;
 		const widthSum = aRect.width + bRect.width;
 		// Column min-width: 20px;
-		columns[index - 1].width = Math.min(widthSum - 20, Math.max(20, event.clientX - (RESIZER_WIDTH / 2) - offset));
-		columns[index].width = widthSum - columns[index - 1].width;
+		const aColumnWidth = Math.min(widthSum - 20, Math.max(20, event.clientX - (RESIZER_WIDTH / 2) - offset));
+		const bColumnWidth = widthSum - aColumnWidth;
 		let onResizeData = {};
-		onResizeData[columns[index - 1].dataKey] = columns[index - 1].width - CELL_PADDING;
-		onResizeData[columns[index].dataKey] = columns[index].width - CELL_PADDING;
+		onResizeData[aColumn.dataKey] = aColumnWidth;
+		onResizeData[bColumn.dataKey] = bColumnWidth;
 		this.props.onColumnResize(onResizeData);
 	}
+	
+	_getResizeColumns(index) {
+		index = typeof index != "undefined" ? index : this.state.resizing;
+		const columns = this.props.columns.filter(col => !col.hidden).sort((a, b) => a.ordinal - b.ordinal);
+		let aColumn = columns[index - 1];
+		let bColumn = columns[index];
+		if (aColumn.fixedWidth) {
+			for (let i = index - 2; i >= 0; i--) {
+				aColumn = columns[i];
+				if (!aColumn.fixedWidth) break;
+			}
+			if (aColumn.fixedWidth) {
+				// All previous columns are fixed width
+				return;
+			}
+		}
+		if (bColumn.fixedWidth) {
+			for (let i = index + 1; i < columns.length; i++) {
+				bColumn = columns[i];
+				if (!bColumn.fixedWidth) break;
+			}
+			if (bColumn.fixedWidth) {
+				// All following columns are fixed width
+				return;
+			}
+		}
+		return [aColumn, bColumn];
+	}
 
-	_handleResizerDragStop = () => {
-		this._resizingColumn = null;
+	_handleResizerDragStop = (event) => {
+		event.stopPropagation();
+		const result = this._getResizeColumns();
+		if (!result) return;
+		let resizeData = {};
+		for (const column of result) {
+			const elem = document.querySelector(`#${this.props.id} .virtualized-table-header .cell.${column.dataKey}`)
+			resizeData[column.dataKey] = elem.getBoundingClientRect().width;
+		}
+		this.props.onColumnResize(resizeData, true);
 		this.setState({ resizing: null });
+	}
+		
+	_handleColumnDragStart = (index, event) => {
+		if (!this.props.onColumnReorder || event.button !== 0) return false;
+		this.setState({ dragging: index });
+	}
+
+	_handleColumnDragStop = (event, cancelled) => {
+		if (!cancelled && typeof this.state.dragging == "number") {
+			const { index } = this._findColumnDragPosition(event.clientX);
+			// If inserting before the column that was being dragged
+			// there is nothing to do
+			if (this.state.dragging != index) {
+				const visibleColumns = this.props.columns.filter(col => !col.hidden);
+				const dragColumn = this.props.columns.findIndex(
+					col => col == visibleColumns[this.state.dragging]);
+				// Insert as final column (before end of list)
+				let insertBeforeColumn = this.props.columns.length;
+				// index == visibleColumns.length if dragged to the end of the view to be ordered
+				// as the final column
+				if (index < visibleColumns.length) {
+					insertBeforeColumn = this.props.columns.findIndex(col => col == visibleColumns[index]);
+				}
+				this.props.onColumnReorder(dragColumn, insertBeforeColumn);
+			}
+		}
+		this.setState({ dragging: null, dragX: null });
+	}
+
+	_handleColumnDrag = (event) => {
+		const { offsetX } = this._findColumnDragPosition(event.clientX);
+		this.isHeaderMouseUp = false;
+		this.setState({ dragX: offsetX });
+	}
+	
+	_handleHeaderMouseUp = (event, dataKey) => {
+		// Due to complicated reasons dragging (for column dragging and for resizing)
+		// is not handled via React events but via native ones attached on `document`
+		// Since React attaches its event handlers on `document` as well
+		// there is no way to prevent bubbling. Thus we have to do custom
+		// handling to prevent header resorting when "mouseup" event is issued
+		// after dragging actions
+		if (!this.isHeaderMouseUp || event.button !== 0) {
+			this.isHeaderMouseUp = true;
+			return;
+		}
+		this.props.onHeaderClick(
+			this.props.columns.findIndex(column => column.dataKey == dataKey));
+	}
+
+	_findColumnDragPosition(x) {
+		const headerRect = document.querySelector(`#${this.props.id} .virtualized-table-header`).getBoundingClientRect();
+		
+		let coords = Array.from(document.querySelectorAll(`#${this.props.id} .virtualized-table-header .resizer`))
+			.map((elem) => {
+				const rect = elem.getBoundingClientRect();
+				// accounting for resizer offset
+				return rect.x + rect.width/2;
+			});
+		// Adding leftmost position, since there's no left resizer
+		coords.splice(0, 0, headerRect.x);
+		// and the rightmost position for the same reason
+		coords.push(headerRect.x + headerRect.width);
+		
+		let index = 0;
+		let closestVal = Math.abs(coords[index] - x);
+		for (let i = 1; i < coords.length; i++) {
+			let distance = Math.abs(coords[i] - x);
+			if (distance < closestVal) {
+				closestVal = distance;
+				index = i;
+			}
+		}
+		return {index, offsetX: coords[index] - headerRect.x};
 	}
 
 	componentDidMount() {
@@ -332,7 +460,6 @@ class VirtualizedTable extends React.Component {
 		return {
 			itemCount: this.props.rowCount,
 			itemHeight: this.props.rowHeight,
-			height: this.props.height - this._topDiv.firstChild.clientHeight,
 			renderItem: this._renderItem,
 			targetElement: document.getElementById(this._jsWindowID),
 		};
@@ -345,41 +472,55 @@ class VirtualizedTable extends React.Component {
 	}
 
 	_renderHeaderCells = () => {
-		return this.props.columns.map((column, index) => {
+		return this.props.columns.filter(col => !col.hidden).map((column, index) => {
 			if (column.hidden) return;
 			let label = this.props.intl.formatMessage({ id: column.label });
-			let draggable = "";
-			if (index != 0) {
-				draggable = (<Draggable
-					onStart={this._handleResizerDragStart.bind(this, index)}
-					onDrag={this._handleResizerDrag}
-					onStop={this._handleResizerDragStop}
-					enableUserSelectHack={false}
-					key={label + '-resizer'}>
-					<div className="resizer"/>
-				</Draggable>);
+			if (column.iconLabel) {
+				label = column.iconLabel;
+			}
+			let resizer = (<Draggable
+				onDragStart={this._handleResizerDragStart.bind(this, index)}
+				onDrag={this._handleResizerDrag}
+				onDragStop={this._handleResizerDragStop}
+				className={`resizer ${column.dataKey}`}
+				key={column.label + '-resizer'}>
+				<div/>
+			</Draggable>);
+			if (index == 0) {
+				resizer = "";
 			}
 			let sortIndicator = "";
-			if (column.sortDirection) {
-				sortIndicator = <span className={"sort-indicator " + (column.sortDirection == 1 ? "ascending" : "descending")}/>;
+			if (!column.iconLabel && column.sortDirection) {
+				sortIndicator = <span className={"sort-indicator " + (column.sortDirection === 1 ? "ascending" : "descending")}/>;
 			}
-			return (<React.Fragment key={label + 'column'}>
-				{draggable}
-				<span
-					onClick={() => this.props.onHeaderClick(index)}
-					className={"cell " + column.className}
-					key={label}>
-					{label}
+			return (<Draggable
+				onDragStart={this._handleColumnDragStart.bind(this, index)}
+				onDrag={this._handleColumnDrag}
+				onDragStop={this._handleColumnDragStop}
+				className={cx("cell " + column.className, { dragging: this.state.dragging == index })}
+				delay={500}
+				key={column.label + '-draggable'}>
+				<div
+					key={column.label + ''}
+					onMouseUp={e => this._handleHeaderMouseUp(e, column.dataKey)}>
+					{resizer}
+					<span
+						key={column.label + '-label'}
+						label={label}
+						className={`label ${column.dataKey}`}>
+						{label}
+					</span>
 					{sortIndicator}
-				</span>
-			</React.Fragment>);
+				</div>
+			</Draggable>);
 		});
 	}
 		
 	render() {
 		let headerCells = this._renderHeaderCells();
-		if (this._jsWindow) {
-			(async () => this._jsWindow.update(this._getJSWindowOptions()))();
+		let dragMarker = "";
+		if (typeof this.state.dragX == 'number') {
+			dragMarker = <div className="column-drag-marker" style={{ left: this.state.dragX }} />;
 		}
 		let props = {
 			onKeyDown: this._onKeyDown,
@@ -398,18 +539,42 @@ class VirtualizedTable extends React.Component {
 					this._topDiv.focus();
 				}
 			},
-			tabIndex: -1
+			tabIndex: -1,
 		};
 		return (
 			<div {...props}>
-				<div className="virtualized-table-header">{headerCells}</div>
+				{dragMarker}
+				<div
+					className="virtualized-table-header"
+					onContextMenu={this.props.onColumnPickerMenu}>
+					{headerCells}
+				</div>
 				<div {...jsWindowProps} />
 			</div>
 		);
 	}
 	
+	updateTreebox() {
+		this._jsWindow.update(this._getJSWindowOptions());
+	}
+	
 	invalidate() {
-		return this._jsWindow.invalidate();
+		this._jsWindow.invalidate();
+		this.updateWidth();
+	}
+	
+	rerender() {
+		this._jsWindow.render();
+		this.updateWidth();
+	}
+	
+	updateWidth() {
+		const tree = document.querySelector(`#${this.props.id}`);
+		const header = document.querySelector(`#${this.props.id} .virtualized-table-header`);
+		const jsWindow = document.querySelector(`#${this._jsWindowID} .js-window`);
+		const scrollbarWidth = Math.max(2,
+			tree.getBoundingClientRect().width - jsWindow.getBoundingClientRect().width - 1);
+		header.style.width = `calc(100% - ${scrollbarWidth}px)`;
 	}
 	
 	invalidateRow(index) {

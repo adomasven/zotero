@@ -23,9 +23,7 @@
 	***** END LICENSE BLOCK *****
 */
 
-const memoize = require('memoize-one');
-
-const requiredOptions = ['height', 'itemCount', 'itemHeight', 'renderItem', 'targetElement'];
+const requiredOptions = ['itemCount', 'itemHeight', 'renderItem', 'targetElement'];
 
 module.exports = class {
 	constructor(options) {
@@ -37,7 +35,7 @@ module.exports = class {
 		
 		this.scrollDirection = 0;
 		this.scrollOffset = 0;
-		this.overscanCount = 1;
+		this.overscanCount = 6;
 		
 		Object.assign(this, options);
 		this._renderedRows = new Map();
@@ -104,21 +102,19 @@ module.exports = class {
 	
 	update(options = {}) {
 		Object.assign(this, options);
-		const { height, itemHeight, itemCount, targetElement, innerElem } = this;
+		const { itemHeight, itemCount, targetElement, innerElem } = this;
 		innerElem.style.cssText = `
 			position: relative;
 			height: ${itemHeight * itemCount}px;
 		`;
 
-		targetElement.style.cssText = `
-			height: ${height}px;
+		targetElement.style.cssText += `
 			max-width: 100%;
 			overflow: auto;
 		`;
 
 		this.scrollDirection = 0;
 		this.scrollOffset = targetElement.scrollTop;
-		this.invalidate();
 	}
 	
 	scrollTo(scrollOffset) {
@@ -128,8 +124,9 @@ module.exports = class {
 		this.render();
 	}
 
-	scrollToRow(index) {
-		const { itemCount, itemHeight, scrollOffset, height } = this;
+	scrollToItem(index) {
+		const { itemCount, itemHeight, scrollOffset, targetElement } = this;
+		const height = targetElement.getBoundingClientRect().height;
 
 		index = Math.max(0, Math.min(index, itemCount - 1));
 		let startPosition = this._getItemPosition(index);
@@ -143,11 +140,17 @@ module.exports = class {
 	}
 	
 	getFirstVisibleRow() {
-		return Math.floor(this.scrollOffset / this.itemHeight);
+		return Math.ceil(this.scrollOffset / this.itemHeight);
+	}
+	
+	getLastVisibleRow() {
+		const height = this.targetElement.getBoundingClientRect().height;
+		return Math.max(1, Math.floor((this.scrollOffset + height + 1) / this.itemHeight)) - 1;
 	}
 	
 	getPageLength() {
-		return Math.ceil(this.height / this.itemHeight);
+		const height = this.targetElement.getBoundingClientRect().height;
+		return Math.ceil(height / this.itemHeight);
 	}
 
 	_getItemPosition = (index) => {
@@ -155,7 +158,8 @@ module.exports = class {
 	};
 
 	_getRangeToRender() {
-		const { itemCount, itemHeight, height, overscanCount, scrollDirection, scrollOffset } = this;
+		const { itemCount, itemHeight, targetElement, overscanCount, scrollDirection, scrollOffset } = this;
+		const height = targetElement.getBoundingClientRect().height;
 
 		if (itemCount === 0) {
 			return [0, 0, 0, 0];

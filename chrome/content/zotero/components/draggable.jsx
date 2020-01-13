@@ -44,9 +44,10 @@ class Draggable extends PureComponent {
 		if (event.button !== 0) return;
 
 		if (this.props.onDragStart) {
-			if (this.props.onDragStart(event)) return;
+			if (this.props.onDragStart(event) === false) return;
 		}
 
+		this.dragstart = Date.now();
 		this.dragstate = DRAG.START;
 		this.drag.start();
 
@@ -59,9 +60,10 @@ class Draggable extends PureComponent {
 	}
 
 	handleDrag = (event) => {
+		if (this.props.delay && (Date.now() - this.dragstart) <= this.props.delay) return;
 		this.dragstate = DRAG.ACTIVE;
 		this.clear();
-		this.props.onDrag(event);
+		this.props.onDrag(event, this.dragstate);
 	}
 
 	handleDragStop = (event, hasBeenCancelled) => {
@@ -92,13 +94,10 @@ class Draggable extends PureComponent {
 	}
 
 	render() {
-		return (
-			<div
-				className={cx('draggable', this.props.className)}
-				onMouseDown={this.handleMouseDown}>
-				{this.props.children}
-			</div>
-		)
+		return React.cloneElement(React.Children.only(this.props.children), {
+			className: cx('draggable', this.props.className),
+			onMouseDown: this.handleMouseDown,
+		});
 	}
 
 	static propTypes = {

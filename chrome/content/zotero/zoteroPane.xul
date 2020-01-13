@@ -329,8 +329,8 @@
 				</splitter>
 				
 				<box id="zotero-layout-switcher" orient="horizontal" zotero-persist="orient" flex="1">
-					<vbox id="zotero-items-pane" zotero-persist="width height" flex="1">
-						<deck id="zotero-items-pane-content" selectedIndex="0" flex="1">
+					<hbox id="zotero-items-pane" zotero-persist="width height">
+						<!--<deck id="zotero-items-pane-content" selectedIndex="0" flex="1">-->
 
 							<html:div id="zotero-items-tree"/>
 							<!-- Key navigation is handled by listener in itemTreeView.js -->
@@ -536,12 +536,12 @@
 
 							<!-- Label for displaying messages when items pane is hidden
 							 (e.g. "Advanced search mode — press Enter to search.")-->
-							<vbox id="zotero-items-pane-message-box" pack="center" align="center"
-								ondragenter="return ZoteroPane.itemsView.onDragEnter(event)"
-								ondragover="return ZoteroPane.itemsView.onDragOver(event)"
-								ondrop="ZoteroPane.itemsView.onDrop(event); ZoteroPane.itemsView.drop(-1, -1, event.dataTransfer)"/>
-						</deck>
-					</vbox>
+							<!--<vbox id="zotero-items-pane-message-box" pack="center" align="center"-->
+								<!--ondragenter="return ZoteroPane.itemsView.onDragEnter(event)"-->
+								<!--ondragover="return ZoteroPane.itemsView.onDragOver(event)"-->
+								<!--ondrop="ZoteroPane.itemsView.onDrop(event); ZoteroPane.itemsView.drop(-1, -1, event.dataTransfer)"/>-->
+						<!--</deck>-->
+					</hbox>
 
 					<splitter id="zotero-items-splitter" resizebefore="closest" resizeafter="closest" collapse="after" orient="horizontal" zotero-persist="state orient"
 						onmousemove="ZoteroPane.updateToolbarPosition(); ZoteroPane.updateTagsBoxSize()"

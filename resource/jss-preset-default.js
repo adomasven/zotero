@@ -1,1 +1,0 @@
-../node_modules/jss-preset-default/dist/jss-preset-default.js

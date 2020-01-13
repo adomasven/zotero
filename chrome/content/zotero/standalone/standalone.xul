@@ -396,5 +396,4 @@
 
 	<menupopup id="tag-menu"/>
 	<menupopup id="tag-selector-view-settings-menu"/>
-	<menupopup id="item-tree-column-picker"/>
 </window>
