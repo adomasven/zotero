@@ -112,6 +112,10 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		Zotero.debug("React CollectionTree loaded");
 	}
 	
+	componentDidMount() {
+		this.selection.select(0);
+	}
+	
 	componentDidUpdate() {
 		this.runListeners('refresh');
 		// We cannot have controlled input nodes, so we initialize
@@ -660,11 +664,6 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		
 		if (!this._rowMap) {
 			Zotero.debug("Row map didn't exist in collectionTree.notify()");
-			return;
-		}
-		
-		if (!ZoteroPane.isShowing()) {
-			Zotero.debug("ZoteroPane is hidden in collectionTree.notify()");
 			return;
 		}
 		
@@ -2138,7 +2137,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	}
 	
 	getIcon(treeRow) {
-		var collectionType = treeRow.type;
+		var collectionType = treeRow.type
 		
 		if (collectionType == 'group') {
 			collectionType = 'Library';
@@ -2176,10 +2175,12 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 				break;
 			
 			case 'publications':
-				iconClsName = Icons.IconTreeitemJournalArticle;
+				iconClsName = "IconTreeitemJournalArticle";
+				break;
 
 			case 'retracted':
-				iconClsName = Icons.IconCross;
+				iconClsName = "IconCross";
+				break;
 		}
 		
 		collectionType = Zotero.Utilities.capitalize(collectionType);

@@ -10,27 +10,28 @@
   position: relative;
 }
 
-.spacer-arrow {
+.spacer-arrow, .spacer-twisty {
+  display: inline-block;
   min-width: 8px;
 }
 
-.arrow {
+.arrow, .twisty {
   margin-right: 0 !important;
+  
+  svg {
+    fill: #444;
+    transition: transform 0.125s ease;
+    transform: rotate(-90deg);
+    margin-top: -3px;
+  }
+
+  &.open svg {
+    transform: rotate(0deg);
+  }
 }
 
-.arrow svg {
-  fill: #444;
-  transition: transform 0.125s ease;
-  transform: rotate(-90deg);
-  margin-top: -3px;
-}
-
-html[dir="rtl"] .arrow svg,
-.arrow svg:dir(rtl),
-.arrow svg:-moz-locale-dir(rtl) {
-  transform: rotate(90deg);
-}
-
-.arrow.open svg {
-  transform: rotate(0deg);
+html[dir="rtl"] .arrow, html[dir="rtl"] .twisty {
+  svg, svg:dir(rtl), svg:-moz-locale-dir(rtl) {
+    transform: rotate(90deg);
+  }
 }

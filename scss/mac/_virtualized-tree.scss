@@ -1,16 +1,16 @@
-.arrow {
+.arrow, .twisty {
   width: 19px;
+  
+  svg {
+    fill: #888;
+    width: 16px;
+  }
 }
 
-.arrow svg {
-  fill: #888;
-  width: 16px;
-}
-
-.focused:not(.highlighted) .arrow svg {
+.focused:not(.highlighted) .arrow svg, .focused:not(.highlighted) .twisty svg {
   fill: #fff;
 }
 
-.spacer-arrow {
+.spacer-arrow, .spacer-twisty {
   min-width: 19px;
 }

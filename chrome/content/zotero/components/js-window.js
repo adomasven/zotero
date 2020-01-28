@@ -23,7 +23,7 @@
 	***** END LICENSE BLOCK *****
 */
 
-const requiredOptions = ['itemCount', 'itemHeight', 'renderItem', 'targetElement'];
+const requiredOptions = ['getItemCount', 'itemHeight', 'renderItem', 'targetElement'];
 
 module.exports = class {
 	constructor(options) {
@@ -36,6 +36,7 @@ module.exports = class {
 		this.scrollDirection = 0;
 		this.scrollOffset = 0;
 		this.overscanCount = 6;
+		this._lastItemCount = null;
 		
 		Object.assign(this, options);
 		this._renderedRows = new Map();
@@ -76,9 +77,9 @@ module.exports = class {
 	render() {
 		const {
 			renderItem,
-			itemCount,
 			innerElem,
 		} = this;
+		const itemCount = this._getItemCount();
 
 		const [startIndex, stopIndex] = this._getRangeToRender();
 
@@ -102,7 +103,8 @@ module.exports = class {
 	
 	update(options = {}) {
 		Object.assign(this, options);
-		const { itemHeight, itemCount, targetElement, innerElem } = this;
+		const { itemHeight, targetElement, innerElem } = this;
+		const itemCount = this._getItemCount();
 		innerElem.style.cssText = `
 			position: relative;
 			height: ${itemHeight * itemCount}px;
@@ -125,7 +127,8 @@ module.exports = class {
 	}
 
 	scrollToItem(index) {
-		const { itemCount, itemHeight, scrollOffset, targetElement } = this;
+		const { itemHeight, scrollOffset, targetElement } = this;
+		const itemCount = this._getItemCount();
 		const height = targetElement.getBoundingClientRect().height;
 
 		index = Math.max(0, Math.min(index, itemCount - 1));
@@ -158,7 +161,8 @@ module.exports = class {
 	};
 
 	_getRangeToRender() {
-		const { itemCount, itemHeight, targetElement, overscanCount, scrollDirection, scrollOffset } = this;
+		const { itemHeight, targetElement, overscanCount, scrollDirection, scrollOffset } = this;
+		const itemCount = this._getItemCount();
 		const height = targetElement.getBoundingClientRect().height;
 
 		if (itemCount === 0) {
@@ -185,6 +189,16 @@ module.exports = class {
 			startIndex,
 			stopIndex,
 		];
+	}
+	
+	_getItemCount() {
+		const itemCount = this.getItemCount();
+		if (this._lastItemCount != itemCount) {
+			this._lastItemCount = itemCount;
+			this.update();
+			this.invalidate();
+		}
+		return this._lastItemCount;
 	}
 	
 	_handleScroll = (event) => {

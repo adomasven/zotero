@@ -145,7 +145,7 @@ var ZoteroPane = new function()
 		Zotero.hiDPISuffix = Zotero.hiDPI ? "@2x" : "";
 
 		ZoteroPane.initCollectionsTree();
-		ZoteroPane.initItemsTree();
+		await ZoteroPane.initItemsTree();
 		
 		// Add a default progress window
 		ZoteroPane.progressWindow = new Zotero.ProgressWindow({ window });
@@ -579,82 +579,18 @@ var ZoteroPane = new function()
 	
 	
 	function handleKeyPress(event) {
-		var from = event.originalTarget.id;
-		
-		// Ignore keystrokes if Zotero pane is closed
-		var zoteroPane = document.getElementById('zotero-pane-stack');
-		if (zoteroPane.getAttribute('hidden') == 'true' ||
-				zoteroPane.getAttribute('collapsed') == 'true') {
-			return;
-		}
-		
 		if (Zotero.locked) {
 			event.preventDefault();
 			return;
 		}
 		
 		var command = Zotero.Keys.getCommand(event.key);
-		
-		if (from == 'zotero-collections-tree') {
-			if ((event.keyCode == event.DOM_VK_BACK_SPACE && Zotero.isMac) ||
-					event.keyCode == event.DOM_VK_DELETE) {
-				var deleteItems = event.metaKey || (!Zotero.isMac && event.shiftKey);
-				ZoteroPane_Local.deleteSelectedCollection(deleteItems);
-				event.preventDefault();
-				return;
-			}
-		}
-		else if (from == 'zotero-items-tree') {
-			// Focus TinyMCE explicitly on tab key, since the normal focusing doesn't work right
-			if (!event.shiftKey && event.keyCode == event.DOM_VK_TAB) {
-				var deck = document.getElementById('zotero-item-pane-content');
-				if (deck.selectedPanel.id == 'zotero-view-note') {
-					document.getElementById('zotero-note-editor').focus();
-					event.preventDefault();
-					return;
-				}
-			}
-			else if ((event.keyCode == event.DOM_VK_BACK_SPACE && Zotero.isMac) ||
-					event.keyCode == event.DOM_VK_DELETE) {
-				// If Cmd/Shift delete, use forced mode, which does different
-				// things depending on the context
-				var force = event.metaKey || (!Zotero.isMac && event.shiftKey);
-				ZoteroPane_Local.deleteSelectedItems(force);
-				event.preventDefault();
-				return;
-			}
-			else if (event.keyCode == event.DOM_VK_RETURN) {
-				var items = this.itemsView.getSelectedItems();
-				// Don't do anything if more than 20 items selected
-				if (!items.length || items.length > 20) {
-					return;
-				}
-				ZoteroPane_Local.viewItems(items, event);
-				// These don't seem to do anything. Instead we override
-				// the tree binding's _handleEnter method in itemTreeView.js.
-				//event.preventDefault();
-				//event.stopPropagation();
-				return;
-			}
-			else if (command == 'toggleRead') {
-				// Toggle read/unread
-				let row = this.collectionsView.getRow(this.collectionsView.selection.currentIndex);
-				if (!row || !row.isFeed()) return;
-				this.toggleSelectedItemsRead();
-				if (itemReadPromise) {
-					itemReadPromise.cancel();
-					itemReadPromise = null;
-				}
-				return;
-			}
-		}
-		
-		// Ignore modifiers other than Ctrl-Shift/Cmd-Shift
-		if (!((Zotero.isMac ? event.metaKey : event.ctrlKey) && event.shiftKey)) {
+		if (!command) {
 			return;
 		}
-		
-		if (!command) {
+
+		// Ignore modifiers other than Ctrl-Shift/Cmd-Shift
+		if (!((Zotero.isMac ? event.metaKey : event.ctrlKey) && event.shiftKey)) {
 			return;
 		}
 		
@@ -734,6 +670,16 @@ var ZoteroPane = new function()
 						this.markFeedRead();
 					}
 					break;
+				case 'toggleRead':
+					// Toggle read/unread
+					let row = this.getCollectionTreeRow();
+					if (!row || !row.isFeed()) return;
+					this.toggleSelectedItemsRead();
+					if (itemReadPromise) {
+						itemReadPromise.cancel();
+						itemReadPromise = null;
+					}
+					break;
 				
 				// Handled by <key>s in standalone.js, pointing to <command>s in zoteroPane.xul,
 				// which are enabled or disabled by this.updateQuickCopyCommands(), called by
@@ -743,7 +689,7 @@ var ZoteroPane = new function()
 					return;
 				
 				default:
-					throw ('Command "' + command + '" not found in ZoteroPane_Local.handleKeyDown()');
+					throw new Error('Command "' + command + '" not found in ZoteroPane_Local.handleKeyPress()');
 			}
 		}
 		catch (e) {
@@ -969,9 +915,9 @@ var ZoteroPane = new function()
 		window.openDialog('chrome://zotero/content/advancedSearch.xul', '', 'chrome,dialog=no,centerscreen', io);
 	};
 
-	this.initItemsTree = function () {
+	this.initItemsTree = async function () {
 		var itemsTree = document.getElementById('zotero-items-tree');
-		ZoteroPane.itemsView = Zotero.ItemTree.init(itemsTree);
+		ZoteroPane.itemsView = await Zotero.ItemTree.init(itemsTree);
 		ZoteroPane.itemsView.onRefresh.addListener(() => ZoteroPane.setTagScope());
 		ZoteroPane.itemsView.onLoad.addListener(() => Zotero.uiIsReady());
 	}
@@ -1661,14 +1607,9 @@ var ZoteroPane = new function()
 		}
 		// Do nothing in trash view if any non-deleted items are selected
 		else if (collectionTreeRow.isTrash()) {
-			var start = {};
-			var end = {};
-			for (var i=0, len=this.itemsView.selection.getRangeCount(); i<len; i++) {
-				this.itemsView.selection.getRangeAt(i, start, end);
-				for (var j=start.value; j<=end.value; j++) {
-					if (!this.itemsView.getRow(j).ref.deleted) {
-						return;
-					}
+			for (const index of this.itemsView.selection.selected) {
+				if (!this.itemsView.getRow(index).ref.deleted) {
+					return;
 				}
 			}
 			var prompt = toDelete;
@@ -4175,6 +4116,21 @@ var ZoteroPane = new function()
 			Zotero.getString("general.error"),
 			Zotero.getString("file.error.cannotAddShortcut") + (path ? "\n\n" + path : "")
 		);
+	}
+	
+	
+	this.focusElement = function (element) {
+		switch (element) {
+			case 'note-editor':
+				let deck = document.getElementById('zotero-item-pane-content');
+				if (deck.selectedPanel.id == 'zotero-view-note') {
+					document.getElementById('zotero-note-editor').focus();
+				}
+				break;
+			default:
+				Zotero.debug(`ZoteroPane.focusElement: invalid element ${element}`);
+				break;
+		}
 	}
 	
 	

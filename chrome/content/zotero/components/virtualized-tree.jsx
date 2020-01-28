@@ -37,24 +37,27 @@ class TreeSelection {
 		Object.assign(this, {
 			pivot: 0,
 			_focused: 0,
-			selected: new Set([0]),
+			selected: new Set([]),
 			_selectEventsSuppressed: false
 		});
 	}
 	
 	isSelected(index) {
+		index = Math.max(0, index);
 		return this.selected.has(index);
 	}
 	
 	toggleSelect(index) {
-		if (this.selectEventsSuppressed) return;
-		
+		index = Math.max(0, index);
 		if (this.selected.has(index)) {
 			this.selected.delete(index);
 		}
 		else {
 			this.selected.add(index);
 		}
+		
+		if (this.selectEventsSuppressed) return;
+		
 		if (this._tree.invalidate) {
 			this._tree.invalidateRow(index);
 		}
@@ -64,8 +67,6 @@ class TreeSelection {
 	}
 	
 	clearSelection() {
-		if (this.selectEventsSuppressed) return;
-
 		this.selected = new Set();
 		if (this._tree.invalidate) {
 			this._tree.invalidate();
@@ -73,13 +74,19 @@ class TreeSelection {
 	}
 
 	select(index) {
-		if (this.selectEventsSuppressed) return;
+		index = Math.max(0, index);
+		if (this.selected.size == 1 && this._focused == index && this.pivot == index) {
+			return;
+		}
 
 		let toInvalidate = Array.from(this.selected);
 		toInvalidate.push(index);
 		this.selected = new Set([index]);
 		this._focused = index;
 		this.pivot = index;
+		
+		if (this.selectEventsSuppressed) return;
+		
 		this._tree.scrollToRow(index);
 		this._updateTree();
 		if (this._tree.invalidate) {
@@ -88,6 +95,8 @@ class TreeSelection {
 	}
 	
 	_rangedSelect(from, to, augment) {
+		from = Math.max(0, from);
+		to = Math.max(0, to);
 		if (!augment) {
 			this.clearSelection();
 		}
@@ -97,9 +106,10 @@ class TreeSelection {
 	}
 	
 	rangedSelect(from, to, augment) {
+		this._rangedSelect(from, to, augment);
+		
 		if (this.selectEventsSuppressed) return;
 
-		this._rangedSelect(from, to, augment);
 		if (this._tree.invalidate) {
 			if (augment) {
 				this._tree.invalidateRange(from, to);
@@ -112,12 +122,14 @@ class TreeSelection {
 	}
 	
 	shiftSelect(index) {
-		if (this.selectEventsSuppressed) return;
-
+		index = Math.max(0, index);
 		let from = Math.min(index, this.pivot);
 		let to = Math.max(index, this.pivot);
 		this._focused = index;
 		this._rangedSelect(from, to);
+		
+		if (this.selectEventsSuppressed) return;
+
 		if (this._tree.invalidate) {
 			this._tree.invalidateRange(from, to);
 		}
@@ -138,15 +150,17 @@ class TreeSelection {
 		return this._focused;
 	}
 	
-	set focused(value) {
-		if (this.selectEventsSuppressed) return;
-
+	set focused(index) {
+		index = Math.max(0, index);
 		let oldValue = this._focused;
-		this._focused = value;
+		this._focused = index;
+		
+		if (this.selectEventsSuppressed) return;
+		
 		this._updateTree();
 		if (this._tree.invalidate) {
 			this._tree.invalidateRow(oldValue);
-			this._tree.invalidateRow(value);
+			this._tree.invalidateRow(index);
 		}
 	}
 	

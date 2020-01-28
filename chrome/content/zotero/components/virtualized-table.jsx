@@ -43,7 +43,13 @@ class VirtualizedTable extends React.Component {
 		this._jsWindowID = `virtualized-table-list-${Zotero.Utilities.randomString(5)}`;
 			
 		this.selection = new TreeSelection(this);
-		
+
+		// Due to complicated reasons dragging (for column dragging and for resizing)
+		// is not handled via React events but via native ones attached on `document`
+		// Since React attaches its event handlers on `document` as well
+		// there is no way to prevent bubbling. Thus we have to do custom
+		// handling to prevent header resorting when "mouseup" event is issued
+		// after dragging actions
 		this.isHeaderMouseUp = true;
 		
 		this.onSelection = Zotero.Utilities.debounce(this._onSelection, 20);
@@ -217,7 +223,7 @@ class VirtualizedTable extends React.Component {
 			break;
 
 		case "Enter":
-			this._activateNode();
+			this._activateNode(e);
 			break;
 		}
 	}
@@ -228,9 +234,9 @@ class VirtualizedTable extends React.Component {
 		this.onSelection(index, shiftSelect, toggleSelection);
 	}
 
-	_activateNode = () => {
+	_activateNode = (event, indices) => {
 		if (this.props.onActivate) {
-			this.props.onActivate(this.selection.focused);
+			this.props.onActivate(event, indices || Array.from(this.selection.selected));
 		}
 	}
 
@@ -409,12 +415,6 @@ class VirtualizedTable extends React.Component {
 	}
 	
 	_handleHeaderMouseUp = (event, dataKey) => {
-		// Due to complicated reasons dragging (for column dragging and for resizing)
-		// is not handled via React events but via native ones attached on `document`
-		// Since React attaches its event handlers on `document` as well
-		// there is no way to prevent bubbling. Thus we have to do custom
-		// handling to prevent header resorting when "mouseup" event is issued
-		// after dragging actions
 		if (!this.isHeaderMouseUp || event.button !== 0) {
 			this.isHeaderMouseUp = true;
 			return;
@@ -458,7 +458,7 @@ class VirtualizedTable extends React.Component {
 	
 	_getJSWindowOptions() {
 		return {
-			itemCount: this.props.rowCount,
+			getItemCount: this.props.getRowCount,
 			itemHeight: this.props.rowHeight,
 			renderItem: this._renderItem,
 			targetElement: document.getElementById(this._jsWindowID),
@@ -468,6 +468,7 @@ class VirtualizedTable extends React.Component {
 	_renderItem = (index) => {
 		let node = this.props.renderItem(index, this.selection);
 		node.addEventListener('mousedown', e => this._onMouseDown(e, index), { passive: true });
+		node.addEventListener('dblclick', e => this._activateNode(e, [index]), { passive: true });
 		return node;
 	}
 
@@ -555,36 +556,50 @@ class VirtualizedTable extends React.Component {
 	}
 	
 	updateTreebox() {
+		if (!this._jsWindow) return;
 		this._jsWindow.update(this._getJSWindowOptions());
 	}
 	
 	invalidate() {
+		if (!this._jsWindow) return;
 		this._jsWindow.invalidate();
 		this.updateWidth();
 	}
 	
 	rerender() {
+		if (!this._jsWindow) return;
 		this._jsWindow.render();
 		this.updateWidth();
 	}
 	
 	updateWidth() {
+		const jsWindow = document.querySelector(`#${this._jsWindowID} .js-window`);
+		if (!jsWindow) return;
 		const tree = document.querySelector(`#${this.props.id}`);
 		const header = document.querySelector(`#${this.props.id} .virtualized-table-header`);
-		const jsWindow = document.querySelector(`#${this._jsWindowID} .js-window`);
-		const scrollbarWidth = Math.max(2,
-			tree.getBoundingClientRect().width - jsWindow.getBoundingClientRect().width - 1);
+		const scrollbarWidth = Math.max(0,
+			tree.getBoundingClientRect().width - jsWindow.getBoundingClientRect().width - 4);
 		header.style.width = `calc(100% - ${scrollbarWidth}px)`;
 	}
 	
 	invalidateRow(index) {
+		if (!this._jsWindow) return;
 		this._jsWindow.rerenderItem(index);
 	}
 	
 	invalidateRange(startIndex, endIndex) {
+		if (!this._jsWindow) return;
 		for (; startIndex <= endIndex; startIndex++) {
 			this._jsWindow.rerenderItem(startIndex);
 		}
+	}
+
+	/**
+	 * When performing custom event handling on rendered rows this allows to ensure that the
+	 * focus returns to the virtualized table for kb selection and other event handling
+	 */
+	focus() {
+		setTimeout(() => this._topDiv.focus());
 	}
 }
 
