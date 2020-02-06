@@ -134,7 +134,8 @@ class VirtualizedTable extends React.Component {
 		const height = document.getElementById(this._jsWindowID).clientHeight;
 		const numRows = Math.floor(height / this.props.rowHeight);
 		let destination = this.selection.focused + (direction * numRows);
-		destination = Math.min(destination, this.props.rowCount - 1);
+		const rowCount = this.props.getRowCount();
+		destination = Math.min(destination, rowCount - 1);
 		destination = Math.max(0, destination);
 		this.onSelection(destination, selectTo);
 	}
@@ -151,8 +152,9 @@ class VirtualizedTable extends React.Component {
 
 		if (e.altKey) return;
 		
-		let shiftSelect = e.shiftKey;
-		let movePivot = e.ctrlKey || e.metaKey;
+		const shiftSelect = e.shiftKey;
+		const movePivot = e.ctrlKey || e.metaKey;
+		const rowCount = this.props.getRowCount();
 
 		switch (e.key) {
 		case "ArrowUp":
@@ -166,10 +168,10 @@ class VirtualizedTable extends React.Component {
 
 		case "ArrowDown":
 			let nextSelect = this.selection.focused + 1;
-			while (nextSelect < this.props.rowCount && !this.props.isSelectable(nextSelect)) {
+			while (nextSelect < rowCount && !this.props.isSelectable(nextSelect)) {
 				nextSelect++;
 			}
-			nextSelect = Math.min(nextSelect, this.props.rowCount - 1);
+			nextSelect = Math.min(nextSelect, rowCount - 1);
 			this.onSelection(nextSelect, shiftSelect, false, movePivot);
 			break;
 
@@ -178,7 +180,7 @@ class VirtualizedTable extends React.Component {
 			break;
 
 		case "End":
-			this.onSelection(this.props.rowCount - 1, shiftSelect, false, movePivot);
+			this.onSelection(rowCount - 1, shiftSelect, false, movePivot);
 			break;
 			
 		case "PageUp":
@@ -187,6 +189,11 @@ class VirtualizedTable extends React.Component {
 			
 		case "PageDown":
 			this._onJumpSelect(1, shiftSelect);
+			break;
+
+		case "a":
+			// i.e. if CTRL/CMD pressed down
+			if (movePivot) this.selection.rangedSelect(0, this.props.getRowCount()-1);
 			break;
 			
 		case " ":
@@ -199,7 +206,7 @@ class VirtualizedTable extends React.Component {
 		
 		switch (e.key) {
 		case "ArrowLeft":
-			let parentIndex = this.props.getParentIndex(this.selection.focused);
+			const parentIndex = this.props.getParentIndex(this.selection.focused);
 			if (this.props.isContainer(this.selection.focused)
 					&& !this.props.isContainerEmpty(this.selection.focused)
 					&& this.props.isContainerOpen(this.selection.focused)) {

@@ -28,8 +28,47 @@
     height: 13px;
   }
   
-  .cell.title .icon:not(.twisty) {
-    margin-right: 6px;
+  .cell.primary {
+    display: flex;
+    align-items: center;
+    
+    :not(.cell-text) {
+      flex-shrink: 0
+    }
+    
+    .cell-text {
+      flex-shrink: 1;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      margin-left: 6px;
+    }
+    
+    .retracted {
+      width: 12px;
+      margin-left: 3px;
+    }
+    
+    .tag-swatch {
+      display: inline-block;
+      min-width: 8px;
+      min-height: 8px;
+      margin-left: 3px;
+      border-radius: 2px;
+    }
+    
+    .cell-icon {
+      min-width: 16px;
+    }
+    
+    @media(min-resolution: 1.25dppx) {
+      .tag-swatch {
+        min-width: 16px;
+        min-height: 16px;
+      }
+      .retracted, .tag-swatch {
+        margin-left: 6px;
+      }
+    }
   }
   
   .cell.hasAttachment {

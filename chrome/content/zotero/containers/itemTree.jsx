@@ -39,6 +39,7 @@ const cx = require('classnames');
 const MARGIN_LEFT = 6;
 const TYPING_TIMEOUT = 1000;
 const CHILD_INDENT = 20;
+const COLORED_TAGS_RE = new RegExp("^[0-" + Zotero.Tags.MAX_COLORED_TAGS + "]{1}$");
 
 function makeItemRenderer(itemTree) {
 	function onTwistyMouseDown(event, index) {
@@ -48,11 +49,11 @@ function makeItemRenderer(itemTree) {
 	}
 
 	function renderPrimaryCell(index, label, column) {
-		const span = renderCell(index, label, column);
+		let span = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+		span.className = `cell ${column.className}`;
 		span.classList.add('primary');
 		
-		// Add twisty & icon
-		const icon = itemTree._getIcon(index);
+		// Add twisty, icon, tag swatches and retraction indicator
 		let twisty;
 		if (itemTree.isContainerEmpty(index)) {
 			twisty = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
@@ -67,7 +68,24 @@ function makeItemRenderer(itemTree) {
 			twisty.addEventListener('mousedown', event => onTwistyMouseDown(event, index),
 				{ passive: true });
 		}
-		span.prepend(twisty, icon);
+		
+		const icon = itemTree._getIcon(index);
+		icon.classList.add('cell-icon');
+		
+		const item = itemTree.getRow(index).ref;
+		let retracted = "";
+		if (Zotero.Retractions.isRetracted(item)) {
+			retracted = getDOMIcon('IconCross');
+			retracted.classList.add("retracted");
+		}
+		
+		let tags = item.getTagColors().map(color => itemTree._getTagSwatch(color));
+
+		let textSpan = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+		textSpan.className = "cell-text";
+		textSpan.innerText = label;
+
+		span.append(twisty, icon, retracted, ...tags, textSpan);
 
 		// Set depth indent
 		const depth = itemTree.getLevel(index);
@@ -131,7 +149,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		
 		this.domEl = props.domEl;
 		this.collectionTreeRow = props.collectionTreeRow;
-		this.collapseAll = true;
 		
 		this._typingString = "";
 		this._skipKeypress = false;
@@ -177,211 +194,27 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		// TODO:
 		ZoteroPane.displayErrorMessage();
 	}
+	
+	componentDidMount() {
+		this._initialized = true;
+		this.runListeners('load');
+	}
 
 	waitForSelect() {
 		return this._waitForEvent('select');
 	}
+
+	waitForLoad() {
+		return this._waitForEvent('load');
+	}
 	
 	async makeVisible() {
-		try {
-			// if (this._treebox) {
-			// 	if (this._needsSort) {
-			// 		await this.sort();
-			// 	}
-			// 	return;
-			// }
-			
-			var start = Date.now();
-			
-			Zotero.debug("Setting tree for " + this.collectionTreeRow.id + " items view " + this.id);
-			
-			// if (!treebox) {
-			// 	Zotero.debug("Treebox not passed in setTree()", 2);
-			// 	return;
-			// }
-			// this._treebox = treebox;
-			
-			// if (!this._ownerDocument) {
-			// 	try {
-			// 		this._ownerDocument = treebox.treeBody.ownerDocument;
-			// 	}
-			// 	catch (e) {}
-			//	
-			// 	if (!this._ownerDocument) {
-			// 		Zotero.debug("No owner document in setTree()", 2);
-			// 		return;
-			// 	}
-			// }
-			
-			// this.setSortColumn();
-			
-			// if (this.window.ZoteroPane) {
-			// 	this.window.ZoteroPane.setItemsPaneMessage(Zotero.getString('pane.items.loading'));
-			// }
-			
-			// if (Zotero.locked) {
-			// 	Zotero.debug("Zotero is locked -- not loading items tree", 2);
-			//	
-			// 	if (this.window.ZoteroPane) {
-			// 		this.window.ZoteroPane.clearItemsPaneMessage();
-			// 	}
-			// 	return;
-			// }
-			
-			// Don't expand to show search matches in My Publications
-			var skipExpandMatchParents = this.collectionTreeRow.isPublications();
-			
-			// await this.refresh(skipExpandMatchParents);
-			// if (!this._treebox.treeBody) {
-			// 	return;
-			// }
-			
-			// Expand all parent items in the view, regardless of search matches. We do this here instead
-			// of refresh so that it doesn't get reverted after item changes.
-			// if (this.expandAll) {
-			// 	var t = new Date();
-			// 	for (let i = 0; i < this._rows.length; i++) {
-			// 		if (this.isContainer(i) && !this.isContainerOpen(i)) {
-			// 			this.toggleOpenState(i, true);
-			// 		}
-			// 	}
-			// 	Zotero.debug(`Opened all parent items in ${new Date() - t} ms`);
-			// }
-			// this._refreshItemRowMap();
-			
-			// Add a keypress listener for expand/collapse
-			// var tree = this._getTreeElement();
-			// var self = this;
-			// var coloredTagsRE = new RegExp("^[1-" + Zotero.Tags.MAX_COLORED_TAGS + "]{1}$");
-			// var listener = function(event) {
-			// 	if (self._skipKeyPress) {
-			// 		self._skipKeyPress = false;
-			// 		return;
-			// 	}
-			//	
-			// 	// Handle arrow keys specially on multiple selection, since
-			// 	// otherwise the tree just applies it to the last-selected row
-			// 	if (event.keyCode == event.DOM_VK_RIGHT || event.keyCode == event.DOM_VK_LEFT) {
-			// 		if (self._treebox.view.selection.count > 1) {
-			// 			switch (event.keyCode) {
-			// 				case event.DOM_VK_RIGHT:
-			// 					self.expandSelectedRows();
-			// 					break;
-			//					
-			// 				case event.DOM_VK_LEFT:
-			// 					self.collapseSelectedRows();
-			// 					break;
-			// 			}
-			//			
-			// 			event.preventDefault();
-			// 		}
-			// 		return;
-			// 	}
-			//	
-			// 	var key = String.fromCharCode(event.which);
-			// 	if (key == '+' && !(event.ctrlKey || event.altKey || event.metaKey)) {
-			// 		self.expandAllRows();
-			// 		event.preventDefault();
-			// 		return;
-			// 	}
-			// 	else if (key == '-' && !(event.shiftKey || event.ctrlKey || event.altKey || event.metaKey)) {
-			// 		self.collapseAllRows();
-			// 		event.preventDefault();
-			// 		return;
-			// 	}
-			//	
-			// 	// Ignore other non-character keypresses
-			// 	if (!event.charCode || event.shiftKey || event.ctrlKey ||
-			// 			event.altKey || event.metaKey) {
-			// 		return;
-			// 	}
-			//	
-			// 	event.preventDefault();
-			// 	event.stopPropagation();
-			//	
-			// 	Zotero.spawn(function* () {
-			// 		if (coloredTagsRE.test(key)) {
-			// 			let libraryID = self.collectionTreeRow.ref.libraryID;
-			// 			let position = parseInt(key) - 1;
-			// 			let colorData = Zotero.Tags.getColorByPosition(libraryID, position);
-			// 			// If a color isn't assigned to this number or any
-			// 			// other numbers, allow key navigation
-			// 			if (!colorData) {
-			// 				return !Zotero.Tags.getColors(libraryID).size;
-			// 			}
-			//			
-			// 			var items = self.getSelectedItems();
-			// 			yield Zotero.Tags.toggleItemsListTags(libraryID, items, colorData.name);
-			// 			return;
-			// 		}
-			//		
-			// 		// We have to disable key navigation on the tree in order to
-			// 		// keep it from acting on the 1-9 keys used for colored tags.
-			// 		// To allow navigation with other keys, we temporarily enable
-			// 		// key navigation and recreate the keyboard event. Since
-			// 		// that will trigger this listener again, we set a flag to
-			// 		// ignore the event, and then clear the flag above when the
-			// 		// event comes in. I see no way this could go wrong...
-			// 		tree.disableKeyNavigation = false;
-			// 		self._skipKeyPress = true;
-			// 		var nsIDWU = Components.interfaces.nsIDOMWindowUtils;
-			// 		var domWindowUtils = event.originalTarget.ownerDocument.defaultView
-			// 			.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
-			// 			.getInterface(nsIDWU);
-			// 		var modifiers = 0;
-			// 		if (event.altKey) {
-			// 			modifiers |= nsIDWU.MODIFIER_ALT;
-			// 		}
-			// 		if (event.ctrlKey) {
-			// 			modifiers |= nsIDWU.MODIFIER_CONTROL;
-			// 		}
-			// 		if (event.shiftKey) {
-			// 			modifiers |= nsIDWU.MODIFIER_SHIFT;
-			// 		}
-			// 		if (event.metaKey) {
-			// 			modifiers |= nsIDWU.MODIFIER_META;
-			// 		}
-			// 		domWindowUtils.sendKeyEvent(
-			// 			'keypress',
-			// 			event.keyCode,
-			// 			event.charCode,
-			// 			modifiers
-			// 		);
-			// 		tree.disableKeyNavigation = true;
-			// 	})
-			// 	.catch(function (e) {
-			// 		Zotero.logError(e);
-			// 	})
-			// }.bind(this);
-			// // Store listener so we can call removeEventListener() in ItemTreeView.unregister()
-			// this.listener = listener;
-			// tree.addEventListener('keypress', listener);
-			
-			// // This seems to be the only way to prevent Enter/Return
-			// // from toggle row open/close. The event is handled by
-			// // handleKeyPress() in zoteroPane.js.
-			// tree._handleEnter = function () {};
-			//
-			// this._updateIntroText();
-			
-			if (this.collectionTreeRow && this.collectionTreeRow.itemsToSelect) {
-				await this.selectItems(this.collectionTreeRow.itemsToSelect);
-				this.collectionTreeRow.itemsToSelect = null;
-			}
-			
-			Zotero.debug("Set tree for items view " + this.id + " in " + (Date.now() - start) + " ms");
-			
-			this._initialized = true;
-			await this.runListeners('load');
-		}
-		catch (e) {
-			Zotero.debug(e, 1);
-			Components.utils.reportError(e);
-			if (this.onError) {
-				this.onError(e);
-			}
-			throw e;
-		}
+		// TODO: This existed due some behaviour that no longer exists. Also see #selectItems()
+		// if (this.collectionTreeRow && this.collectionTreeRow.itemsToSelect) {
+		// 	await this.selectItems(this.collectionTreeRow.itemsToSelect);
+		// 	this.collectionTreeRow.itemsToSelect = null;
+		// }
+		
 	}
 	
 	setItemsPaneMessage(message) {
@@ -508,8 +341,8 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			this._searchMode = newSearchMode;
 			this._searchItemIDs = newSearchItemIDs; // items matching the search
 			this._rowCache = {};
-			
-			if (!skipExpandMatchParents) {
+				
+			if (!this.collectionTreeRow.isPublications()) {
 				this.expandMatchParents(newSearchParentIDs);
 			}
 			
@@ -739,7 +572,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 				|| collectionTreeRow.isPublications()
 				|| collectionTreeRow.isTrash()
 				|| hasQuickSearch) {
-				let skipExpandMatchParents = collectionTreeRow.isPublications();
 				await this.refresh();
 				refreshed = true;
 				madeChanges = true;
@@ -1087,9 +919,37 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		if (Zotero.locked) {
 			return false;
 		}
-
+		
 		if (!event.shiftKey && event.key == "Tab") {
 			ZoteroPane.focusElement('note-editor');
+			return false;
+		}
+		
+		// Handle arrow keys specially on multiple selection, since
+		// otherwise the tree just applies it to the last-selected row
+		if (this.selection.count > 1 && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
+			if (event.key == "ArrowRight") {
+				this.expandSelectedRows();
+			}
+			else {
+				this.collapseSelectedRows();
+			}
+			return false;
+		}
+		if (!event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && COLORED_TAGS_RE.test(event.key)) {
+			let libraryID = this.collectionTreeRow.ref.libraryID;
+			let position = parseInt(event.key) - 1;
+			let colorData = Zotero.Tags.getColorByPosition(libraryID, position);
+			// If a color isn't assigned to this number or any
+			// other numbers, allow key navigation
+			if (!colorData) {
+				return !Zotero.Tags.getColors(libraryID).size;
+			}
+
+			var items = this.getSelectedItems();
+			// Async operation and we're not waiting for the promise
+			// since we need to return false below to prevent virtualized-table from handling the event
+			const _promise = Zotero.Tags.toggleItemsListTags(items, colorData.name);
 			return false;
 		}
 		else if ((event.key == "Backspace" && Zotero.isMac) ||
@@ -1110,15 +970,15 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			return false;
 		}
 		else if (event.key == '+' && !(event.ctrlKey || event.altKey || event.metaKey)) {
-			this.expandAll();
+			this.expandAllRows();
 			return false;
 		}
 		else if (event.key == '-' && !(event.shiftKey || event.ctrlKey
 			|| event.altKey || event.metaKey)) {
-			this.collapseAll();
+			this.collapseAllRows();
 			return false;
 		}
-		else if (event.key.length == 1 || event.key == "Space") {
+		else if (!event.ctrlKey && !event.metaKey && (event.key.length == 1 || event.key == "Space")) {
 			this.handleTyping(event.key);
 			return false;
 		}
@@ -1195,8 +1055,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		});
 	}
 	
-	async changeCollectionTreeRow(collectionTreeRow, collapseAll=true) {
-		this.collapseAll = collapseAll;
+	async changeCollectionTreeRow(collectionTreeRow) {
 		this.collectionTreeRow = collectionTreeRow;
 		this.collectionTreeRow.view.itemTreeView = this;
 		ZoteroPane.setItemsPaneMessage(Zotero.getString('pane.items.loading'));
@@ -1220,6 +1079,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 						ZoteroPane.itemSelected();
 					}
 				}
+				this._updateIntroText();
 				resolve();
 			});
 		});
@@ -1399,8 +1259,8 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			
 			for (let i = parentRows.length - 1; i >= 0; i--) {
 				let row = parentRows[i];
-				this._closeContainer(row, true);
-				this.toggleOpenState(row, true);
+				this._closeContainer(row, true, true);
+				this.toggleOpenState(row, true, true);
 			}
 			this._refreshItemRowMap();
 			
@@ -1635,6 +1495,8 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			this._rows.sort((a, b) => rowSort(a, b) * order);
 		}
 		
+		this.tree && this.tree.invalidate();
+		
 		this._refreshItemRowMap();
 		
 		// this.rememberOpenState(openItemIDs);
@@ -1719,7 +1581,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		this.ensureRowIsVisible(Math.max(indices[0] - maxBuffer, 0));
 	}
 	
-	async toggleOpenState(index, skipRowMapRefresh) {
+	async toggleOpenState(index, skipRowMapRefresh=false) {
 		// Shouldn't happen but does if an item is dragged over a closed
 		// container until it opens and then released, since the container
 		// is no longer in the same place when the spring-load closes
@@ -1774,23 +1636,22 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			return;
 		}
 
-		await this._refreshPromise;
-		this.tree.invalidate();
-
 		if (!skipRowMapRefresh) {
+			await this._refreshPromise;
+			this.tree.invalidate(index);
+			
 			Zotero.debug('Refreshing item row map');
 			this._refreshItemRowMap();
 		}
 	}
 
 	expandMatchParents(searchParentIDs) {
-		var t = new Date();
-		var time = 0;
 		// Expand parents of child matches
 		if (!this._searchMode) {
 			return;
 		}
 
+		var savedSelection = this.getSelectedItems(true);
 		for (var i=0; i<this.rowCount; i++) {
 			var id = this.getRow(i).ref.id;
 			if (searchParentIDs.has(id) && this.isContainer(i) && !this.isContainerOpen(i)) {
@@ -1799,7 +1660,74 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 				time += (new Date() - t2);
 			}
 		}
+		this.tree && this.tree.invalidate();
 		this._refreshItemRowMap();
+		this._restoreSelection(savedSelection);
+	}
+
+	expandAllRows() {
+		this.selection.selectEventsSuppressed = true;
+		var selectedItems = this.getSelectedItems(true);
+		for (var i=0; i<this.rowCount; i++) {
+			if (this.isContainer(i) && !this.isContainerOpen(i)) {
+				this.toggleOpenState(i, true);
+			}
+		}
+		this._refreshItemRowMap();
+		this._restoreSelection(selectedItems);
+		this.tree.invalidate();
+		this.selection.selectEventsSuppressed = false;
+	}
+
+
+	collapseAllRows() {
+		this.selection.selectEventsSuppressed = true;
+		const selectedItems = this.getSelectedItems(true);
+		for (var i=0; i<this.rowCount; i++) {
+			if (this.isContainer(i)) {
+				this._closeContainer(i, true);
+			}
+		}
+		this._refreshItemRowMap();
+		this._restoreSelection(selectedItems, false);
+		this.tree.invalidate();
+		this.selection.selectEventsSuppressed = false;
+	};
+
+
+	expandSelectedRows() {
+		this.selection.selectEventsSuppressed = true;
+		const selectedItems = this.getSelectedItems(true);
+		// Reverse sort so we don't mess up indices of subsequent
+		// items when expanding
+		const indices = Array.from(this.selection.selected).sort((a, b) => b - a);
+		for (const index of indices) {
+			if (this.isContainer(index) && !this.isContainerOpen(index)) {
+				this.toggleOpenState(index, true);
+			}
+		}
+		this._refreshItemRowMap();
+		this._restoreSelection(selectedItems);
+		this.tree.invalidate();
+		this.selection.selectEventsSuppressed = false;
+	}
+
+
+	collapseSelectedRows() {
+		this.selection.selectEventsSuppressed = true;
+		const selectedItems = this.getSelectedItems(true);
+		// Reverse sort and so we don't mess up indices of subsequent
+		// items when collapsing
+		const indices = Array.from(this.selection.selected).sort((a, b) => b - a);
+		for (const index of indices) {
+			if (this.isContainer(index)) {
+				this._closeContainer(index, true);
+			}
+		}
+		this._refreshItemRowMap();
+		this._restoreSelection(selectedItems, false);
+		this.tree.invalidate();
+		this.selection.selectEventsSuppressed = false;
 	}
 	
 	// //////////////////////////////////////////////////////////////////////////////
@@ -1869,10 +1797,11 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		// Collapse open items
 		for (var i=0; i<this.rowCount; i++) {
 			if (this.selection.isSelected(i) && this.isContainer(i)) {
-				this._closeContainer(i, true);
+				this._closeContainer(i, true, true);
 			}
 		}
 		this._refreshItemRowMap();
+		this.tree.invalidate();
 
 		// Create an array of selected items
 		var ids = Array.from(this.selection.selected).map(index => this.getRow(index).id);
@@ -2028,10 +1957,10 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			return;
 		}
 
-		await this._refreshPromise;
-		this.tree.invalidate();
-
 		if (!skipRowMapRefresh) {
+			await this._refreshPromise;
+			this.tree.invalidate(index);
+			
 			Zotero.debug('Refreshing item row map');
 			this._refreshItemRowMap();
 		}
@@ -2265,7 +2194,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			this.window.ZoteroPane.clearItemsPaneMessage();
 			this._introText = false;
 		}
-	}	
+	}
 
 	/**
 	 * Restore a scroll position returned from _saveScrollPosition()
@@ -2311,8 +2240,15 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			offset: 0
 		};
 	}
-	
-	_restoreSelection(selection) {
+
+	/**
+	 * 
+	 * @param selection
+	 * @param {Boolean} expandCollapsedParents - if an item to select is in a collapsed parent
+	 * 					will expand the parent, otherwise the item is ignored
+	 * @private
+	 */
+	_restoreSelection(selection, expandCollapsedParents=true) {
 		if (!selection.length || !this._treebox) {
 			return;
 		}
@@ -2329,7 +2265,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 					this.selection.toggleSelect(this._rowMap[selection[i]]);
 				}
 				// Try the parent
-				else {
+				else if (expandCollapsedParents) {
 					var item = Zotero.Items.get(selection[i]);
 					if (!item) {
 						continue;
@@ -2647,7 +2583,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	}
 	
 	_getIcon(index) {
-		// Get item type icon and tag swatches
 		var item = this.getRow(index).ref;
 		var itemType = Zotero.ItemTypes.getName(item.itemTypeID);
 		if (itemType == 'attachment') {
@@ -2679,10 +2614,17 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			iconClsName = "IconTreeitem";
 		}
 		// N.B. Should use css-image-set in Electron
-		if (window.devicePixelRatio >= 1.25 && ((iconClsName + "2x") in Icons)) {
+		if (Zotero.hiDPI && ((iconClsName + "2x") in Icons)) {
 			iconClsName += "2x";
 		}
 		return getDOMIcon(iconClsName);
+	}
+	
+	_getTagSwatch(color) {
+		let span = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+		span.className = 'tag-swatch';
+		span.style.backgroundColor = color;
+		return span;
 	}
 };
 

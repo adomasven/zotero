@@ -1083,7 +1083,7 @@ var ZoteroPane = new function()
 				await library.waitForDataLoad('item');
 			}
 			
-			this.itemsView.changeCollectionTreeRow(collectionTreeRow, collectionTreeRow.isPublications())
+			this.itemsView.changeCollectionTreeRow(collectionTreeRow);
 
 			// try {
 			// 	let tree = document.getElementById('zotero-items-tree');
