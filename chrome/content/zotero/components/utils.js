@@ -27,10 +27,10 @@
 
 const noop = () => {};
 
-function getDragTargetOrient(event) {
-	let elem = event.target;
-	let {y, height} = elem.getBoundingClientRect();
-	let ratio = (event.clientY - y) / height;
+function getDragTargetOrient(event, target) {
+	const elem = target || event.target;
+	const {y, height} = elem.getBoundingClientRect();
+	const ratio = (event.clientY - y) / height;
 	// first 1/6 of the elem	([x-----])
 	if (ratio <= 0.166) return -1;
 	// 2/6 to 5/6 of the elem	([-xxxx-])

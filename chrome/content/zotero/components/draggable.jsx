@@ -24,7 +24,6 @@
 */
 
 'use strict';
-'use strict'
 
 const React = require('react');
 const { PureComponent } = React;
@@ -34,6 +33,11 @@ const cx = require('classnames');
 
 const DRAG = { START: 1, ACTIVE: 2, NONE: 3 };
 
+/**
+ * Creates a synthetic draggable element which does not use the standard
+ * dragstart, dragover, dragend events. Useful for custom interactions
+ * like element resize or column dragging
+ */
 class Draggable extends PureComponent {
 	componentWillUnmount() {
 		this.drag.stop();

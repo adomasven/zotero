@@ -16,12 +16,8 @@
   background-color: -moz-field;
   overflow: hidden;
   display: flex;
+  position: relative;
   flex: 1;
-
-  .row.selected {
-    background-color: highlight;
-    color: highlighttext;
-  }
 
   .virtualized-table-header .icon {
     width: 13px;

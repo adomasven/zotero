@@ -314,9 +314,9 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 						},
 						draggable: treeRow != this._editing,
 					};
-					
+
+					props.onDoubleClick = () => this.handleActivate(treeRow);
 					if (this.props.dragAndDrop) {
-						props.onDoubleClick = () => this.handleActivate(treeRow);
 						props.onDragStart = e => this.onDragStart(treeRow, e);
 						props.onDragOver = e => this.onDragOver(treeRow, e);
 						props.onDragEnd = e => this.onDragEnd(treeRow, e);
@@ -1167,13 +1167,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 					
 					if (sourceCollectionTreeRow.id == targetCollectionTreeRow.id) {
 						// Ignore drag into the same collection
-						if (this.type == 'collection') {
-							this.setDropEffect(event, "none");
-						}
-						// If dragging from the same source, do a move
-						else {
-							this.setDropEffect(event, "move");
-						}
+						this.setDropEffect(event, "none");
 						return false;
 					}
 					// If the source isn't a collection, the action has to be a copy

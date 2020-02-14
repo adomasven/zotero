@@ -550,7 +550,7 @@
 					</splitter>
 
 					<!-- itemPane.xul -->
-					<vbox id="zotero-item-pane"/>
+					<vbox id="zotero-item-pane" flex="1"/>
 				</box>
 			</hbox>
 		</vbox>

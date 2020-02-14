@@ -25,7 +25,28 @@
 
 const requiredOptions = ['getItemCount', 'itemHeight', 'renderItem', 'targetElement'];
 
+/**
+ * A windowed list for performant display of an essentially infinite number of items
+ * Inspired by https://github.com/bvaughn/react-window
+ *
+ * The main principle here is to display a div with a height set to itemHeight * getItemCount()
+ * and only render rows visible in the scrollbox area, unloading them and rendering new ones
+ * as needed.
+ *
+ * This was created after the measured performance of react-window was not satisfactory
+ * for a 100% fluid experience, especially once rows with multiple cells that needed
+ * responsive resizing
+ *
+ * The class requires careful handholding to achieve good performance. Read method documentation!
+ */
 module.exports = class {
+	/**
+	 * @param options (required):
+	 * 	- getItemCount {Function} a function that returns the number of items currently on display
+	 * 	- renderItem {Function} a function that returns a DOM element for an individual row to display
+	 * 	- itemHeight {Integer}
+	 * 	- targetElement {DOMElement} a container DOM element for the js-window
+	 */
 	constructor(options) {
 		for (let option of requiredOptions) {
 			if (!options.hasOwnProperty(option)) {
@@ -41,7 +62,10 @@ module.exports = class {
 		Object.assign(this, options);
 		this._renderedRows = new Map();
 	}
-	
+
+	/**
+	 * Call once to add the js-window DOM element to the container
+	 */
 	initialize() {
 		const { targetElement } = this;
 		this.innerElem = document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
@@ -52,39 +76,55 @@ module.exports = class {
 		
 		this.update();
 	}
-	
+
+	/**
+	 * Call to remove the js-window from the container
+	 */
 	destroy() {
 		this.targetElement.removeEventListener('scroll', this._handleScroll);
+		this.targetElement.removeChild(this.innerElem);
 	}
-	
+
+	/**
+	 * Rerender an individual item. A no-op if the item is not in view
+	 * @param index {Integer}
+	 */
 	rerenderItem(index) {
 		if (!this._renderedRows.has(index)) return;
-		let elem = this.renderItem(index);
+		let oldElem = this._renderedRows.get(index);
+		let elem = this.renderItem(index, oldElem);
 		elem.style.top = this._getItemPosition(index) + "px";
 		elem.style.position = "absolute";
+		if (elem == oldElem) return;
 		this.innerElem.replaceChild(elem, this._renderedRows.get(index));
 		this._renderedRows.set(index, elem);
 	}
 
+	/**
+	 * Rerender items within the scrollbox. Call sparingly
+	 */
 	invalidate() {
-		for (let elem of this._renderedRows.values()) {
-			elem.remove();
-		}
-		this._renderedRows = new Map();
+		// Removes any items out of view and adds the ones not in view
 		this.render();
+		// Rerender the rest
+		for (let index of Array.from(this._renderedRows.keys())) {
+			this.rerenderItem(index);
+		}
 	}
-	
+
+	/**
+	 * Render all items within the scrollbox and remove those no longer visible
+	 */
 	render() {
 		const {
 			renderItem,
 			innerElem,
 		} = this;
-		const itemCount = this._getItemCount();
 
 		const [startIndex, stopIndex] = this._getRangeToRender();
 
-		if (itemCount > 0) {
-			for (let index = startIndex; index <= stopIndex; index++) {
+		if (stopIndex - startIndex > 0) {
+			for (let index = startIndex; index < stopIndex; index++) {
 				if (this._renderedRows.has(index)) continue;
 				let elem = renderItem(index);
 				elem.style.top = this._getItemPosition(index) + "px";
@@ -94,13 +134,17 @@ module.exports = class {
 			}
 		}
 		for (let [index, elem] of this._renderedRows.entries()) {
-			if (index < startIndex || index > stopIndex) {
+			if (index < startIndex || index >= stopIndex) {
 				elem.remove();
 				this._renderedRows.delete(index);
 			}
 		}
 	}
-	
+
+	/**
+	 * Use to update constructor params
+	 * @param options (see constructor())
+	 */
 	update(options = {}) {
 		Object.assign(this, options);
 		const { itemHeight, targetElement, innerElem } = this;
@@ -118,7 +162,11 @@ module.exports = class {
 		this.scrollDirection = 0;
 		this.scrollOffset = targetElement.scrollTop;
 	}
-	
+
+	/**
+	 * Scroll the top of the scrollbox to a specified location
+	 * @param scrollOffset {Integer} offset for the top of the tree
+	 */
 	scrollTo(scrollOffset) {
 		scrollOffset = Math.max(0, scrollOffset);
 		this.scrollOffset = scrollOffset;
@@ -126,6 +174,10 @@ module.exports = class {
 		this.render();
 	}
 
+	/**
+	 * Scroll the scrollbox to a specified item. No-op if already in view
+	 * @param index
+	 */
 	scrollToItem(index) {
 		const { itemHeight, scrollOffset, targetElement } = this;
 		const itemCount = this._getItemCount();
@@ -151,6 +203,15 @@ module.exports = class {
 		return Math.max(1, Math.floor((this.scrollOffset + height + 1) / this.itemHeight)) - 1;
 	}
 	
+	getIndexByMouseEventPosition = (yOffset) => {
+		return Math.min(this._getItemCount()-1, Math.floor((yOffset - this.innerElem.getBoundingClientRect().top) / this.itemHeight));
+	}
+	
+	getElementByIndex = index => this._renderedRows.get(index);
+
+	/**
+	 * @returns {Integer} - the number of fully visible items in the scrollbox
+	 */
 	getPageLength() {
 		const height = this.targetElement.getBoundingClientRect().height;
 		return Math.ceil(height / this.itemHeight);
@@ -159,7 +220,7 @@ module.exports = class {
 	_getItemPosition = (index) => {
 		return (this.itemHeight * index);
 	};
-
+	
 	_getRangeToRender() {
 		const { itemHeight, targetElement, overscanCount, scrollDirection, scrollOffset } = this;
 		const itemCount = this._getItemCount();
@@ -170,7 +231,7 @@ module.exports = class {
 		}
 
 		const startIndex = Math.floor(scrollOffset / itemHeight);
-		const stopIndex = Math.ceil((scrollOffset + height) / itemHeight);
+		const stopIndex = Math.ceil((scrollOffset + height) / itemHeight + 1);
 
 		// Overscan by one item in each direction so that tab/focus works.
 		// If there isn't at least one extra item, tab loops back around.
@@ -185,7 +246,7 @@ module.exports = class {
 
 		return [
 			Math.max(0, startIndex - overscanBackward),
-			Math.max(0, Math.min(itemCount - 1, stopIndex + overscanForward)),
+			Math.max(0, Math.min(itemCount, stopIndex + overscanForward)),
 			startIndex,
 			stopIndex,
 		];

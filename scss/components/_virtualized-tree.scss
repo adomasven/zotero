@@ -17,12 +17,13 @@
 
 .arrow, .twisty {
   margin-right: 0 !important;
+  display: flex;
+  align-items: center;
   
   svg {
     fill: #444;
     transition: transform 0.125s ease;
     transform: rotate(-90deg);
-    margin-top: -3px;
   }
 
   &.open svg {

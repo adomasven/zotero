@@ -34,6 +34,12 @@ const Draggable = require('./draggable');
 
 const RESIZER_WIDTH = 5; // px
 
+/**
+ * A virtualized-table, inspired by https://github.com/bvaughn/react-virtualized
+ *
+ * Uses a custom js-window for fast item rendering and
+ * CSS style injection for fast column resizing
+ */
 class VirtualizedTable extends React.Component {
 	constructor(props) {
 		super(props);
@@ -44,7 +50,7 @@ class VirtualizedTable extends React.Component {
 			
 		this.selection = new TreeSelection(this);
 
-		// Due to complicated reasons dragging (for column dragging and for resizing)
+		// Due to how the Draggable element works dragging (for column dragging and for resizing)
 		// is not handled via React events but via native ones attached on `document`
 		// Since React attaches its event handlers on `document` as well
 		// there is no way to prevent bubbling. Thus we have to do custom
@@ -52,7 +58,9 @@ class VirtualizedTable extends React.Component {
 		// after dragging actions
 		this.isHeaderMouseUp = true;
 		
-		this.onSelection = Zotero.Utilities.debounce(this._onSelection, 20);
+		this._isMouseDrag = false;
+		
+		this.onSelection = oncePerAnimationFrame(this._onSelection);
 	}
 	
 	// ------------------------ Selection Methods ------------------------- //
@@ -109,6 +117,7 @@ class VirtualizedTable extends React.Component {
 			);
 			tree.scrollTop = scrollTo;
 		}
+		this.props.onDragOver && this.props.onDragOver(e)
 	}
 
 	/**
@@ -137,7 +146,7 @@ class VirtualizedTable extends React.Component {
 		const rowCount = this.props.getRowCount();
 		destination = Math.min(destination, rowCount - 1);
 		destination = Math.max(0, destination);
-		this.onSelection(destination, selectTo);
+		return this.onSelection(destination, selectTo);
 	}
 
 	/**
@@ -235,10 +244,30 @@ class VirtualizedTable extends React.Component {
 		}
 	}
 	
-	_onMouseDown = (e, index) => {
-		let shiftSelect = e.shiftKey;
-		let toggleSelection = e.ctrlKey || e.metaKey;
-		this.onSelection(index, shiftSelect, toggleSelection);
+	_onDragStart = () => {
+		this._isMouseDrag = true;
+	}
+	
+	_onDragEnd = () => {
+		this._isMouseDrag = false;
+	}
+	
+	_handleMouseDown = async (e, index) => {
+		await Zotero.Promise.delay(100);
+		// All modifier clicks handled in mouseUp
+		if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+		if (this.selection.isSelected(index)) return;
+		this._onSelection(index, false, false);
+	}
+	
+	_handleMouseUp = async (e, index) => {
+		const shiftSelect = e.shiftKey;
+		const toggleSelection = e.ctrlKey || e.metaKey;
+		if (this._isMouseDrag || e.button != 0) {
+			// other mouse buttons are ignored
+			return;
+		}
+		this._onSelection(index, shiftSelect, toggleSelection);
 	}
 
 	_activateNode = (event, indices) => {
@@ -248,7 +277,7 @@ class VirtualizedTable extends React.Component {
 	}
 
 	/**
-	 * Scroll the row into view. Delegates to virtualized-list
+	 * Scroll the row into view. Delegates to js-window
 	 *
 	 * @param index
 	 */
@@ -325,6 +354,7 @@ class VirtualizedTable extends React.Component {
 			onResizeData[columns[i].dataKey] = elem.getBoundingClientRect().width;
 		}
 		this.props.onColumnResize(onResizeData);
+		this._isMouseDrag = true;
 	}
 
 	_handleResizerDrag = (event) => {
@@ -394,6 +424,7 @@ class VirtualizedTable extends React.Component {
 	}
 
 	_handleColumnDragStop = (event, cancelled) => {
+		event.stopPropagation();
 		if (!cancelled && typeof this.state.dragging == "number") {
 			const { index } = this._findColumnDragPosition(event.clientX);
 			// If inserting before the column that was being dragged
@@ -472,10 +503,18 @@ class VirtualizedTable extends React.Component {
 		};
 	}
 
-	_renderItem = (index) => {
-		let node = this.props.renderItem(index, this.selection);
-		node.addEventListener('mousedown', e => this._onMouseDown(e, index), { passive: true });
-		node.addEventListener('dblclick', e => this._activateNode(e, [index]), { passive: true });
+	_renderItem = (index, oldElem = null) => {
+		let node = this.props.renderItem(index, this.selection, oldElem);
+		if (!node.dataset.eventHandlersAttached) {
+			node.dataset.eventHandlersAttached = true;
+			node.addEventListener('dragstart', e => this._onDragStart(e, index), { passive: true });
+			node.addEventListener('dragend', e => this._onDragEnd(e, index), { passive: true });
+			node.addEventListener('mousedown', e => this._handleMouseDown(e, index), { passive: true });
+			node.addEventListener('mouseup', e => this._handleMouseUp(e, index), { passive: true, capture: true });
+			node.addEventListener('dblclick', e => this._activateNode(e, [index]), { passive: true });
+		}
+		node.id = this.props.id + "-row-" + index;
+		node.setAttribute('role', 'row');
 		return node;
 	}
 
@@ -526,18 +565,28 @@ class VirtualizedTable extends React.Component {
 		
 	render() {
 		let headerCells = this._renderHeaderCells();
-		let dragMarker = "";
+		let columnDragMarker = "";
 		if (typeof this.state.dragX == 'number') {
-			dragMarker = <div className="column-drag-marker" style={{ left: this.state.dragX }} />;
+			columnDragMarker = <div className="column-drag-marker" style={{ left: this.state.dragX }} />;
 		}
 		let props = {
 			onKeyDown: this._onKeyDown,
 			onDragOver: this._onDragOver,
+			onDrop: e => this.props.onDrop && this.props.onDrop(e),
+			onDragEnter: e => this.props.onTreeDragEnter && this.onTreeDragEnter(e),
+			onDragLeave: e => this.props.onTreeDragLeave && this.onTreeDragLeave(e),
 			className: cx(["virtualized-table", { resizing: this.state.resizing }]),
 			id: this.props.id,
 			ref: ref => this._topDiv = ref,
 			tabIndex: 0,
+			role: "table",
 		};
+		if (this.selection.count > 0) {
+			const elem = this._jsWindow && this._jsWindow.getElementByIndex(this.selection.focused);
+			if (elem) {
+				props['aria-activedescendant'] = elem.id;
+			}
+		}
 		let jsWindowProps = {
 			id: this._jsWindowID,
 			className: "virtualized-table-body",
@@ -551,7 +600,7 @@ class VirtualizedTable extends React.Component {
 		};
 		return (
 			<div {...props}>
-				{dragMarker}
+				{columnDragMarker}
 				<div
 					className="virtualized-table-header"
 					onContextMenu={this.props.onColumnPickerMenu}>
@@ -561,25 +610,28 @@ class VirtualizedTable extends React.Component {
 			</div>
 		);
 	}
-	
-	updateTreebox() {
-		if (!this._jsWindow) return;
-		this._jsWindow.update(this._getJSWindowOptions());
-	}
-	
+
+	/**
+	 * Invalidates the underlying js-window
+	 */
 	invalidate() {
 		if (!this._jsWindow) return;
 		this._jsWindow.invalidate();
-		this.updateWidth();
+		this._updateWidth();
 	}
-	
+
+	/**
+	 * Rerenders/renders the underlying js-window. Use for container size changes
+	 * to render missing items and update widths
+	 */
 	rerender() {
 		if (!this._jsWindow) return;
 		this._jsWindow.render();
-		this.updateWidth();
+		this._updateWidth();
 	}
 	
-	updateWidth() {
+	
+	_updateWidth() {
 		const jsWindow = document.querySelector(`#${this._jsWindowID} .js-window`);
 		if (!jsWindow) return;
 		const tree = document.querySelector(`#${this.props.id}`);
@@ -588,12 +640,21 @@ class VirtualizedTable extends React.Component {
 			tree.getBoundingClientRect().width - jsWindow.getBoundingClientRect().width - 4);
 		header.style.width = `calc(100% - ${scrollbarWidth}px)`;
 	}
-	
+
+	/**
+	 * Rerender a row in the underlying js-window
+	 * @param index
+	 */
 	invalidateRow(index) {
 		if (!this._jsWindow) return;
 		this._jsWindow.rerenderItem(index);
 	}
-	
+
+	/**
+	 * Rerender a row range in the underlying js-window
+	 * @param startIndex
+	 * @param endIndex
+	 */
 	invalidateRange(startIndex, endIndex) {
 		if (!this._jsWindow) return;
 		for (; startIndex <= endIndex; startIndex++) {
@@ -608,6 +669,36 @@ class VirtualizedTable extends React.Component {
 	focus() {
 		setTimeout(() => this._topDiv.focus());
 	}
+}
+
+/**
+ * Create a function that calls the given function `fn` only once per animation
+ * frame.
+ *
+ * @param {Function} fn
+ * @returns {Function}
+ */
+function oncePerAnimationFrame(fn) {
+	let animationId = null;
+	let argsToPass = null;
+	return function(...args) {
+		argsToPass = args;
+		if (animationId !== null) {
+			return;
+		}
+
+		let debouncedFn = () => {
+			fn.call(this, ...argsToPass);
+			animationId = null;
+			argsToPass = null;
+		};
+
+		if (typeof requestAnimationFrame == 'undefined') {
+			animationId = setTimeout(debouncedFn, 20);
+		} else {
+			animationId = requestAnimationFrame(debouncedFn);
+		}
+	};
 }
 
 module.exports = injectIntl(VirtualizedTable, { forwardRef: true });

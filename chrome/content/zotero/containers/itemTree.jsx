@@ -65,6 +65,7 @@ function makeItemRenderer(itemTree) {
 			if (itemTree.isContainerOpen(index)) {
 				twisty.classList.add('open');
 			}
+			twisty.style.pointerEvents = 'auto';
 			twisty.addEventListener('mousedown', event => onTwistyMouseDown(event, index),
 				{ passive: true });
 		}
@@ -101,14 +102,30 @@ function makeItemRenderer(itemTree) {
 		return span;
 	}
 	
-	return function (index, selection) {
-		let rowData = itemTree._getRowData({ index });
-		let div = document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
-		div.className = "row";
-		if (selection.isSelected(index)) {
-			div.classList.add('selected');
+	return function (index, selection, oldDiv=null) {
+		let div;
+		if (oldDiv) {
+			div = oldDiv;
+			div.innerHTML = "";
+		} else {
+			div = document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
+			div.className = "row";
 		}
 		
+		div.classList.toggle('selected', selection.isSelected(index));
+		div.classList.remove('drop', 'drop-before', 'drop-after');
+		if (itemTree._dropRow == index) {
+			let span;
+			if (Zotero.DragDrop.currentOrientation != 0) {
+				span = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+				span.className = Zotero.DragDrop.currentOrientation < 0 ? "drop-before" : "drop-after";
+				div.appendChild(span);
+			} else {
+				div.classList.add('drop');
+			}
+		}
+
+		const rowData = itemTree._getRowData({ index });
 		for (let column of itemTree._getColumns()) {
 			if (column.hidden) continue;
 			
@@ -117,6 +134,20 @@ function makeItemRenderer(itemTree) {
 			}
 			else {
 				div.appendChild(renderCell(index, rowData[column.dataKey], column));
+			}
+		}
+		
+		if (!oldDiv) {
+			if (itemTree.props.onContextMenu) {
+				div.addEventListener('contextmenu', itemTree.props.onContextMenu, { passive: true });
+			}
+			
+			if (itemTree.props.dragAndDrop) {
+				div.setAttribute('draggable', true);
+				div.addEventListener('dragstart', e => itemTree.onDragStart(e, index), { passive: true });
+				div.addEventListener('dragover', e => itemTree.onDragOver(e, index), { passive: true });
+				div.addEventListener('dragend', itemTree.onDragEnd, { passive: true });
+				// div.addEventListener('drop', e => itemTree.onDrop(index, e), { passive: true });
 			}
 		}
 		
@@ -158,10 +189,11 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		this._introText = null;
 		
 		this._rowCache = {};
-		this._itemImages = {};
 		
 		this._modificationLock = Zotero.Promise.resolve();
 		this._refreshPromise = Zotero.Promise.resolve();
+		
+		this._dropRow = null;
 		
 		this._unregisterID = Zotero.Notifier.registerObserver(
 			this,
@@ -198,6 +230,19 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	componentDidMount() {
 		this._initialized = true;
 		this.runListeners('load');
+		// Create an element where we can create drag images to be displayed next to the cursor while dragging
+		// since for multiple item drags we need to display all the elements
+		let elem = this._dragImageContainer = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+		elem.style.width = "100%";
+		elem.style.height = "2000px";
+		elem.style.position = "absolute";
+		elem.style.top = "-10000px";
+		elem.className = "drag-image-container";
+		this.domEl.appendChild(elem);
+	}
+	
+	componentDidUnmount() {
+		this.domEl.removeChild(this._dragImageContainer);
 	}
 
 	waitForSelect() {
@@ -978,7 +1023,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			this.collapseAllRows();
 			return false;
 		}
-		else if (!event.ctrlKey && !event.metaKey && (event.key.length == 1 || event.key == "Space")) {
+		else if (!event.ctrlKey && !event.metaKey && (event.key.length == 1 && (event.key != " " || this.selection.isSelected(this.selection.focused)))) {
 			this.handleTyping(event.key);
 			return false;
 		}
@@ -988,7 +1033,11 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	render() {
 		Zotero.debug('Rendering itemTree');
 		if (this._itemsPaneMessage) {
-			return <div className={"items-pane-message"}>{this._itemsPaneMessage}</div>;
+			return (<div
+				onDragOver={e => this.props.dragAndDrop && this.onDragOver(e, -1)}
+				onDrop={e => this.props.dragAndDrop && this.onDrop(e, -1)}
+				className={"items-pane-message"}>{this._itemsPaneMessage}
+			</div>);
 		}
 		if (!this.collectionTreeRow) {
 			return <div className={"items-pane-message"}>{Zotero.getString('pane.items.loading')}</div>;
@@ -1007,7 +1056,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 				getRowCount: () => this._rows.length,
 				rowHeight: itemHeight,
 				headerHeight: headerHeight,
-				id: "zotero-items-tree",
+				id: this.id,
 				ref: ref => this.tree = ref,
 				treeboxRef: ref => this._treebox = ref,
 				columns: this._getColumns(),
@@ -1016,15 +1065,18 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 				multiSelect: true,
 				
 				getAriaLabel: index => this.getRow(index).getField('title'),
-				onSelectionChange: Zotero.Utilities.debounce(selection => ZoteroPane.itemSelected(selection), 100),
+				onSelectionChange: this._handleSelectionChange,
 				isSelectable: () => true,
 				getParentIndex: this.getParentIndex,
 				isContainer: this.isContainer,
 				isContainerEmpty: this.isContainerEmpty,
 				isContainerOpen: this.isContainerOpen,
 				toggleOpenState: this.toggleOpenState.bind(this),
-				
-				// onDragLeave: (e) => this.props.dragAndDrop && this.onTreeDragLeave(e),
+
+				// onDragEnter: (e) => this.props.dragAndDrop && this.onTreeDragLeave(e),
+				// onDragLeave: (e) => this.props.dragAndDrop && this.onTreeDragEnter(e),
+				onDragOver: e => this.props.dragAndDrop && this.onDragOver(e, -1),
+				onDrop: e => this.props.dragAndDrop && this.onDrop(e, -1),
 				onKeyDown: this.handleKeyDown,
 				onActivate: this.handleActivate,
 				onColumnPickerMenu: this._displayColumnPickerMenu,
@@ -1037,24 +1089,16 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		);
 	}
 	
-	updateHeight = Zotero.Utilities.debounce((height) => {
+	_updateHeight = (height) => {
 		this.forceUpdate(() => {
 			if (this.tree) {
-				this.tree.updateTreebox();
 				this.tree.rerender();
 			}
 		});
-	})
-	
-	updateItemCount = async () => {
-		await new Promise((resolve) => {
-			if (this.tree) {
-				this.tree.updateTreebox();
-			}
-			resolve();
-		});
 	}
-	
+
+	updateHeight = Zotero.Utilities.debounce(this._updateHeight);
+
 	async changeCollectionTreeRow(collectionTreeRow) {
 		this.collectionTreeRow = collectionTreeRow;
 		this.collectionTreeRow.view.itemTreeView = this;
@@ -1068,7 +1112,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		await new Promise(resolve => {
 			this.forceUpdate(() => {
 				if (this.tree) {
-					this.tree.updateTreebox();
 					this.tree.invalidate();
 
 					if (this.selection) {
@@ -1095,7 +1138,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		await new Promise((resolve) => {
 			this.forceUpdate(() => {
 				if (this.tree) {
-					this.tree.updateTreebox();
 					this.tree.invalidate();
 					this._restoreSelection(selection);
 					if (this.selection) {
@@ -1655,9 +1697,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		for (var i=0; i<this.rowCount; i++) {
 			var id = this.getRow(i).ref.id;
 			if (searchParentIDs.has(id) && this.isContainer(i) && !this.isContainerOpen(i)) {
-				var t2 = new Date();
 				this.toggleOpenState(i, true);
-				time += (new Date() - t2);
 			}
 		}
 		this.tree && this.tree.invalidate();
@@ -1839,16 +1879,10 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		}
 	}
 
-	// //////////////////////////////////////////////////////////////////////////////
-	//
-	//  Private methods
-	//
-	// //////////////////////////////////////////////////////////////////////////////
-
 	getLevel(index) {
 		return this._rows[index].level;
 	}
-	
+
 	isContainer = (index) => {
 		return this.getRow(index).ref.isRegularItem();
 	}
@@ -1856,7 +1890,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	isContainerOpen = (index) => {
 		return this.getRow(index).isOpen;
 	}
-	
+
 	isContainerEmpty = (index) => {
 		if (this.regularOnly) {
 			return true;
@@ -1868,6 +1902,685 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		}
 		var includeTrashed = this.collectionTreeRow.isTrash();
 		return item.numNotes(includeTrashed) === 0 && item.numAttachments(includeTrashed) == 0;
+	}
+
+	////////////////////////////////////////////////////////////////////////////////
+	///
+	///  Drag-and-drop methods
+	///
+	////////////////////////////////////////////////////////////////////////////////
+
+	/**
+	 * Start a drag using HTML 5 Drag and Drop
+	 */
+	onDragStart = (event, index) => {
+		// See note in LibraryTreeView::setDropEffect()
+		if (Zotero.isWin || Zotero.isLinux) {
+			event.dataTransfer.effectAllowed = 'copyMove';
+		}
+		
+		// Propagate selection before we set the drag image if dragging not one of the selected rows
+		if (!this.selection.isSelected(index)) {
+			this.selection.select(index);
+		}
+		// Set drag image
+		const dragElems = this.domEl.querySelectorAll('.selected');
+		for (let elem of dragElems) {
+			elem = elem.cloneNode(true);
+			elem.style.position = "initial";
+			this._dragImageContainer.appendChild(elem);
+		}
+		event.dataTransfer.setDragImage(this._dragImageContainer, 0, 0);
+
+		var itemIDs = this.getSelectedItems(true);
+		event.dataTransfer.setData("zotero/item", itemIDs);
+
+		var items = Zotero.Items.get(itemIDs);
+		Zotero.DragDrop.currentDragSource = this.collectionTreeRow;
+
+		// If at least one file is a non-web-link attachment and can be found,
+		// enable dragging to file system
+		var files = items
+			.filter(item => item.isAttachment())
+			.map(item => item.getFilePath())
+			.filter(path => path);
+
+		if (files.length) {
+			// Advanced multi-file drag (with unique filenames, which otherwise happen automatically on
+			// Windows but not Linux) and auxiliary snapshot file copying on macOS
+			let dataProvider;
+			if (Zotero.isMac) {
+				dataProvider = new Zotero.ItemTreeView.fileDragDataProvider(itemIDs);
+			}
+
+			for (let i = 0; i < files.length; i++) {
+				let file = Zotero.File.pathToFile(files[i]);
+
+				if (dataProvider) {
+					Zotero.debug("Adding application/x-moz-file-promise");
+					event.dataTransfer.mozSetDataAt("application/x-moz-file-promise", dataProvider, i);
+				}
+
+				// Allow dragging to filesystem on Linux and Windows
+				let uri;
+				if (!Zotero.isMac) {
+					Zotero.debug("Adding text/x-moz-url " + i);
+					let fph = Components.classes["@mozilla.org/network/protocol;1?name=file"]
+						.createInstance(Components.interfaces.nsIFileProtocolHandler);
+					uri = fph.getURLSpecFromFile(file);
+					event.dataTransfer.mozSetDataAt("text/x-moz-url", uri + '\n' + file.leafName, i);
+				}
+
+				// Allow dragging to web targets (e.g., Gmail)
+				Zotero.debug("Adding application/x-moz-file " + i);
+				event.dataTransfer.mozSetDataAt("application/x-moz-file", file, i);
+
+				if (Zotero.isWin) {
+					event.dataTransfer.mozSetDataAt("application/x-moz-file-promise-url", uri, i);
+				}
+				else if (Zotero.isLinux) {
+					// Don't create a symlink for an unmodified drag
+					event.dataTransfer.effectAllowed = 'copy';
+				}
+			}
+		}
+
+		// Get Quick Copy format for current URL (set via /ping from connector)
+		var format = Zotero.QuickCopy.getFormatFromURL(Zotero.QuickCopy.lastActiveURL);
+
+		Zotero.debug("Dragging with format " + format);
+
+		var exportCallback = function(obj, worked) {
+			if (!worked) {
+				Zotero.log(Zotero.getString("fileInterface.exportError"), 'warning');
+				return;
+			}
+
+			var text = obj.string.replace(/\r\n/g, "\n");
+			event.dataTransfer.setData("text/plain", text);
+		}
+
+		format = Zotero.QuickCopy.unserializeSetting(format);
+		try {
+			if (format.mode == 'export') {
+				Zotero.QuickCopy.getContentFromItems(items, format, exportCallback);
+			}
+			else if (format.mode == 'bibliography') {
+				var content = Zotero.QuickCopy.getContentFromItems(items, format, null, event.shiftKey);
+				if (content) {
+					if (content.html) {
+						event.dataTransfer.setData("text/html", content.html);
+					}
+					event.dataTransfer.setData("text/plain", content.text);
+				}
+			}
+			else {
+				Components.utils.reportError("Invalid Quick Copy mode");
+			}
+		}
+		catch (e) {
+			Zotero.debug(e);
+			Components.utils.reportError(e + " with '" + format.id + "'");
+		}
+	}
+
+	/**
+	 * We use this to set the drag action, which is used by view.canDrop(),
+	 * based on the view's canDropCheck() and modifier keys.
+	 */
+	onDragOver = (event, row) => {
+		try {
+			event.stopPropagation();
+			Zotero.DragDrop.currentOrientation = getDragTargetOrient(event);
+			Zotero.debug(`Dragging over item ${row} with ${Zotero.DragDrop.currentOrientation}, drop row: ${this._dropRow}`);
+
+			var target = event.target;
+			if (target.classList.contains('items-pane-message')) {
+				let doc = target.ownerDocument;
+				// Consider a drop on the items pane message box (e.g., when showing the welcome text)
+				// a drop on the items tree
+				if (target.firstChild.hasAttribute('allowdrop')) {
+					target = doc.querySelector('#zotero-items-tree treechildren');
+				}
+				else {
+					this.setDropEffect(event, "none");
+					return false;
+				}
+			}
+
+			if (!this.canDropCheck(row, Zotero.DragDrop.currentOrientation, event.dataTransfer)) {
+				this.setDropEffect(event, "none");
+				return false;
+			}
+
+			if (event.dataTransfer.getData("zotero/item")) {
+				var sourceCollectionTreeRow = Zotero.DragDrop.getDragSource();
+				if (sourceCollectionTreeRow) {
+					var targetCollectionTreeRow = this.collectionTreeRow;
+
+					if (!targetCollectionTreeRow) {
+						this.setDropEffect(event, "none");
+						return false;
+					}
+
+					if (sourceCollectionTreeRow.id == targetCollectionTreeRow.id) {
+						// If dragging from the same source, do a move
+						this.setDropEffect(event, "move");
+						return false;
+					}
+					// If the source isn't a collection, the action has to be a copy
+					if (!sourceCollectionTreeRow.isCollection()) {
+						this.setDropEffect(event, "copy");
+						return false;
+					}
+					// For now, all cross-library drags are copies
+					if (sourceCollectionTreeRow.ref.libraryID != targetCollectionTreeRow.ref.libraryID) {
+						this.setDropEffect(event, "copy");
+						return false;
+					}
+				}
+
+				if ((Zotero.isMac && event.metaKey) || (!Zotero.isMac && event.shiftKey)) {
+					this.setDropEffect(event, "move");
+				}
+				else {
+					this.setDropEffect(event, "copy");
+				}
+			}
+			else if (event.dataTransfer.types.contains("application/x-moz-file")) {
+				// As of Aug. 2013 nightlies:
+				//
+				// - Setting the dropEffect only works on Linux and OS X.
+				//
+				// - Modifier keys don't show up in the drag event on OS X until the
+				//   drop (https://bugzilla.mozilla.org/show_bug.cgi?id=911918),
+				//   so since we can't show a correct effect, we leave it at
+				//   the default 'move', the least misleading option, and set it
+				//   below in onDrop().
+				//
+				// - The cursor effect gets set by the system on Windows 7 and can't
+				//   be overridden.
+				if (!Zotero.isMac) {
+					if (event.shiftKey) {
+						if (event.ctrlKey) {
+							event.dataTransfer.dropEffect = "link";
+						}
+						else {
+							event.dataTransfer.dropEffect = "move";
+						}
+					}
+					else {
+						event.dataTransfer.dropEffect = "copy";
+					}
+				}
+			}
+			return false;
+		} finally {
+			let prevDropRow = this._dropRow;
+			if (event.dataTransfer.dropEffect != 'none') {
+				this._dropRow = row;
+			} else {
+				this._dropRow = null;
+			}
+			typeof prevDropRow == 'number' && this.tree.invalidateRow(prevDropRow);
+			this.tree.invalidateRow(row);
+		}
+	}
+
+	onDragEnd = () => {
+		this._dropRow = null;
+		Zotero.DragDrop.currentDragSource = null;
+		this._dragImageContainer.innerHTML = "";
+		this.tree.invalidate();
+	}
+
+	/**
+	 * Called by treeRow.onDragOver() before setting the dropEffect
+	 */
+	canDropCheck = (row, orient, dataTransfer) => {
+		//Zotero.debug("Row is " + row + "; orient is " + orient);
+
+		var dragData = Zotero.DragDrop.getDataFromDataTransfer(dataTransfer);
+		if (!dragData) {
+			Zotero.debug("No drag data");
+			return false;
+		}
+		var dataType = dragData.dataType;
+		var data = dragData.data;
+
+		var collectionTreeRow = this.collectionTreeRow;
+
+		if (row != -1 && orient == 0) {
+			var rowItem = this.getRow(row).ref; // the item we are dragging over
+		}
+
+		if (dataType == 'zotero/item') {
+			let items = Zotero.Items.get(data);
+
+			// Directly on a row
+			if (rowItem) {
+				var canDrop = false;
+
+				for (let item of items) {
+					// If any regular items, disallow drop
+					if (item.isRegularItem()) {
+						return false;
+					}
+
+					// Disallow cross-library child drag
+					if (item.libraryID != collectionTreeRow.ref.libraryID) {
+						return false;
+					}
+
+					// Only allow dragging of notes and attachments
+					// that aren't already children of the item
+					if (item.parentItemID != rowItem.id) {
+						canDrop = true;
+					}
+				}
+				return canDrop;
+			}
+
+			// In library, allow children to be dragged out of parent
+			else if (collectionTreeRow.isLibrary(true) || collectionTreeRow.isCollection()) {
+				for (let item of items) {
+					// Don't allow drag if any top-level items
+					if (item.isTopLevelItem()) {
+						return false;
+					}
+
+					// Don't allow web attachments to be dragged out of parents,
+					// but do allow PDFs for now so they can be recognized
+					if (item.isWebAttachment() && item.attachmentContentType != 'application/pdf') {
+						return false;
+					}
+
+					// Don't allow children to be dragged within their own parents
+					var parentItemID = item.parentItemID;
+					var parentIndex = this._rowMap[parentItemID];
+					if (row != -1 && this.getLevel(row) > 0) {
+						if (this.getRow(this.getParentIndex(row)).ref.id == parentItemID) {
+							return false;
+						}
+					}
+					// Including immediately after the parent
+					if (orient == 1) {
+						if (row == parentIndex) {
+							return false;
+						}
+					}
+					// And immediately before the next parent
+					if (orient == -1) {
+						var nextParentIndex = null;
+						for (var i = parentIndex + 1; i < this.rowCount; i++) {
+							if (this.getLevel(i) == 0) {
+								nextParentIndex = i;
+								break;
+							}
+						}
+						if (row === nextParentIndex) {
+							return false;
+						}
+					}
+
+					// Disallow cross-library child drag
+					if (item.libraryID != collectionTreeRow.ref.libraryID) {
+						return false;
+					}
+				}
+				return true;
+			}
+			return false;
+		}
+		else if (dataType == "text/x-moz-url" || dataType == 'application/x-moz-file') {
+			// Disallow direct drop on a non-regular item (e.g. note)
+			if (rowItem) {
+				if (!rowItem.isRegularItem()) {
+					return false;
+				}
+			}
+			// Don't allow drop into searches or publications
+			else if (collectionTreeRow.isSearch() || collectionTreeRow.isPublications()) {
+				return false;
+			}
+
+			return true;
+		}
+
+		return false;
+	};
+
+	/*
+	 *  Called when something's been dropped on or next to a row
+	 */
+	onDrop = async (event, row) => {
+		const dataTransfer = event.dataTransfer;
+		const orient = Zotero.DragDrop.currentOrientation;
+		if (!this.canDrop(row, orient, dataTransfer)) {
+			return false;
+		}
+
+		var dragData = Zotero.DragDrop.getDataFromDataTransfer(dataTransfer);
+		if (!dragData) {
+			Zotero.debug("No drag data");
+			return false;
+		}
+		var dropEffect = dragData.dropEffect;
+		var dataType = dragData.dataType;
+		var data = dragData.data;
+		var sourceCollectionTreeRow = Zotero.DragDrop.getDragSource(dataTransfer);
+		var collectionTreeRow = this.collectionTreeRow;
+		var targetLibraryID = collectionTreeRow.ref.libraryID;
+
+		if (dataType == 'zotero/item') {
+			var ids = data;
+			var items = Zotero.Items.get(ids);
+			if (items.length < 1) {
+				return;
+			}
+
+			// TEMP: This is always false for now, since cross-library drag
+			// is disallowed in canDropCheck()
+			//
+			// TODO: support items coming from different sources?
+			if (items[0].libraryID == targetLibraryID) {
+				var sameLibrary = true;
+			}
+			else {
+				var sameLibrary = false;
+			}
+
+			var toMove = [];
+
+			// Dropped directly on a row
+			if (orient == 0) {
+				// Set drop target as the parent item for dragged items
+				//
+				// canDrop() limits this to child items
+				var rowItem = this.getRow(row).ref; // the item we are dragging over
+				await Zotero.DB.executeTransaction(async function () {
+					for (let i=0; i<items.length; i++) {
+						let item = items[i];
+						item.parentID = rowItem.id;
+						await item.save();
+					}
+				});
+			}
+
+			// Dropped outside of a row
+			else
+			{
+				// Remove from parent and make top-level
+				if (collectionTreeRow.isLibrary(true)) {
+					await Zotero.DB.executeTransaction(async function () {
+						for (let i=0; i<items.length; i++) {
+							let item = items[i];
+							if (!item.isRegularItem()) {
+								item.parentID = false;
+								await item.save()
+							}
+						}
+					});
+				}
+				// Add to collection
+				else
+				{
+					await Zotero.DB.executeTransaction(async function () {
+						for (let i=0; i<items.length; i++) {
+							let item = items[i];
+							var source = item.isRegularItem() ? false : item.parentItemID;
+							// Top-level item
+							if (source) {
+								item.parentID = false;
+								item.addToCollection(collectionTreeRow.ref.id);
+								await item.save();
+							}
+							else {
+								item.addToCollection(collectionTreeRow.ref.id);
+								await item.save();
+							}
+							toMove.push(item.id);
+						}
+					});
+				}
+			}
+
+			// If moving, remove items from source collection
+			if (dropEffect == 'move' && toMove.length) {
+				if (!sameLibrary) {
+					throw new Error("Cannot move items between libraries");
+				}
+				if (!sourceCollectionTreeRow || !sourceCollectionTreeRow.isCollection()) {
+					throw new Error("Drag source must be a collection");
+				}
+				if (collectionTreeRow.id != sourceCollectionTreeRow.id) {
+					await Zotero.DB.executeTransaction(async function () {
+						await collectionTreeRow.ref.removeItems(toMove);
+					}.bind(this));
+				}
+			}
+		}
+		else if (dataType == 'text/x-moz-url' || dataType == 'application/x-moz-file') {
+			// Disallow drop into read-only libraries
+			if (!collectionTreeRow.editable) {
+				let win = Services.wm.getMostRecentWindow("navigator:browser");
+				win.ZoteroPane.displayCannotEditLibraryMessage();
+				return;
+			}
+
+			var targetLibraryID = collectionTreeRow.ref.libraryID;
+
+			var parentItemID = false;
+			var parentCollectionID = false;
+
+			if (orient == 0) {
+				let treerow = this.getRow(row);
+				parentItemID = treerow.ref.id
+			}
+			else if (collectionTreeRow.isCollection()) {
+				var parentCollectionID = collectionTreeRow.ref.id;
+			}
+
+			let addedItems = [];
+			var notifierQueue = new Zotero.Notifier.Queue;
+			try {
+				// If there's a single file being added to a parent, automatic renaming is enabled,
+				// and there are no other non-HTML attachments, we'll rename the file as long as it's
+				// an allowed type. The dragged data could be a URL, so we don't yet know the file type.
+				// This should be kept in sync with ZoteroPane.addAttachmentFromDialog().
+				let renameIfAllowedType = false;
+				let parentItem;
+				if (parentItemID
+					&& data.length == 1
+					&& Zotero.Attachments.shouldAutoRenameFile(dropEffect == 'link')) {
+					parentItem = Zotero.Items.get(parentItemID);
+					if (!parentItem.numNonHTMLFileAttachments()) {
+						renameIfAllowedType = true;
+					}
+				}
+
+				for (var i=0; i<data.length; i++) {
+					var file = data[i];
+
+					if (dataType == 'text/x-moz-url') {
+						var url = data[i];
+						if (url.indexOf('file:///') == 0) {
+							let win = Services.wm.getMostRecentWindow("navigator:browser");
+							// If dragging currently loaded page, only convert to
+							// file if not an HTML document
+							if (win.content.location.href != url ||
+								win.content.document.contentType != 'text/html') {
+								var nsIFPH = Components.classes["@mozilla.org/network/protocol;1?name=file"]
+									.getService(Components.interfaces.nsIFileProtocolHandler);
+								try {
+									var file = nsIFPH.getFileFromURLSpec(url);
+								}
+								catch (e) {
+									Zotero.debug(e);
+								}
+							}
+						}
+
+						// Still string, so remote URL
+						if (typeof file == 'string') {
+							let item;
+							if (parentItemID) {
+								if (!collectionTreeRow.filesEditable) {
+									let win = Services.wm.getMostRecentWindow("navigator:browser");
+									win.ZoteroPane.displayCannotEditLibraryFilesMessage();
+									return;
+								}
+								item = await Zotero.Attachments.importFromURL({
+									libraryID: targetLibraryID,
+									url,
+									renameIfAllowedType,
+									parentItemID,
+									saveOptions: {
+										notifierQueue
+									}
+								});
+							}
+							else {
+								let win = Services.wm.getMostRecentWindow("navigator:browser");
+								item = await win.ZoteroPane.addItemFromURL(url, 'temporaryPDFHack'); // TODO: don't do this
+							}
+							if (item) {
+								addedItems.push(item);
+							}
+							continue;
+						}
+
+						// Otherwise file, so fall through
+					}
+
+					file = file.path;
+
+					// Rename file if it's an allowed type
+					let fileBaseName = false;
+					if (renameIfAllowedType) {
+						fileBaseName = await Zotero.Attachments.getRenamedFileBaseNameIfAllowedType(
+							parentItem, file
+						);
+					}
+
+					let item;
+					if (dropEffect == 'link') {
+						// Rename linked file, with unique suffix if necessary
+						try {
+							if (fileBaseName) {
+								let ext = Zotero.File.getExtension(file);
+								let newName = await Zotero.File.rename(
+									file,
+									fileBaseName + (ext ? '.' + ext : ''),
+									{
+										unique: true
+									}
+								);
+								// Update path in case the name was changed to be unique
+								file = OS.Path.join(OS.Path.dirname(file), newName);
+							}
+						}
+						catch (e) {
+							Zotero.logError(e);
+						}
+
+						item = await Zotero.Attachments.linkFromFile({
+							file,
+							parentItemID,
+							collections: parentCollectionID ? [parentCollectionID] : undefined,
+							saveOptions: {
+								notifierQueue
+							}
+						});
+					}
+					else {
+						if (file.endsWith(".lnk")) {
+							let win = Services.wm.getMostRecentWindow("navigator:browser");
+							win.ZoteroPane.displayCannotAddShortcutMessage(file);
+							continue;
+						}
+
+						item = await Zotero.Attachments.importFromFile({
+							file,
+							fileBaseName,
+							libraryID: targetLibraryID,
+							parentItemID,
+							collections: parentCollectionID ? [parentCollectionID] : undefined,
+							saveOptions: {
+								notifierQueue
+							}
+						});
+						// If moving, delete original file
+						if (dragData.dropEffect == 'move') {
+							try {
+								await OS.File.remove(file);
+							}
+							catch (e) {
+								Zotero.logError("Error deleting original file " + file + " after drag");
+							}
+						}
+					}
+
+					if (item) {
+						addedItems.push(item);
+					}
+				}
+			}
+			finally {
+				await Zotero.Notifier.commit(notifierQueue);
+			}
+
+			// Automatically retrieve metadata for PDFs
+			if (!parentItemID) {
+				Zotero.RecognizePDF.autoRecognizeItems(addedItems);
+			}
+		}
+	};
+
+	onTreeDragEnter = (event) => {
+		Zotero.DragDrop.currentEvent = event;
+	}
+	
+	onTreeDragExit = () => {
+		Zotero.DragDrop.currentEvent = null;
+	}
+
+	setDropEffect(event, effect) {
+		// On Windows (in Fx26), Firefox uses 'move' for unmodified drags
+		// and 'copy'/'link' for drags with system-default modifier keys
+		// as long as the actions are allowed by the initial effectAllowed set
+		// in onDragStart, regardless of the effectAllowed or dropEffect set
+		// in onDragOver. It doesn't seem to be possible to use 'copy' for
+		// the default and 'move' for modified, as we need to in the collections
+		// tree. To prevent inaccurate cursor feedback, we set effectAllowed to
+		// 'copy' in onDragStart, which locks the cursor at 'copy'. ('none' still
+		// changes the cursor, but 'move'/'link' do not.) It'd be better to use
+		// the unadorned 'move', but we use 'copy' instead because with 'move' text
+		// can't be dragged to some external programs (e.g., Chrome, Notepad++),
+		// which seems worse than always showing 'copy' feedback.
+		//
+		// However, since effectAllowed is enforced, leaving it at 'copy'
+		// would prevent our modified 'move' in the collections tree from working,
+		// so we also have to set effectAllowed here (called from onDragOver) to
+		// the same action as the dropEffect. This allows the dropEffect setting
+		// (which we use in the tree's canDrop() and drop() to determine the desired
+		// action) to be changed, even if the cursor doesn't reflect the new setting.
+		if (Zotero.isWin || Zotero.isLinux) {
+			event.dataTransfer.effectAllowed = effect;
+		}
+		event.dataTransfer.dropEffect = effect;
+	}
+
+	// //////////////////////////////////////////////////////////////////////////////
+	//
+	//  Private methods
+	//
+	// //////////////////////////////////////////////////////////////////////////////
+
+	_handleSelectionChange = (selection) => {
+		// Update aria-activedescendant on the tree
+		this.forceUpdate();
+		this.props.onSelectionChange(selection);
 	}
 
 	/**
@@ -1984,7 +2697,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	_getRowData = ({ index }) => {
 		var treeRow = this.getRow(index);
 		if (!treeRow) {
-			throw new Error("Attempting to get row data for a non-existant tree row");
+			throw new Error(`Attempting to get row data for a non-existant tree row ${index}`);
 		}
 		var itemID = treeRow.id;
 		
@@ -2349,8 +3062,10 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			var consistentTop = Math.max(0, newRow - pos);
 			this.tree.scrollToRow(Math.min(fullTop, consistentTop));
 		}
-		this.tree.invalidate();
-		this.selection.selectEventsSuppressed = false;
+		this.forceUpdate(() => {
+			this.tree.invalidate();
+			this.selection.selectEventsSuppressed = false;
+		})
 	}
 
 	_displayColumnPickerMenu = (event) => {
@@ -2739,6 +3454,7 @@ Zotero.ItemTree.Columns = class {
 		const legacyPersistSetting = persistSettings[legacyDataKey];
 		if (legacyPersistSetting) {
 			// Remove legacy pref
+			delete persistSettings[legacyDataKey];
 			for (const key in legacyPersistSetting) {
 				if (typeof legacyPersistSetting[key] == "string") {
 					if (key == 'sortDirection') {
@@ -2781,7 +3497,6 @@ Zotero.ItemTree.Columns = class {
 	async _updateItemTree() {
 		// TODO: maybe move to itemTree?
 		this._itemTree.forceUpdate(() => {
-			this._itemTree.tree.updateTreebox();
 			this._itemTree.tree.invalidate();
 		});
 	}

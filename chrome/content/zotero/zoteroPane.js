@@ -917,7 +917,12 @@ var ZoteroPane = new function()
 
 	this.initItemsTree = async function () {
 		var itemsTree = document.getElementById('zotero-items-tree');
-		ZoteroPane.itemsView = await Zotero.ItemTree.init(itemsTree);
+		ZoteroPane.itemsView = await Zotero.ItemTree.init(itemsTree, {
+			onSelectionChange: Zotero.Utilities.debounce(
+				selection => ZoteroPane.itemSelected(selection), 100),
+			onContextMenu: e => ZoteroPane.onItemsContextMenuOpen(e),
+			dragAndDrop: true
+		});
 		ZoteroPane.itemsView.onRefresh.addListener(() => ZoteroPane.setTagScope());
 		ZoteroPane.itemsView.onLoad.addListener(() => Zotero.uiIsReady());
 	}
@@ -4689,6 +4694,11 @@ var ZoteroPane = new function()
 
 		this.updateToolbarPosition();
 		this.updateTagsBoxSize();
+		if (ZoteroPane.itemsView) {
+			// Need to immediately rerender the items here without any debouncing
+			// since tree height will have changed
+			ZoteroPane.itemsView._updateHeight();
+		}
 	}
 	
 	
@@ -4833,10 +4843,6 @@ var ZoteroPane = new function()
 			itemsToolbar.setAttribute("flex", "0");
 			itemToolbar.setAttribute("flex", "1");
 		}
-		
-		// Allow item pane to shrink to available height in stacked mode, but don't expand to be too
-		// wide when there's no persisted width in non-stacked mode
-		itemPane.setAttribute("flex", stackedLayout ? 1 : 0);
 		
 		this.handleTagSelectorResize();
 	}

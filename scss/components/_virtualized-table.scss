@@ -1,4 +1,4 @@
-.virtualized-table {
+.virtualized-table, .drag-image-container{
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -30,6 +30,31 @@
     align-items: center;
     width: 100%;
     height: 22px;
+    box-sizing: border-box;
+    
+    &.drop {
+      color: $shade-0 !important;
+      background: $shade-5 !important;
+    }
+
+    span.drop-before, span.drop-after {
+      position: absolute;
+      width: 20%;
+      height: 1px;
+      background-color: $shade-5;
+      pointer-events: none;
+    }
+    span.drop-before {
+      top: 0;
+    }
+    span.drop-after {
+      bottom: -1px;
+    }
+    
+    &.selected {
+      background-color: highlight;
+      color: highlighttext;
+    }
   }
   
   .column-drag-marker {
@@ -106,13 +131,14 @@
   }
 }
 
-.virtualized-table-body {
+.virtualized-table-body, .drag-image-container{
   flex: 1 0;
   
   .cell {
     padding: 0 5px;
     text-overflow: ellipsis;
     overflow: hidden;
+    pointer-events: none;
     
     &:first-child {
       padding-left: 5px;
