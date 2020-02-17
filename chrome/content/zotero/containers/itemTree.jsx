@@ -3347,7 +3347,7 @@ Zotero.ItemTree.Columns = class {
 	constructor(itemTree) {
 		this._itemTree = itemTree;
 		const visibilityGroup = this._visibilityGroup = itemTree.collectionTreeRow.visibilityGroup;
-		let visibilityGroupSettings = JSON.parse(Zotero.Prefs.get('itemsView.columnVisibility'));
+		// let visibilityGroupSettings = JSON.parse(Zotero.Prefs.get('itemsView.columnVisibility') || "{}");
 		
 		this._prefKey = itemTree.id + "-" + visibilityGroup;
 		
@@ -3413,7 +3413,7 @@ Zotero.ItemTree.Columns = class {
 		}
 		// Storing back persist settings to account for legacy upgrades
 		this.storePrefs(columnsSettings);
-		Zotero.Prefs.set('itemsView.columnVisibility', JSON.stringify(visibilityGroupSettings));
+		// Zotero.Prefs.set('itemsView.columnVisibility', JSON.stringify(visibilityGroupSettings));
 
 		// Set column width CSS rules
 		this.resize(columnWidths);
