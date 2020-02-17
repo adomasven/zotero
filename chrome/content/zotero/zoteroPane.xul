@@ -329,7 +329,7 @@
 				</splitter>
 				
 				<box id="zotero-layout-switcher" orient="horizontal" zotero-persist="orient" flex="1">
-					<hbox id="zotero-items-pane" zotero-persist="width height">
+					<hbox id="zotero-items-pane" zotero-persist="width height" flex="1">
 						<!--<deck id="zotero-items-pane-content" selectedIndex="0" flex="1">-->
 
 							<html:div id="zotero-items-tree"/>
@@ -550,7 +550,7 @@
 					</splitter>
 
 					<!-- itemPane.xul -->
-					<vbox id="zotero-item-pane" flex="1"/>
+					<vbox id="zotero-item-pane"/>
 				</box>
 			</hbox>
 		</vbox>

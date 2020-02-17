@@ -1097,7 +1097,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		});
 	}
 
-	updateHeight = Zotero.Utilities.debounce(this._updateHeight);
+	updateHeight = Zotero.Utilities.debounce(this._updateHeight, 200);
 
 	async changeCollectionTreeRow(collectionTreeRow) {
 		this.collectionTreeRow = collectionTreeRow;
