@@ -424,7 +424,6 @@ class VirtualizedTable extends React.Component {
 	}
 
 	_handleColumnDragStop = (event, cancelled) => {
-		event.stopPropagation();
 		if (!cancelled && typeof this.state.dragging == "number") {
 			const { index } = this._findColumnDragPosition(event.clientX);
 			// If inserting before the column that was being dragged
