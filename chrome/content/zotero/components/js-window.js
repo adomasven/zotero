@@ -179,9 +179,9 @@ module.exports = class {
 	 * @param index
 	 */
 	scrollToItem(index) {
-		const { itemHeight, scrollOffset, targetElement } = this;
+		const { itemHeight, scrollOffset } = this;
 		const itemCount = this._getItemCount();
-		const height = targetElement.getBoundingClientRect().height;
+		const height = this.getWindowHeight();
 
 		index = Math.max(0, Math.min(index, itemCount - 1));
 		let startPosition = this._getItemPosition(index);
@@ -199,8 +199,12 @@ module.exports = class {
 	}
 	
 	getLastVisibleRow() {
-		const height = this.targetElement.getBoundingClientRect().height;
+		const height = this.getWindowHeight();
 		return Math.max(1, Math.floor((this.scrollOffset + height + 1) / this.itemHeight)) - 1;
+	}
+	
+	getWindowHeight() {
+		return this.targetElement.getBoundingClientRect().height;
 	}
 	
 	getIndexByMouseEventPosition = (yOffset) => {
@@ -213,7 +217,7 @@ module.exports = class {
 	 * @returns {Integer} - the number of fully visible items in the scrollbox
 	 */
 	getPageLength() {
-		const height = this.targetElement.getBoundingClientRect().height;
+		const height = this.getWindowHeight();
 		return Math.ceil(height / this.itemHeight);
 	}
 
@@ -222,9 +226,9 @@ module.exports = class {
 	};
 	
 	_getRangeToRender() {
-		const { itemHeight, targetElement, overscanCount, scrollDirection, scrollOffset } = this;
+		const { itemHeight, overscanCount, scrollDirection, scrollOffset } = this;
 		const itemCount = this._getItemCount();
-		const height = targetElement.getBoundingClientRect().height;
+		const height =  this.getWindowHeight();
 
 		if (itemCount === 0) {
 			return [0, 0, 0, 0];

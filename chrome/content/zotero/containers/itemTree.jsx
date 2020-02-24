@@ -210,7 +210,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		this.renderItem = makeItemRenderer(this);
 
 		this.onLoad = this._createEventBinding('load', true, true);
-		this.onSelect = this._createEventBinding('select');
 		this.onRefresh = this._createEventBinding('refresh');
 	}
 
@@ -239,10 +238,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	
 	componentDidUnmount() {
 		this.domEl.removeChild(this._dragImageContainer);
-	}
-
-	waitForSelect() {
-		return this._waitForEvent('select');
 	}
 
 	waitForLoad() {
@@ -1224,7 +1219,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		// If items are already selected, just scroll to the top-most one
 		var selectedRows = this.selection.selected;
 		if (rowsToSelect.length == selectedRows.size && rowsToSelect.every(row => selectedRows.has(row))) {
-			// this.ensureRowsAreVisible(rowsToSelect);
+			this.ensureRowsAreVisible(rowsToSelect);
 			return rowsToSelect.length;
 		}
 		
@@ -1573,10 +1568,10 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		}
 		itemHeight *= Zotero.Prefs.get('fontSize');
 		
-		const pageLength = Math.floor(this.domEl.parentElement.clientHeight / itemHeight);
+		const pageLength = Math.floor(this._treebox.getWindowHeight() / itemHeight);
 		const maxBuffer = 5;
 		
-		indices = indices.concat();
+		indices = Array.from(indices);
 		indices.sort((a, b) => a - b);
 		
 		var indicesWithParents = [];
@@ -1590,6 +1585,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			if (indicesWithParents[indicesWithParents.length - 1] - indicesWithParents[0] - buffer < pageLength) {
 				//Zotero.debug(`We can fit all parent indices with buffer ${buffer}`);
 				this.ensureRowIsVisible(indicesWithParents[0] - buffer);
+				this.ensureRowIsVisible(indicesWithParents[indicesWithParents.length-1] + buffer);
 				return;
 			}
 		}
@@ -1599,6 +1595,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			if (indices[indices.length - 1] - indices[0] - buffer < pageLength) {
 				//Zotero.debug(`We can fit all indices with buffer ${buffer}`);
 				this.ensureRowIsVisible(indices[0] - buffer);
+				this.ensureRowIsVisible(indices[indices.length-1] + buffer);
 				return;
 			}
 		}
@@ -1607,8 +1604,9 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		// put it five indices from the top
 		if (indices[0] != indicesWithParents[0]) {
 			for (let buffer = maxBuffer; buffer >= 0; buffer--) {
-				 if (indices[0] - indicesWithParents[0] - buffer <= pageLength) {
+				if (indices[0] - indicesWithParents[0] - buffer <= pageLength) {
 					//Zotero.debug(`Scrolling to first parent minus ${buffer}`);
+					this.ensureRowIsVisible(indicesWithParents[0] + buffer);
 					this.ensureRowIsVisible(indicesWithParents[0] - buffer);
 					return;
 				}
@@ -1617,7 +1615,8 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		
 		// Otherwise just put the first row at the top
 		//Zotero.debug("Scrolling to first row " + Math.max(indices[0] - maxBuffer, 0));
-		this.ensureRowIsVisible(Math.max(indices[0] - maxBuffer, 0));
+		this.ensureRowIsVisible(indices[0] - maxBuffer);
+		this.ensureRowIsVisible(indices[0] + maxBuffer);
 	}
 	
 	async toggleOpenState(index, skipRowMapRefresh=false) {
@@ -3002,6 +3001,8 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			Zotero.logError(e);
 		}
 
+		this.ensureRowsAreVisible(Array.from(this.selection.selected.keys()));
+
 		if (unsuppress) {
 			this.selection.selectEventsSuppressed = false;
 		}
@@ -3044,21 +3045,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 
 		await this._refreshPromise;
 		this.selection.selectEventsSuppressed = true;
-		var savedSelection = this.getSelectedItems(true);
-		if (savedSelection.length == 1) {
-			var pos = this._rowMap[savedSelection[0]] - this._treebox.getFirstVisibleRow();
-		}
 		await this.sort();
-		this._restoreSelection(savedSelection);
-		// If single row was selected, try to keep it in the same place
-		if (savedSelection.length == 1) {
-			var newRow = this._rowMap[savedSelection[0]];
-			// Calculate the last row that would give us a full view
-			var fullTop = Math.max(0, this._rows.length - this._treebox.getPageLength());
-			// Calculate the row that would give us the same position
-			var consistentTop = Math.max(0, newRow - pos);
-			this.tree.scrollToRow(Math.min(fullTop, consistentTop));
-		}
 		this.forceUpdate(() => {
 			this.tree.invalidate();
 			this.selection.selectEventsSuppressed = false;
