@@ -29,6 +29,7 @@ const React = require('react');
 const JSWindow = require('./js-window');
 const { injectIntl } = require('react-intl');
 const { TreeSelection } = require('./virtualized-tree');
+const { IconDownChevron } = require('components/icons');
 const cx = require('classnames');
 const Draggable = require('./draggable');
 
@@ -547,7 +548,11 @@ class VirtualizedTable extends React.Component {
 			}
 			let sortIndicator = "";
 			if (!column.iconLabel && column.sortDirection) {
-				sortIndicator = <span className={"sort-indicator " + (column.sortDirection === 1 ? "ascending" : "descending")}/>;
+				if (!Zotero.isNode && Zotero.isLinux) {
+					sortIndicator = <span className={"sort-indicator " + (column.sortDirection === 1 ? "ascending" : "descending")}/>;
+				} else {
+					sortIndicator = <IconDownChevron className="sort-indicator"/>;
+				}
 			}
 			return (<Draggable
 				onDragStart={this._handleColumnDragStart.bind(this, index)}

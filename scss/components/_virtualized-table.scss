@@ -1,3 +1,6 @@
+//
+// Virtualized table
+// --------------------------------------------------
 .virtualized-table, .drag-image-container{
   width: 100%;
   display: flex;
@@ -121,7 +124,7 @@
       -moz-appearance: toolbarbutton-dropdown;
       display: block;
       position: absolute;
-      right: 5px;
+      right: 10px;
       transform: scale(1.25);
       
       &.ascending {
