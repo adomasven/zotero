@@ -253,11 +253,19 @@ class VirtualizedTable extends React.Component {
 	}
 	
 	_handleMouseDown = async (e, index) => {
-		await Zotero.Promise.delay(100);
-		// All modifier clicks handled in mouseUp
-		if (e.shiftKey || e.ctrlKey || e.metaKey) return;
-		if (this.selection.isSelected(index)) return;
-		this._onSelection(index, false, false);
+		const modifierClick = e.shiftKey || e.ctrlKey || e.metaKey;
+		if (e.button == 2) {
+			if (!modifierClick && !this.selection.isSelected(index)) {
+				this._onSelection(index, false, false);
+			}
+			if (this.props.onItemContextMenu) {
+				this.props.onItemContextMenu(e);
+			}
+		}
+		// All modifier clicks handled in mouseUp per mozilla itemtree convention
+		if (!modifierClick && !this.selection.isSelected(index)) {
+			this._onSelection(index, false, false);
+		}
 	}
 	
 	_handleMouseUp = async (e, index) => {
@@ -265,6 +273,7 @@ class VirtualizedTable extends React.Component {
 		const toggleSelection = e.ctrlKey || e.metaKey;
 		if (this._isMouseDrag || e.button != 0) {
 			// other mouse buttons are ignored
+			this._isMouseDrag = false;
 			return;
 		}
 		this._onSelection(index, shiftSelect, toggleSelection);
@@ -421,6 +430,7 @@ class VirtualizedTable extends React.Component {
 	_handleColumnDragStart = (index, event) => {
 		if (!this.props.onColumnReorder || event.button !== 0) return false;
 		this.setState({ dragging: index });
+		this._isMouseDrag = true;
 	}
 
 	_handleColumnDragStop = (event, cancelled) => {

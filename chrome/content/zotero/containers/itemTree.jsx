@@ -138,10 +138,6 @@ function makeItemRenderer(itemTree) {
 		}
 		
 		if (!oldDiv) {
-			if (itemTree.props.onContextMenu) {
-				div.addEventListener('contextmenu', itemTree.props.onContextMenu, { passive: true });
-			}
-			
 			if (itemTree.props.dragAndDrop) {
 				div.setAttribute('draggable', true);
 				div.addEventListener('dragstart', e => itemTree.onDragStart(e, index), { passive: true });
@@ -1083,6 +1079,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 				onColumnResize: this._columns.resize,
 				onColumnReorder: this._columns.setOrder,
 				onHeaderClick: this._handleHeaderClick,
+				onItemContextMenu: this.props.onContextMenu,
 
 				label: Zotero.getString('pane.collections.title'),
 			}
