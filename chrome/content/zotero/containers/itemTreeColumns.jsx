@@ -252,7 +252,6 @@ const COLUMNS = [
 		dataKey: "hasAttachment",
 		defaultIn: new Set(["default"]),
 		disabledIn: "feed",
-		className: "treecol-image",
 		label: "zotero.tabs.attachments.label",
 		iconLabel: <Icons.IconAttachSmall />,
 		fixedWidth: true,
@@ -261,7 +260,6 @@ const COLUMNS = [
 	{
 		dataKey: "numNotes",
 		disabledIn: "feed",
-		className: "treecol-image",
 		label: "zotero.tabs.notes.label",
 		iconLabel: <Icons.IconTreeitemNoteSmall />,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])

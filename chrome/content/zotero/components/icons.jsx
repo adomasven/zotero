@@ -85,6 +85,8 @@ i('Cross', "chrome://zotero/skin/cross.png");
 
 i('Attach', "chrome://zotero/skin/attach.png");
 i('AttachSmall', "chrome://zotero/skin/attach-small.png");
+i('BulletBlue', "chrome://zotero/skin/bullet_blue.png");
+i('BulletBlueEmpty', "chrome://zotero/skin/bullet_blue_empty.png");
 
 // TreeItems
 i('TreeitemArtwork', 'chrome://zotero/skin/treeitem-artwork.png');

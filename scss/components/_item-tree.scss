@@ -61,15 +61,12 @@
   .cell.hasAttachment {
     flex: 0;
     min-width: 14px;
+    max-width: 14px;
     box-sizing: content-box;
     padding: 0 4px;
   }
-}
-
-#zotero-items-column-numNotes {
-	list-style-image: url(chrome://zotero/skin/treeitem-note-small.png);
-}
-
-#zotero-items-column-numNotes .treecol-icon {
-	width: 12px;
+  
+  .cell.numNotes {
+    text-align: center;
+  }
 }

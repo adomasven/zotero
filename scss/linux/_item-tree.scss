@@ -1,7 +1,7 @@
 #zotero-items-tree {
   border: 1px solid #ccc;
   
-  .cell.hasAttachment {
+  .cell.hasAttachment, .cell.numNotes {
     padding: 0 8px;
   }
 }

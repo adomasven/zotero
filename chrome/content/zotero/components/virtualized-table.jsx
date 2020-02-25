@@ -531,7 +531,8 @@ class VirtualizedTable extends React.Component {
 	_renderHeaderCells = () => {
 		return this.props.columns.filter(col => !col.hidden).map((column, index) => {
 			if (column.hidden) return;
-			let label = this.props.intl.formatMessage({ id: column.label });
+			let labelAttribute = this.props.intl.formatMessage({ id: column.label });
+			let label = labelAttribute;
 			if (column.iconLabel) {
 				label = column.iconLabel;
 			}
@@ -554,11 +555,13 @@ class VirtualizedTable extends React.Component {
 					sortIndicator = <IconDownChevron className={"sort-indicator " + (column.sortDirection === 1 ? "ascending" : "descending")}/>;
 				}
 			}
+			const className = cx("cell", column.className, { dragging: this.state.dragging == index },
+				{ "cell-icon": !!column.iconLabel });
 			return (<Draggable
 				onDragStart={this._handleColumnDragStart.bind(this, index)}
 				onDrag={this._handleColumnDrag}
 				onDragStop={this._handleColumnDragStop}
-				className={cx("cell " + column.className, { dragging: this.state.dragging == index })}
+				className={className}
 				delay={500}
 				key={column.label + '-draggable'}>
 				<div
@@ -567,7 +570,7 @@ class VirtualizedTable extends React.Component {
 					{resizer}
 					<span
 						key={column.label + '-label'}
-						label={label}
+						label={labelAttribute}
 						className={`label ${column.dataKey}`}>
 						{label}
 					</span>

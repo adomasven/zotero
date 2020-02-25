@@ -116,8 +116,11 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    &.fixed-width > .label {
-      margin-left: 0;
+    &.cell-icon {
+      > .label {
+        margin-left: 0;
+      }
+      justify-content: center;
     }
     
     .sort-indicator {

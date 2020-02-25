@@ -95,6 +95,58 @@ function makeItemRenderer(itemTree) {
 		return span;
 	}
 	
+	function renderHasAttachmentCell(index, label, column) {
+		let span = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+		span.className = `cell ${column.className}`;
+		
+		if (itemTree.collectionTreeRow.isTrash()) return span;
+
+		const item = itemTree.getRow(index).ref;
+		
+		if ((!itemTree.isContainer(index) || !itemTree.isContainerOpen(index))
+				&& Zotero.Sync.Storage.getItemDownloadImageNumber(item)) {
+			return span;
+		}
+		
+		if (itemTree.isContainer(index)) {
+			if (item.isRegularItem()) {
+				const state = item.getBestAttachmentStateCached();
+				let icon = "";
+				if (state === 1) {
+					icon = getDOMIcon('IconBulletBlue');
+					icon.classList.add('cell-icon');
+				}
+				else if (state === -1) {
+					icon = getDOMIcon('IconBulletEmptyEmpty');
+					icon.classList.add('cell-icon');
+				}
+				span.append(icon);
+				
+				item.getBestAttachmentState()
+				// TODO: With no cell refreshing this is possibly wildly inefficient
+				// Refresh cell when promise is fulfilled
+				.then(bestState => bestState != state && itemTree.tree.invalidateRow(index));
+			}
+		}
+		
+		if (item.isFileAttachment()) {
+			const exists = item.fileExistsCached();
+			let icon = "";
+			if (exists !== null) {
+				icon = exists ? getDOMIcon('IconBulletBlue') : getDOMIcon('IconBulletBlueEmpty');
+				icon.classList.add('cell-icon');
+			}
+			span.append(icon);
+			
+			item.fileExists()
+			// TODO: With no cell refreshing this is possibly wildly inefficient
+			// Refresh cell when promise is fulfilled
+			.then(realExists => realExists != exists && itemTree.tree.invalidateRow(index));
+		}
+		
+		return span;
+	}
+	
 	function renderCell(index, label, column) {
 		let span = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
 		span.className = `cell ${column.className}`;
@@ -131,6 +183,9 @@ function makeItemRenderer(itemTree) {
 			
 			if (column.primary) {
 				div.appendChild(renderPrimaryCell(index, rowData[column.dataKey], column));
+			}
+			else if (column.dataKey === 'hasAttachment') {
+				div.appendChild(renderHasAttachmentCell(index, rowData[column.dataKey], column));
 			}
 			else {
 				div.appendChild(renderCell(index, rowData[column.dataKey], column));
@@ -210,6 +265,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		this.renderItem = makeItemRenderer(this);
 
 		this.onLoad = this._createEventBinding('load', true, true);
+		this.onSelect = this._createEventBinding('select');
 		this.onRefresh = this._createEventBinding('refresh');
 	}
 
@@ -242,6 +298,10 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 
 	waitForLoad() {
 		return this._waitForEvent('load');
+	}
+	
+	waitForSelect() {
+		return this._waitForEvent('select');
 	}
 	
 	async makeVisible() {
@@ -2710,14 +2770,12 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		}
 		
 		row.hasAttachment = "";
-		// TODO:
 		// Don't show pie for open parent items, since we show it for the
 		// child item
-		// if (!this.isContainer(row) || !this.isContainerOpen(row)) {
-		// 	var num = Zotero.Sync.Storage.getItemDownloadImageNumber(treeRow.ref);
-		// 	//var num = Math.round(new Date().getTime() % 10000 / 10000 * 64);
-		// 	if (num !== false) props.push("pie", "pie" + num);
-		// }
+		if (!this.isContainer(index) || !this.isContainerOpen(index)) {
+			var num = Zotero.Sync.Storage.getItemDownloadImageNumber(treeRow.ref);
+			row.hasAttachment = num === false ? "pie" : "pie" + num;
+		}
 		
 		// Style unread items in feeds
 		if (treeRow.ref.isFeedItem && !treeRow.ref.isRead) {
