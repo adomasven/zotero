@@ -654,7 +654,7 @@ class VirtualizedTable extends React.Component {
 		const tree = document.querySelector(`#${this.props.id}`);
 		const header = document.querySelector(`#${this.props.id} .virtualized-table-header`);
 		const scrollbarWidth = Math.max(0,
-			tree.getBoundingClientRect().width - jsWindow.getBoundingClientRect().width - 4);
+			tree.getBoundingClientRect().width - jsWindow.getBoundingClientRect().width);
 		header.style.width = `calc(100% - ${scrollbarWidth}px)`;
 	}
 
