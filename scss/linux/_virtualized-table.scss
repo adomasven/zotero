@@ -1,3 +1,7 @@
-.ReactVirtualized__Table__row {
-  width: calc(100% + 10px) !important;
+.virtualized-table-header .cell .sort-indicator {
+  transform: scale(1.25);
+  
+  &.ascending {
+    transform: scale(1.25) rotate(180deg);
+  }
 }

@@ -9,10 +9,11 @@
   background-repeat: no-repeat;
   background-size: contain;
   background-position: center;
+  vertical-align: middle;
 }
 
-.icon.icon-downchevron > img {
-  width: 7px;
+.icon.icon-downchevron {
+  width: 7px !important;
 }
 
 .icon {

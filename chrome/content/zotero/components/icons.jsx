@@ -40,14 +40,15 @@ function i(name, svgOrSrc, hasHiDPI=true) {
 			if (typeof svgOrSrc == 'string') {
 				if (!props.style) props.style = {};
 				props.style.backgroundImage = `url(${svgOrSrc})`;
-				props.className = "icon-bg";
+				props.className = props.className || "";
+				props.className += " icon-bg";
 				// We use css background-image.
 				// This is a performance optimization for fast-scrolling trees.
 				// If we use img elements they are slow to render
 				// and produce pop-in when fast-scrolling.
 				return (
 					<Icon {...props} />
-				)
+				);
 			}
 
 			return (

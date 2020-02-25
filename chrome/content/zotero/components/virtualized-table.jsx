@@ -551,7 +551,7 @@ class VirtualizedTable extends React.Component {
 				if (!Zotero.isNode && Zotero.isLinux) {
 					sortIndicator = <span className={"sort-indicator " + (column.sortDirection === 1 ? "ascending" : "descending")}/>;
 				} else {
-					sortIndicator = <IconDownChevron className="sort-indicator"/>;
+					sortIndicator = <IconDownChevron className={"sort-indicator " + (column.sortDirection === 1 ? "ascending" : "descending")}/>;
 				}
 			}
 			return (<Draggable
