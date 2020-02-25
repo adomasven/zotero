@@ -14,7 +14,6 @@
   }
 }
 #zotero-items-tree {
-  border: 1px solid #ccc;
   background-color: -moz-field;
   overflow: hidden;
   display: flex;
@@ -51,29 +50,19 @@
       min-width: 8px;
       min-height: 8px;
       margin-left: 3px;
-      border-radius: 2px;
+      border-radius: 1px;
     }
     
     .cell-icon {
       min-width: 16px;
     }
-    
-    @media(min-resolution: 1.25dppx) {
-      .tag-swatch {
-        min-width: 16px;
-        min-height: 16px;
-      }
-      .retracted, .tag-swatch {
-        margin-left: 6px;
-      }
-    }
   }
   
   .cell.hasAttachment {
     flex: 0;
-    min-width: 13px;
+    min-width: 14px;
     box-sizing: content-box;
-    padding: 0 8px;
+    padding: 0 4px;
   }
 }
 

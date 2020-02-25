@@ -2179,10 +2179,6 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		
 		collectionType = Zotero.Utilities.capitalize(collectionType);
 		iconClsName = iconClsName || "IconTreesource" + collectionType;
-		// N.B. Should use css-image-set in Electron
-		if (window.devicePixelRatio >= 1.25 && ((iconClsName + "2x") in Icons)) {
-			iconClsName += "2x";
-		}
 		iconCls = Icons[iconClsName];
 		
 		if (!iconCls) {

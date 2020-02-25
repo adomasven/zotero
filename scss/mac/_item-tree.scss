@@ -1,0 +1,21 @@
+#zotero-items-tree {
+  // Alternating row colours
+  .virtualized-table-body .js-window {
+    background: repeating-linear-gradient(
+      0deg,
+      -moz-OddTreeRow,
+      -moz-OddTreeRow 18px,
+      -moz-EvenTreeRow 18px,
+      -moz-EvenTreeRow 36px
+    );
+  }
+  
+  // Selected rows when the tree is not the focused element
+  .virtualized-table:not(:focus) {
+    .row.selected {
+      background: #dcdcdc;
+      color: initial;
+    }
+  }
+
+}

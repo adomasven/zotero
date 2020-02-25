@@ -1034,7 +1034,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			return <div className={"items-pane-message"}>{Zotero.getString('pane.items.loading')}</div>;
 		}
 		
-		let itemHeight = 20; // px
+		let itemHeight = 18; // px
 		if (Zotero.isLinux) {
 			itemHeight = 22;
 		}
@@ -3313,9 +3313,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			iconClsName = "IconTreeitem";
 		}
 		// N.B. Should use css-image-set in Electron
-		if (Zotero.hiDPI && ((iconClsName + "2x") in Icons)) {
-			iconClsName += "2x";
-		}
 		return getDOMIcon(iconClsName);
 	}
 	

@@ -1,0 +1,38 @@
+.virtualized-table, .drag-image-container {
+  .arrow, .twisty {
+    width: 19px;
+    
+    svg {
+      fill: #888;
+      width: 16px;
+    }
+  }
+
+  .focused:not(.highlighted) .arrow svg, .focused:not(.highlighted) .twisty svg {
+    fill: #fff;
+  }
+
+  .spacer-arrow, .spacer-twisty {
+    min-width: 19px;
+  }
+}
+
+.virtualized-table-body, .drag-image-container{
+  .cell:not(:first-child) {
+    border-left: 1px solid #ddd;
+  }
+}
+
+// IDK why, but these heights are all over the place on macOS (not a f(x)=x)
+*[zoteroFontSize=medium] .virtualized-table-body .row {
+  height: 1.739em;
+}
+
+*[zoteroFontSize=large] .virtualized-table-body .row {
+  height: 1.68em;
+}
+
+*[zoteroFontSize=x-large] .virtualized-table-body .row {
+  height: 1.697em;
+}
+
