@@ -155,7 +155,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			event.preventDefault();
 		}
 		else if (event.key == "F2" && !Zotero.isMac) {
-			this.handleActivate(this.selection.pivot);
+			this.handleActivate(this.selection.focused);
 		}
 		else if (event.key.length == 1) {
 			this.handleTyping(event.key);
@@ -165,7 +165,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	
 	handleSelectionChange = (selection) => {
 		selection = selection || this.selection;
-		let treeRow = this.getRow(selection.pivot);
+		let treeRow = this.getRow(selection.focused);
 		if (this._editing) {
 			if (this._editing == treeRow) return;
 			this.commitEditingName(this._editing);
@@ -173,7 +173,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		}
 		this.forceUpdateOnce();
 		this.props.onSelectionChange && this.props.onSelectionChange(this.prevSelection);
-		this.prevSelection = selection.pivot;
+		this.prevSelection = selection.focused;
 	}
 	
 	handleActivate = (index) => {
@@ -199,11 +199,11 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			}
 		}
 		if (allSameChar) {
-			for (let i = this.selection.pivot + 1, checked = 0; checked < this._rows.length; i++, checked++) {
+			for (let i = this.selection.focused + 1, checked = 0; checked < this._rows.length; i++, checked++) {
 				i %= this._rows.length;
 				let row = this.getRow(i);
 				if (this.isSelectable(i) && row.getName().toLowerCase().indexOf(char) == 0) {
-					if (i != this.selection.pivot) {
+					if (i != this.selection.focused) {
 						this.ensureRowIsVisible(i);
 						await this.selectWait(i);
 					}
@@ -215,7 +215,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			for (let i = 0; i < this._rows.length; i++) {
 				let row = this.getRow(i);
 				if (this.isSelectable(i) && row.getName().toLowerCase().indexOf(this._typingString) == 0) {
-					if (i != this.selection.pivot) {
+					if (i != this.selection.focused) {
 						this.ensureRowIsVisible(i);
 						await this.selectWait(i);
 					}
@@ -547,6 +547,9 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	 * @return {Promise}
 	 */
 	async selectWait(index) {
+		if (this.ref && this.selection.isSelected(index)) {
+			return;
+		}
 		var promise = this.waitForSelect();
 		this.selection.select(index);
 		
@@ -614,7 +617,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			await this.selectLibrary(libraryID);
 		}
 		// Force switch to library view
-		else if (!this.getRow(this.selection.pivot).isLibrary() && inLibraryRoot) {
+		else if (!this.getRow(this.selection.focused).isLibrary() && inLibraryRoot) {
 			Zotero.debug("Told to select in library; switching to library");
 			await this.selectLibrary(libraryID);
 		}
@@ -689,11 +692,11 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		//
 		// Actions that can change the selection
 		//
-		var currentTreeRow = this.getRow(this.selection.pivot);
+		var currentTreeRow = this.getRow(this.selection.focused);
 		this.selection.selectEventsSuppressed = true;
 		
 		if (action == 'delete') {
-			let selectedIndex = this.selection.pivot;
+			let selectedIndex = this.selection.focused;
 			let feedDeleted = false;
 			
 			// Since a delete involves shifting of rows, we have to do it in reverse order
@@ -986,8 +989,8 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		if (treeRow.isLibrary(true) || treeRow.isCollection()) {
 			count = await this._expandRow(this._rows, index, true);
 		}
-		if (this.selection.pivot > index) {
-			this.selection.select(this.selection.pivot + count);
+		if (this.selection.focused > index) {
+			this.selection.select(this.selection.focused + count);
 		}
 		this.selection.selectEventsSuppressed = false;
 		
@@ -1004,7 +1007,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	 * @param show {Boolean}
 	 * @returns {Promise}
 	 */
-	async toggleVirtualCollection(libraryID, type, show) {
+	async toggleVirtualCollection(libraryID, type, show, select) {
 		const types = {
 			duplicates: 'D',
 			unfiled: 'U'
@@ -1017,20 +1020,22 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		Zotero.Prefs.setVirtualCollectionStateForLibrary(libraryID, type, show);
 		
 		var promise = this.waitForSelect();
+		var selectedRow = this.selection.focused;
+		var selectedRowID = this.getRow(selectedRow).id;
 		
 		await this.refresh();
 		this.forceUpdate();
 		
 		// Select new or original row
 		if (show) {
-			await this.collectionsView.selectByID(select ? treeViewID : selectedRowID);
+			await this.selectByID(select ? treeViewID : selectedRowID);
 		}
 		else if (type == 'retracted') {
-			await this.collectionsView.selectByID("L" + libraryID);
+			await this.selectByID("L" + libraryID);
 		}
 		// Select next appropriate row after removal
 		else {
-			await this.selectWait(this.selection.pivot);
+			await this.selectWait(this.selection.focused);
 		}
 		this.selection.selectEventsSuppressed = false;
 		
@@ -1044,7 +1049,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	 * @returns {Promise<void>}
 	 */
 	async deleteSelection(deleteItems) {
-		var treeRow = this.getRow(this.selection.pivot);
+		var treeRow = this.getRow(this.selection.focused);
 		if (treeRow.isCollection() || treeRow.isFeed()) {
 			await treeRow.ref.eraseTx({ deleteItems });
 		}
@@ -1067,7 +1072,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	 * Returns TRUE if the underlying view is editable
 	 */
 	get editable() {
-		return this.getRow(this.selection.pivot).editable;
+		return this.getRow(this.selection.focused).editable;
 	}
 	
 	/**
@@ -1097,21 +1102,21 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	 * Return libraryID of selected row (which could be a collection, etc.)
 	 */
 	getSelectedLibraryID() {
-		var treeRow = this.getRow(this.selection.pivot);
+		var treeRow = this.getRow(this.selection.focused);
 		return treeRow && treeRow.ref && treeRow.ref.libraryID !== undefined
 			&& treeRow.ref.libraryID;
 	}
 	
 	getSelectedCollection(asID) {
-		var collection = this.getRow(this.selection.pivot);
+		var collection = this.getRow(this.selection.focused);
 		if (collection && collection.isCollection()) {
 			return asID ? collection.ref.id : collection.ref;
 		}
 	}
 	
 	getSelectedSearch(asID) {
-		if (this.getRow(this.selection.pivot)) {
-			var search = this.getRow(this.selection.pivot);
+		if (this.getRow(this.selection.focused)) {
+			var search = this.getRow(this.selection.focused);
 			if (search && search.isSearch()) {
 				return asID ? search.ref.id : search.ref;
 			}
@@ -1120,8 +1125,8 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	}
 	
 	getSelectedGroup(asID) {
-		if (this.getRow(this.selection.pivot)) {
-			var group = this.getRow(this.selection.pivot);
+		if (this.getRow(this.selection.focused)) {
+			var group = this.getRow(this.selection.focused);
 			if (group && group.isGroup()) {
 				return asID ? group.ref.id : group.ref;
 			}
@@ -2026,7 +2031,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		let level = this.getLevel(index);
 
 		let moveSelect = index - 1;
-		if (index <= this.selection.pivot) {
+		if (index <= this.selection.focused) {
 			while (moveSelect >= this._rows.length || !this.isSelectable(moveSelect)) {
 				moveSelect--;
 			}
@@ -2109,7 +2114,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		if (!this.isContainerOpen(row)) return;
 		
 		this.selection.selectEventsSuppressed = true;
-		let selectParent = this.getParentIndex(this.selection.pivot);
+		let selectParent = this.getParentIndex(this.selection.focused);
 		while (selectParent != -1) {
 			if (selectParent === row) this.selection.select(row);
 			selectParent = this.getParentIndex(selectParent);
@@ -2597,7 +2602,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		}
 
 		let moveSelect = beforeRow + 1;
-		if (moveSelect <= this.selection.pivot) {
+		if (moveSelect <= this.selection.focused) {
 			while (!this.isSelectable(moveSelect)) {
 				moveSelect++;
 			}

@@ -112,7 +112,7 @@ Zotero.ItemTreeView.prototype.setTree = async function (treebox) {
 		this.setSortColumn();
 		
 		if (this.window.ZoteroPane) {
-			this.window.ZoteroPane.setItemsPaneMessage(Zotero.getString('pane.items.loading'));
+			await this.window.ZoteroPane.setItemsPaneMessage(Zotero.getString('pane.items.loading'));
 		}
 		
 		if (Zotero.locked) {

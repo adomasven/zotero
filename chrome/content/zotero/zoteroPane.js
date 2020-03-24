@@ -709,7 +709,7 @@ var ZoteroPane = new function()
 	this.newItem = Zotero.Promise.coroutine(function* (typeID, data, row, manual)
 	{
 		if ((row === undefined || row === null) && this.getCollectionTreeRow()) {
-			row = this.collectionsView.selection.pivot;
+			row = this.collectionsView.selection.focused;
 			
 			// Make sure currently selected view is editable
 			if (!this.canEdit(row)) {
@@ -890,8 +890,8 @@ var ZoteroPane = new function()
 		return s.id;
 	});
 	
-	this.setVirtual = function(libraryID, type, show) {
-		return this.collectionsView.toggleVirtualCollection(libraryID, type, show);
+	this.setVirtual = function(libraryID, type, show, select) {
+		return this.collectionsView.toggleVirtualCollection(libraryID, type, show, select);
 	};
 	
 	this.openAdvancedSearchWindow = function () {
@@ -1158,7 +1158,7 @@ var ZoteroPane = new function()
 	
 	this.getCollectionTreeRow = function () {
 		return this.collectionsView && this.collectionsView.selection.count
-			&& this.collectionsView.getRow(this.collectionsView.selection.pivot);
+			&& this.collectionsView.getRow(this.collectionsView.selection.focused);
 	}
 	
 	
@@ -1167,7 +1167,7 @@ var ZoteroPane = new function()
 	 *                              or false if not (used for tests, though there could possibly
 	 *                              be a better test for whether the item pane changed)
 	 */
-	this.itemSelected = function (selection) {
+	this.itemSelected = function () {
 		return Zotero.Promise.coroutine(function* () {
 			// Don't select item until items list has loaded
 			//
@@ -3494,7 +3494,7 @@ var ZoteroPane = new function()
 				
 				// Currently selected row
 				if (row === undefined && this.collectionsView && this.getCollectionTreeRow()) {
-					row = this.collectionsView.selection.pivot;
+					row = this.collectionsView.selection.focused;
 				}
 				
 				if (row && !this.canEdit(row)) {
@@ -3614,7 +3614,7 @@ var ZoteroPane = new function()
 					
 					// Currently selected row
 					if (row === undefined) {
-						row = ZoteroPane_Local.collectionsView.selection.pivot;
+						row = ZoteroPane_Local.collectionsView.selection.focused;
 					}
 					
 					if (!ZoteroPane_Local.canEdit(row)) {
@@ -4050,7 +4050,7 @@ var ZoteroPane = new function()
 	this.canEdit = function (row) {
 		// Currently selected row
 		if (row === undefined) {
-			row = this.collectionsView.selection.pivot;
+			row = this.collectionsView.selection.focused;
 		}
 		
 		var collectionTreeRow = this.collectionsView.getRow(row);
@@ -4067,7 +4067,7 @@ var ZoteroPane = new function()
 	this.canEditLibrary = function (row) {
 		// Currently selected row
 		if (row === undefined) {
-			row = this.collectionsView.selection.pivot;
+			row = this.collectionsView.selection.focused;
 		}
 		
 		var collectionTreeRow = this.collectionsView.getRow(row);
@@ -4085,7 +4085,7 @@ var ZoteroPane = new function()
 	this.canEditFiles = function (row) {
 		// Currently selected row
 		if (row === undefined) {
-			row = this.collectionsView.selection.pivot;
+			row = this.collectionsView.selection.focused;
 		}
 		
 		var collectionTreeRow = this.collectionsView.getRow(row);

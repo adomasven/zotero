@@ -30,6 +30,7 @@ const { div } = require('react-dom-factories');
 const PropTypes = require('prop-types');
 const { IntlProvider } = require('react-intl');
 const VirtualizedTable = require('components/virtualized-table');
+const { TreeSelectionStub } = require('components/virtualized-tree');
 const Icons = require('components/icons');
 const getDOMIcon = Icons.getDomElement;
 const { getDragTargetOrient } = require('components/utils');
@@ -117,7 +118,7 @@ function makeItemRenderer(itemTree) {
 					icon.classList.add('cell-icon');
 				}
 				else if (state === -1) {
-					icon = getDOMIcon('IconBulletEmptyEmpty');
+					icon = getDOMIcon('IconBulletBlueEmpty');
 					icon.classList.add('cell-icon');
 				}
 				span.append(icon);
@@ -177,7 +178,7 @@ function makeItemRenderer(itemTree) {
 			}
 		}
 
-		const rowData = itemTree._getRowData({ index });
+		const rowData = itemTree._getRowData(index);
 		for (let column of itemTree._getColumns()) {
 			if (column.hidden) continue;
 			
@@ -196,9 +197,12 @@ function makeItemRenderer(itemTree) {
 			if (itemTree.props.dragAndDrop) {
 				div.setAttribute('draggable', true);
 				div.addEventListener('dragstart', e => itemTree.onDragStart(e, index), { passive: true });
-				div.addEventListener('dragover', e => itemTree.onDragOver(e, index), { passive: true });
+				div.addEventListener('dragover', e => itemTree.onDragOver(e, index));
 				div.addEventListener('dragend', itemTree.onDragEnd, { passive: true });
-				// div.addEventListener('drop', e => itemTree.onDrop(index, e), { passive: true });
+				div.addEventListener('drop', (e) => {
+					e.stopBubbling();
+					itemTree.onDrop(e, index);
+				}, { passive: true });
 			}
 		}
 		
@@ -263,10 +267,16 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		}
 		
 		this.renderItem = makeItemRenderer(this);
+		
+		this._itemTreeLoadingDeferred = Zotero.Promise.defer();
 
-		this.onLoad = this._createEventBinding('load', true, true);
+		this.onLoad = this._createEventBinding('load', true);
 		this.onSelect = this._createEventBinding('select');
 		this.onRefresh = this._createEventBinding('refresh');
+	}
+
+	unregister() {
+		Zotero.Notifier.unregisterObserver(this._unregisterID);
 	}
 
 	componentDidCatch(error, info) {
@@ -280,7 +290,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	
 	componentDidMount() {
 		this._initialized = true;
-		this.runListeners('load');
+		this._itemTreeLoadingDeferred.resolve();
 		// Create an element where we can create drag images to be displayed next to the cursor while dragging
 		// since for multiple item drags we need to display all the elements
 		let elem = this._dragImageContainer = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
@@ -292,33 +302,39 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		this.domEl.appendChild(elem);
 	}
 	
-	componentDidUnmount() {
+	componentWillUnmount() {
 		this.domEl.removeChild(this._dragImageContainer);
 	}
 
+	/**
+	 * NOTE: In XUL item tree waitForLoad() just returned this._waitForEvent('load').
+	 * That was because on each collection change the item tree class was reset and the
+	 * `load` event was a `once` and `triggerImmediately` event.
+	 *
+	 * Since in this implementation the item tree class is created once and stays up through
+	 * the lifetime of Zotero we cannot replicate the previous behaviour with events easily
+	 * so we use a deferred promise instead
+	 * @returns {Promise}
+	 */
 	waitForLoad() {
-		return this._waitForEvent('load');
+		return this._itemTreeLoadingDeferred.promise;
 	}
 	
 	waitForSelect() {
 		return this._waitForEvent('select');
 	}
 	
-	async makeVisible() {
-		// TODO: This existed due some behaviour that no longer exists. Also see #selectItems()
-		// if (this.collectionTreeRow && this.collectionTreeRow.itemsToSelect) {
-		// 	await this.selectItems(this.collectionTreeRow.itemsToSelect);
-		// 	this.collectionTreeRow.itemsToSelect = null;
-		// }
-		
-	}
-	
-	setItemsPaneMessage(message) {
+	async setItemsPaneMessage(message) {
+		if (message instanceof HTMLElement) {
+			message = message.outerHTML;
+		}
 		this._itemsPaneMessage = message;
+		return new Promise(resolve => this.forceUpdate(resolve));
 	}
 	
-	clearItemsPaneMessage() {
+	async clearItemsPaneMessage() {
 		this._itemsPaneMessage = null;
+		return new Promise(resolve => this.forceUpdate(resolve));
 	}
 	
 	refresh = Zotero.serial(async function (skipExpandMatchParents) {
@@ -709,7 +725,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 							}
 							// Otherwise just resort
 							else {
-								sort = id;
+								sort = true;
 							}
 						}
 						// If item moved from top-level to under another item, remove the old row.
@@ -723,7 +739,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 							let beforeRow = this.rowCount;
 							this._addRow(new Zotero.ItemTreeRow(item, 0, false), beforeRow);
 
-							sort = id;
+							sort = true;
 						}
 						// If item was moved from one parent to another, remove from old parent
 						else if (parentItemID && parentIndex != -1 && this._rowMap[parentItemID] != parentIndex) {
@@ -768,10 +784,10 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 
 			// In some modes, just re-run search
 			if (collectionTreeRow.isSearch()
-				|| collectionTreeRow.isPublications()
-				|| collectionTreeRow.isTrash()
-				|| collectionTreeRow.isUnfiled()
-				|| hasQuickSearch) {
+					|| collectionTreeRow.isPublications()
+					|| collectionTreeRow.isTrash()
+					|| collectionTreeRow.isUnfiled()
+					|| hasQuickSearch) {
 				if (hasQuickSearch) {
 					// For item adds, clear the quick search, unless all the new items have
 					// skipSelect or are child items
@@ -929,7 +945,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 					}
 				}
 				else {
-					this._restoreSelection(savedSelection);
+					await this._restoreSelection(savedSelection);
 					reselect = true;
 				}
 			}
@@ -945,21 +961,16 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		// before returning. This guarantees that changes are reflected in the middle and right-hand panes
 		// before returning from the save transaction.
 		//
-		// TODO wtf is this:
 		// If no onselect handler is set on the tree element, as is the case in the Advanced Search window,
 		// the select listeners never get called, so don't wait.
-		// let selectPromise;
-		// var tree = this._getTreeElement();
-		// var hasOnSelectHandler = tree.getAttribute('onselect') != '';
-		// if (reselect && hasOnSelectHandler) {
-		// 	selectPromise = this.waitForSelect();
-		// 	this.selection.selectEventsSuppressed = false;
-		// 	Zotero.debug("Yielding for select promise"); // TEMP
-		// 	return selectPromise;
-		// }
-		// else {
+		if (this.props.onSelectionChange) {
+			var selectPromise = this.waitForSelect();
 			this.selection.selectEventsSuppressed = false;
-		// }
+			Zotero.debug("Yielding for select promise"); // TEMP
+			return selectPromise;
+		} else {
+			this.selection.selectEventsSuppressed = false;
+		}
 	}
 
 	handleTyping(char) {
@@ -1083,62 +1094,79 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	
 	render() {
 		Zotero.debug('Rendering itemTree');
-		if (this._itemsPaneMessage) {
-			return (<div
-				onDragOver={e => this.props.dragAndDrop && this.onDragOver(e, -1)}
-				onDrop={e => this.props.dragAndDrop && this.onDrop(e, -1)}
-				className={"items-pane-message"}>{this._itemsPaneMessage}
-			</div>);
-		}
-		if (!this.collectionTreeRow) {
-			return <div className={"items-pane-message"}>{Zotero.getString('pane.items.loading')}</div>;
-		}
+		const itemsPaneMessageHTML = this._itemsPaneMessage || Zotero.getString('pane.items.loading');
+		const showMessage = !this.collectionTreeRow || this._itemsPaneMessage;
 		
-		let itemHeight = 18; // px
-		if (Zotero.isLinux) {
-			itemHeight = 22;
-		}
-		itemHeight *= Zotero.Prefs.get('fontSize');
+		const itemsPaneMessage = (<div
+			onDragOver={e => this.props.dragAndDrop && this.onDragOver(e, -1)}
+			onDrop={e => this.props.dragAndDrop && this.onDrop(e, -1)}
+			className={"items-tree-message"}
+			style={{ display: showMessage ? "flex" : "none" }}
+			// Due to some collision between React and the XUL environment
+			// setting innerHTML on a cached React node triggers an XML
+			// parsing error god knows where. So on every refresh we set a new
+			// key for the element, forcing it to be recreated. This shouldn't
+			// be a major performance concern since we're not calling #forceUpdate()
+			// that often and even if we did it's just a single div here.
+			key={Date.now()}
+			dangerouslySetInnerHTML={{ __html: itemsPaneMessageHTML }}>
+		</div>);
 
-		const headerHeight = 28 * Zotero.Prefs.get('fontSize') + 1; // 1px border
-
-		return React.createElement(VirtualizedTable,
-			{
-				getRowCount: () => this._rows.length,
-				rowHeight: itemHeight,
-				headerHeight: headerHeight,
-				id: this.id,
-				ref: ref => this.tree = ref,
-				treeboxRef: ref => this._treebox = ref,
-				columns: this._getColumns(),
-				renderItem: this.renderItem,
-				
-				multiSelect: true,
-				
-				getAriaLabel: index => this.getRow(index).getField('title'),
-				onSelectionChange: this._handleSelectionChange,
-				isSelectable: () => true,
-				getParentIndex: this.getParentIndex,
-				isContainer: this.isContainer,
-				isContainerEmpty: this.isContainerEmpty,
-				isContainerOpen: this.isContainerOpen,
-				toggleOpenState: this.toggleOpenState.bind(this),
-
-				// onDragEnter: (e) => this.props.dragAndDrop && this.onTreeDragLeave(e),
-				// onDragLeave: (e) => this.props.dragAndDrop && this.onTreeDragEnter(e),
-				onDragOver: e => this.props.dragAndDrop && this.onDragOver(e, -1),
-				onDrop: e => this.props.dragAndDrop && this.onDrop(e, -1),
-				onKeyDown: this.handleKeyDown,
-				onActivate: this.handleActivate,
-				onColumnPickerMenu: this._displayColumnPickerMenu,
-				onColumnResize: this._columns.resize,
-				onColumnReorder: this._columns.setOrder,
-				onHeaderClick: this._handleHeaderClick,
-				onItemContextMenu: this.props.onContextMenu,
-
-				label: Zotero.getString('pane.collections.title'),
+		let virtualizedTable = <div className="virtualized-table"></div>;
+		if (this.collectionTreeRow) {
+			let itemHeight = 18; // px
+			if (Zotero.isLinux) {
+				itemHeight = 22;
 			}
-		);
+			itemHeight *= Zotero.Prefs.get('fontSize');
+
+			const headerHeight = 28 * Zotero.Prefs.get('fontSize') + 1; // 1px border
+
+			virtualizedTable = React.createElement(VirtualizedTable,
+				{
+					getRowCount: () => this._rows.length,
+					rowHeight: itemHeight,
+					headerHeight: headerHeight,
+					id: this.id,
+					ref: ref => this.tree = ref,
+					treeboxRef: ref => this._treebox = ref,
+					columns: this._getColumns(),
+					showHeader: true,
+					renderItem: this.renderItem,
+					hide: showMessage,
+
+					multiSelect: true,
+
+					getAriaLabel: index => this.getRow(index).getField('title'),
+					onSelectionChange: this._handleSelectionChange,
+					isSelectable: () => true,
+					getParentIndex: this.getParentIndex,
+					isContainer: this.isContainer,
+					isContainerEmpty: this.isContainerEmpty,
+					isContainerOpen: this.isContainerOpen,
+					toggleOpenState: this.toggleOpenState.bind(this),
+
+					onTreeDragEnter: (e) => this.props.dragAndDrop && this.onTreeDragEnter(e),
+					onTreeDragLeave: (e) => this.props.dragAndDrop && this.onTreeDragLeave(e),
+					onDragOver: e => this.props.dragAndDrop && this.onDragOver(e, -1),
+					onDrop: e => this.props.dragAndDrop && this.onDrop(e, -1),
+					onKeyDown: this.handleKeyDown,
+					onActivate: this.handleActivate,
+					onColumnPickerMenu: this._displayColumnPickerMenu,
+					onColumnResize: this._columns.resize,
+					onColumnReorder: this._columns.setOrder,
+					onHeaderClick: this._handleHeaderClick,
+					onItemContextMenu: this.props.onContextMenu,
+
+					label: Zotero.getString('pane.collections.title'),
+				}
+			);
+		}
+
+		return [
+			itemsPaneMessage,
+			virtualizedTable
+		];
 	}
 	
 	_updateHeight = (height) => {
@@ -1152,37 +1180,37 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	updateHeight = Zotero.Utilities.debounce(this._updateHeight, 200);
 
 	async changeCollectionTreeRow(collectionTreeRow) {
+		this._itemTreeLoadingDeferred = Zotero.Promise.defer();
 		this.collectionTreeRow = collectionTreeRow;
 		this.collectionTreeRow.view.itemTreeView = this;
 		ZoteroPane.setItemsPaneMessage(Zotero.getString('pane.items.loading'));
 		// Ensures that an up to date this._columns is set
 		this._getColumns();
 
-		this.selection && this.selection.clearSelection();
+		this.selection.clearSelection();
 		await this.refresh();
 		ZoteroPane.clearItemsPaneMessage();
-		await new Promise(resolve => {
-			this.forceUpdate(() => {
-				if (this.tree) {
-					this.tree.invalidate();
+		this.forceUpdate(() => {
+			if (this.tree) {
+				this.tree.invalidate();
 
-					if (this.selection) {
-						this.selection.suppressSelectionEvents = false;
-					}
-
-					if (!this.selection.count) {
-						ZoteroPane.itemSelected();
-					}
+				if (this.selection) {
+					this.selection.selectEventsSuppressed = false;
 				}
-				this._updateIntroText();
-				resolve();
-			});
+
+				if (!this.selection.count) {
+					ZoteroPane.itemSelected();
+				}
+			}
+			this._updateIntroText();
+			this._itemTreeLoadingDeferred.resolve();
 		});
+		await this._itemTreeLoadingDeferred.promise;
 	}
 	
 	async refreshAndMaintainSelection(clearItemsPaneMessage=true) {
 		if (this.selection) {
-			this.selection.suppressSelectionEvents = true;
+			this.selection.selectEventsSuppressed = true;
 		}
 		const selection = this.getSelectedItems(true);
 		await this.refresh();
@@ -1193,7 +1221,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 					this.tree.invalidate();
 					this._restoreSelection(selection);
 					if (this.selection) {
-						this.selection.suppressSelectionEvents = false;
+						this.selection.selectEventsSuppressed = false;
 					}
 					if (!this.selection.count) {
 						ZoteroPane.itemSelected();
@@ -1259,10 +1287,10 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 				
 				// If parent is already open and we haven't found the item, the child
 				// hasn't yet been added to the view, so close parent to allow refresh
-				// this._closeContainer(parentRow);
+				await this._closeContainer(parentRow);
 				
 				// Open the parent
-				// this.toggleOpenState(parentRow);
+				await this.toggleOpenState(parentRow);
 			}
 			
 			// Since we're opening containers, we still need to reference by id
@@ -1373,7 +1401,15 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		
 		var primaryField = this._getSortField();
 		var sortFields = this._getSortFields();
-		var order = this._getColumns().find(c => c.dataKey == primaryField).sortDirection;
+		var order = 1;
+		const columns = this._getColumns();
+		for (const field of sortFields) {
+			const col = columns.find(c => c.dataKey == primaryField);
+			if (col) {
+				order = col.sortDirection;
+				break;
+			}
+		}
 		var collation = Zotero.getLocaleCollation();
 		var sortCreatorAsString = Zotero.Prefs.get('sortCreatorAsString');
 		
@@ -1571,8 +1607,9 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		}
 		
 		var savedSelection = this.getSelectedItems(true);
-		// TODO:
-		// var openItemIDs = this._saveOpenState(true);
+		
+		// Save open state and close containers before sorting
+		var openItemIDs = this._saveOpenState(true);
 		
 		// Sort specific items
 		if (itemIDs) {
@@ -1593,7 +1630,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		
 		this._refreshItemRowMap();
 		
-		// this.rememberOpenState(openItemIDs);
+		this._rememberOpenState(openItemIDs);
 		this._restoreSelection(savedSelection);
 		
 		var numSorted = itemIDs ? itemIDs.length : this._rows.length;
@@ -1837,8 +1874,16 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	}
 
 	// TODO: consolidate
+	/**
+	 * Rather unfortunate that we have to resort to a stub selection object here
+	 * for cases where no tree exists, but the alternatives would require either
+	 * putting `this.selection && this.selection[property]` for all accesses
+	 * or doing a lot of fundamental control flow restructuring, so consider
+	 * this a bit of a heavy hack
+	 * @returns {TreeSelection}
+	 */
 	get selection() {
-		return this.tree ? this.tree.selection : null;
+		return this.tree ? this.tree.selection : TreeSelectionStub;
 	}
 	
 	get rowCount() {
@@ -1879,6 +1924,10 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			return false;
 		}
 		return this._rowMap[id];
+	}
+	
+	getCellText(index, column) {
+		return this._getRowData(index)[column];
 	}
 
 	async deleteSelection(force) {
@@ -2086,12 +2135,13 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	 */
 	onDragOver = (event, row) => {
 		try {
+			event.preventDefault();
 			event.stopPropagation();
 			Zotero.DragDrop.currentOrientation = getDragTargetOrient(event);
 			Zotero.debug(`Dragging over item ${row} with ${Zotero.DragDrop.currentOrientation}, drop row: ${this._dropRow}`);
 
 			var target = event.target;
-			if (target.classList.contains('items-pane-message')) {
+			if (target.classList.contains('items-tree-message')) {
 				let doc = target.ownerDocument;
 				// Consider a drop on the items pane message box (e.g., when showing the welcome text)
 				// a drop on the items tree
@@ -2184,8 +2234,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	}
 
 	onDragEnd = () => {
-		this._dropRow = null;
-		Zotero.DragDrop.currentDragSource = null;
 		this._dragImageContainer.innerHTML = "";
 		this.tree.invalidate();
 	}
@@ -2312,7 +2360,9 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	onDrop = async (event, row) => {
 		const dataTransfer = event.dataTransfer;
 		const orient = Zotero.DragDrop.currentOrientation;
-		if (!this.canDrop(row, orient, dataTransfer)) {
+		this._dropRow = null;
+		Zotero.DragDrop.currentDragSource = null;
+		if (!dataTransfer.dropEffect || dataTransfer.dropEffect == "none") {
 			return false;
 		}
 
@@ -2431,7 +2481,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 
 			if (orient == 0) {
 				let treerow = this.getRow(row);
-				parentItemID = treerow.ref.id
+				parentItemID = treerow.ref.id;
 			}
 			else if (collectionTreeRow.isCollection()) {
 				var parentCollectionID = collectionTreeRow.ref.id;
@@ -2597,7 +2647,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		Zotero.DragDrop.currentEvent = event;
 	}
 	
-	onTreeDragExit = () => {
+	onTreeDragLeave = () => {
 		Zotero.DragDrop.currentEvent = null;
 	}
 
@@ -2750,7 +2800,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		this._rowMap = rowMap;
 	}
 	
-	_getRowData = ({ index }) => {
+	_getRowData = (index) => {
 		var treeRow = this.getRow(index);
 		if (!treeRow) {
 			throw new Error(`Attempting to get row data for a non-existant tree row ${index}`);
@@ -3008,14 +3058,67 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		};
 	}
 
+	_saveOpenState(close) {
+		if (!this.tree) return [];
+		var itemIDs = [];
+		if (close) {
+			if (!this.selection.selectEventsSuppressed) {
+				var unsuppress = this.selection.selectEventsSuppressed = true;
+			}
+		}
+		for (var i=0; i<this._rows.length; i++) {
+			if (this.isContainer(i) && this.isContainerOpen(i)) {
+				itemIDs.push(this.getRow(i).ref.id);
+				if (close) {
+					this._closeContainer(i, true);
+				}
+			}
+		}
+		if (close) {
+			this._refreshItemRowMap();
+			if (unsuppress) {
+				this.selection.selectEventsSuppressed = false;
+			}
+		}
+		return itemIDs;
+	}
+
+	_rememberOpenState(itemIDs) {
+		if (!this.tree) return;
+		var rowsToOpen = [];
+		for (let id of itemIDs) {
+			var row = this._rowMap[id];
+			// Item may not still exist
+			if (row == undefined) {
+				continue;
+			}
+			rowsToOpen.push(row);
+		}
+		rowsToOpen.sort(function (a, b) {
+			return a - b;
+		});
+
+		if (!this.selection.selectEventsSuppressed) {
+			var unsuppress = this.selection.selectEventsSuppressed = true;
+		}
+		// Reopen from bottom up
+		for (var i=rowsToOpen.length-1; i>=0; i--) {
+			this.toggleOpenState(rowsToOpen[i], true);
+		}
+		this._refreshItemRowMap();
+		if (unsuppress) {
+			this.selection.selectEventsSuppressed = false;
+		}
+	}
+
 	/**
-	 * 
+	 *
 	 * @param selection
 	 * @param {Boolean} expandCollapsedParents - if an item to select is in a collapsed parent
 	 * 					will expand the parent, otherwise the item is ignored
 	 * @private
 	 */
-	_restoreSelection(selection, expandCollapsedParents=true) {
+	async _restoreSelection(selection, expandCollapsedParents=true) {
 		if (!selection.length || !this._treebox) {
 			return;
 		}
@@ -3044,8 +3147,8 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 					}
 
 					if (this._rowMap[parent] != null) {
-						this._closeContainer(this._rowMap[parent]);
-						this.toggleOpenState(this._rowMap[parent]);
+						await this._closeContainer(this._rowMap[parent]);
+						await this.toggleOpenState(this._rowMap[parent]);
 						this.selection.toggleSelect(this._rowMap[selection[i]]);
 					}
 				}

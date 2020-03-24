@@ -68,9 +68,11 @@ class TreeSelection {
 	
 	clearSelection() {
 		this.selected = new Set();
+		this.pivot = 0;
 		if (this._tree.invalidate) {
 			this._tree.invalidate();
 		}
+		this._updateTree();
 	}
 
 	select(index) {
@@ -178,6 +180,17 @@ class TreeSelection {
 		}
 	}
 }
+
+let TreeSelectionStub = {};
+for (const key of Object.getOwnPropertyNames(TreeSelection.prototype)) {
+	TreeSelectionStub[key] = () => 0;
+}
+TreeSelectionStub = Object.freeze(Object.assign(TreeSelectionStub, {
+	pivot: 0,
+	focused: 0,
+	count: 0,
+	selected: new Set([])
+}));
 
 class VirtualizedTree extends React.Component {
 	constructor() {
@@ -503,3 +516,4 @@ function oncePerAnimationFrame(fn) {
 
 module.exports = VirtualizedTree;
 module.exports.TreeSelection = TreeSelection;
+module.exports.TreeSelectionStub = TreeSelectionStub;

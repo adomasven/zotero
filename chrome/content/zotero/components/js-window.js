@@ -178,7 +178,7 @@ module.exports = class {
 	 * Scroll the scrollbox to a specified item. No-op if already in view
 	 * @param index
 	 */
-	scrollToItem(index) {
+	scrollToRow(index) {
 		const { itemHeight, scrollOffset } = this;
 		const itemCount = this._getItemCount();
 		const height = this.getWindowHeight();

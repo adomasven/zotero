@@ -40,6 +40,19 @@ const RESIZER_WIDTH = 5; // px
  *
  * Uses a custom js-window for fast item rendering and
  * CSS style injection for fast column resizing
+ *
+ * Exposes the js-window to the object creator via a ref
+ * and also includes a bunch of helper methods for invalidating
+ * rows, scrolling, etc.
+ *
+ * Any updates to actual rows being drawn have to be told about
+ * to the js-window instance. More fundamental changes like the number and
+ * type of columns, window resizes, etc, have to be told about to the
+ * VirtualizedTable instance via forceUpdate()
+ *
+ * Selection is controlled via the .selection property, which is an
+ * instance of TableSelection. Selection changes perform their own row invalidation
+ * on the js-window.
  */
 class VirtualizedTable extends React.Component {
 	constructor(props) {
@@ -292,7 +305,7 @@ class VirtualizedTable extends React.Component {
 	 * @param index
 	 */
 	scrollToRow(index) {
-		this._jsWindow && this._jsWindow.scrollToItem(index);
+		this._jsWindow && this._jsWindow.scrollToRow(index);
 	}
 
 	/**
@@ -430,19 +443,19 @@ class VirtualizedTable extends React.Component {
 		
 	_handleColumnDragStart = (index, event) => {
 		if (!this.props.onColumnReorder || event.button !== 0) return false;
-		this.setState({ dragging: index });
+		this.setState({ draggingColumn: index });
 		this._isMouseDrag = true;
 	}
 
 	_handleColumnDragStop = (event, cancelled) => {
-		if (!cancelled && typeof this.state.dragging == "number") {
+		if (!cancelled && typeof this.state.draggingColumn == "number") {
 			const { index } = this._findColumnDragPosition(event.clientX);
 			// If inserting before the column that was being dragged
 			// there is nothing to do
-			if (this.state.dragging != index) {
+			if (this.state.draggingColumn != index) {
 				const visibleColumns = this.props.columns.filter(col => !col.hidden);
 				const dragColumn = this.props.columns.findIndex(
-					col => col == visibleColumns[this.state.dragging]);
+					col => col == visibleColumns[this.state.draggingColumn]);
 				// Insert as final column (before end of list)
 				let insertBeforeColumn = this.props.columns.length;
 				// index == visibleColumns.length if dragged to the end of the view to be ordered
@@ -453,13 +466,13 @@ class VirtualizedTable extends React.Component {
 				this.props.onColumnReorder(dragColumn, insertBeforeColumn);
 			}
 		}
-		this.setState({ dragging: null, dragX: null });
+		this.setState({ draggingColumn: null, dragColumnX: null });
 	}
 
 	_handleColumnDrag = (event) => {
 		const { offsetX } = this._findColumnDragPosition(event.clientX);
 		this.isHeaderMouseUp = false;
-		this.setState({ dragX: offsetX });
+		this.setState({ dragColumnX: offsetX });
 	}
 	
 	_handleHeaderMouseUp = (event, dataKey) => {
@@ -555,7 +568,7 @@ class VirtualizedTable extends React.Component {
 					sortIndicator = <IconDownChevron className={"sort-indicator " + (column.sortDirection === 1 ? "ascending" : "descending")}/>;
 				}
 			}
-			const className = cx("cell", column.className, { dragging: this.state.dragging == index },
+			const className = cx("cell", column.className, { draggingColumn: this.state.draggingColumn == index },
 				{ "cell-icon": !!column.iconLabel });
 			return (<Draggable
 				onDragStart={this._handleColumnDragStart.bind(this, index)}
@@ -581,23 +594,32 @@ class VirtualizedTable extends React.Component {
 	}
 		
 	render() {
-		let headerCells = this._renderHeaderCells();
+		let header = "";
 		let columnDragMarker = "";
-		if (typeof this.state.dragX == 'number') {
-			columnDragMarker = <div className="column-drag-marker" style={{ left: this.state.dragX }} />;
+		if (this.props.columns && this.props.showHeader) {
+			const headerCells = this._renderHeaderCells();
+			header = (<div
+				className="virtualized-table-header"
+				onContextMenu={this.props.onColumnPickerMenu}>
+				{headerCells}
+			</div>);
+			if (typeof this.state.dragColumnX == 'number') {
+				columnDragMarker = <div className="column-drag-marker" style={{ left: this.state.dragColumnX }} />;
+			}
 		}
 		let props = {
 			onKeyDown: this._onKeyDown,
 			onDragOver: this._onDragOver,
 			onDrop: e => this.props.onDrop && this.props.onDrop(e),
-			onDragEnter: e => this.props.onTreeDragEnter && this.onTreeDragEnter(e),
-			onDragLeave: e => this.props.onTreeDragLeave && this.onTreeDragLeave(e),
 			className: cx(["virtualized-table", { resizing: this.state.resizing }]),
 			id: this.props.id,
 			ref: ref => this._topDiv = ref,
 			tabIndex: 0,
 			role: "table",
 		};
+		if (this.props.hide) {
+			props.style = { display: "none" };
+		}
 		if (this.selection.count > 0) {
 			const elem = this._jsWindow && this._jsWindow.getElementByIndex(this.selection.focused);
 			if (elem) {
@@ -618,11 +640,7 @@ class VirtualizedTable extends React.Component {
 		return (
 			<div {...props}>
 				{columnDragMarker}
-				<div
-					className="virtualized-table-header"
-					onContextMenu={this.props.onColumnPickerMenu}>
-					{headerCells}
-				</div>
+				{header}
 				<div {...jsWindowProps} />
 			</div>
 		);
@@ -649,6 +667,7 @@ class VirtualizedTable extends React.Component {
 	
 	
 	_updateWidth() {
+		if (!this.props.showHeader) return;
 		const jsWindow = document.querySelector(`#${this._jsWindowID} .js-window`);
 		if (!jsWindow) return;
 		const tree = document.querySelector(`#${this.props.id}`);

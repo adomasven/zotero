@@ -42,7 +42,10 @@ Zotero.Utilities.Internal = {
 				};
 			}
 			this._events[event].triggered = true;
-			for (let [listener, once] of this._events[event].listeners.entries()) {
+			// Array.from(entries) since entries() returns an iterator and we want a snapshot of the entries
+			// at the time of runListeners() call to prevent triggering listeners that are added right
+			// runListeners() invocation
+			for (let [listener, once] of Array.from(this._events[event].listeners.entries())) {
 				await Zotero.Promise.resolve(listener.call(this));
 				if (once) {
 					this._events[event].listeners.delete(listener);
