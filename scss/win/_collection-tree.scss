@@ -1,10 +1,10 @@
-#zotero-collections-tree .tree {
-  &:not(:focus) .tree-node.focused:not(.highlighted) {
+#zotero-collections-tree .virtualized-table {
+  &:not(:focus) .row.selected:not(.highlighted) {
     color: inherit;
     background: $shade-2;
   }
   
-  .tree-node {
+  .row {
     height: 1.666em;
 
     &.drop {

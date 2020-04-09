@@ -924,7 +924,7 @@ var ZoteroPane = new function()
 			dragAndDrop: true
 		});
 		ZoteroPane.itemsView.onRefresh.addListener(() => ZoteroPane.setTagScope());
-		ZoteroPane.itemsView.onLoad.addListener(() => Zotero.uiIsReady());
+		ZoteroPane.itemsView.waitForLoad().then(() => Zotero.uiIsReady());
 	}
 
 	this.initCollectionsTree = function () {
@@ -932,7 +932,7 @@ var ZoteroPane = new function()
 		ZoteroPane.collectionsView = Zotero.CollectionTree.init(collectionsTree, {
 			onSelectionChange: Zotero.Utilities.debounce(
 				prevSelection => ZoteroPane.onCollectionSelected(prevSelection), 100),
-			onContext: e => ZoteroPane.onCollectionsContextMenuOpen(e),
+			onContextMenu: e => ZoteroPane.onCollectionsContextMenuOpen(e),
 			dragAndDrop: true
 		});
 	};
@@ -961,7 +961,7 @@ var ZoteroPane = new function()
 			this.tagSelector.handleResize();
 		}
 		if (this.collectionsView) {
-			this.collectionsView.forceUpdateOnce();
+			this.collectionsView.updateHeight();
 		}
 	}, 100);
 	
@@ -2297,11 +2297,7 @@ var ZoteroPane = new function()
 		// done. This causes some menu items (e.g., export/createBib/loadReport) to appear gray
 		// in the menu at first and then turn black once there are items
 		if (!collectionTreeRow.isHeader() && !this.itemsView.initialized) {
-			await new Promise((resolve) => {
-				this.itemsView.onLoad.addListener(() => {
-					resolve();
-				});
-			});
+			await this.itemsView.waitForLoad();
 		}
 		
 		// Set attributes on the menu from the configuration object
@@ -2432,7 +2428,7 @@ var ZoteroPane = new function()
 			let unfiled = Zotero.Prefs.getVirtualCollectionStateForLibrary(
 				libraryID, 'unfiled'
 			);
-			let retracted = Zotero.Utilities.Internal.getVirtualCollectionStateForLibrary(
+			let retracted = Zotero.Prefs.getVirtualCollectionStateForLibrary(
 				libraryID, 'retracted'
 			);
 			if (!duplicates || !unfiled || !retracted) {
@@ -4820,7 +4816,7 @@ var ZoteroPane = new function()
 			collectionsTree.style.maxWidth = (collectionsPane.boxObject.width - borderSize) + 'px';
 		}
 		if (ZoteroPane.itemsView) {
-			ZoteroPane.itemsView.updateHeight(itemsPane.boxObject.height);
+			ZoteroPane.itemsView.updateHeight();
 		}
 		
 		if (stackedLayout || itemPane.collapsed) {

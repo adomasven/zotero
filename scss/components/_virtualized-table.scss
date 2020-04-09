@@ -38,6 +38,9 @@
     &.drop {
       color: $shade-0 !important;
       background: $shade-5 !important;
+      * {
+        pointer-events: none !important;
+      }
     }
 
     span.drop-before, span.drop-after {
@@ -54,12 +57,20 @@
       bottom: -1px;
     }
     
-    &.selected {
+    &.selected:not(.highlighted) {
       background-color: highlight;
       color: highlighttext;
     }
+
+    &.highlighted {
+      background: #FFFF99;
+    }
+
+    &.unread {
+      font-weight: bold;
+    }
   }
-  
+
   .column-drag-marker {
     z-index: 99999;
     position: absolute;

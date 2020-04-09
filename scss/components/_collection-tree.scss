@@ -9,53 +9,37 @@
   flex-direction: column;
   width: 100%;
   
-  .tree {
+  .virtualized-table {
     overflow-y: auto;
     flex: 1 0;
     text-overflow: ellipsis;
   }
-  
-  .tree-node {
+
+  .cell.primary {
     display: flex;
-    height: 20px;
-    width: 100%;
     align-items: center;
-    
-    &.focused:not(.highlighted) {
-      background-color: highlight;
-      color: highlighttext;
+
+    :not(.cell-text) {
+      flex-shrink: 0
     }
     
-    &.highlighted {
-      background: #FFFF99;
+    .cell-text {
+      flex-shrink: 1;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      margin-left: 6px;
     }
     
-    &.drop {
-      color: $shade-0 !important;
-      background: $shade-5 !important;
+    input.cell-text {
+      border: 1px highlight solid;
+      padding: 1px 2px;
+      margin-right: 5px;
+      width: 100%;
+      font-size: inherit;
     }
-    
-    &.unread {
-      font-weight: bold;
+
+    .cell-icon {
+      min-width: 16px;
     }
-  }
-  
-  span.tree-node-label {
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-  
-  input.tree-node-label {
-    border: 1px highlight solid;
-    padding: 1px 2px;
-    margin-right: 5px;
-    width: 100%;
-    font-size: inherit;
-  }
-  
-  .icon {
-    margin-right: 6px;
-    padding-top: 1px;
   }
 }

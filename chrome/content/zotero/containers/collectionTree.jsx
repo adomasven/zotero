@@ -31,8 +31,9 @@ const React = require('react');
 const ReactDOM = require('react-dom');
 const { IntlProvider } = require('react-intl');
 const VirtualizedTree = require('components/virtualized-tree');
-const { IconTwisty } = require('components/icons');
+const VirtualizedTable = require('components/virtualized-table');
 const Icons = require('components/icons');
+const { getDomElement: getDOMIcon } = Icons;
 const { getDragTargetOrient } = require('components/utils');
 const cx = require('classnames');
 
@@ -88,7 +89,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		this._virtualCollectionLibraries = {};
 		this._trashNotEmpty = {};
 		this._editing = null;
-		this._editingInputRef = null;
+		this._editingInput = null;
 		this._dropRow = null;
 		this._typingString = "";
 		this._typingTimeout = null;
@@ -118,13 +119,6 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	
 	componentDidUpdate() {
 		this.runListeners('refresh');
-		// We cannot have controlled input nodes, so we initialize
-		// the uncontrolled element here instead.
-		if (this._editing) {
-			this._editingInputRef.current.value = this._editing.editingName;
-			this._editingInputRef.current.select();
-			this._editingInputRef = null;
-		}
 	}
 
 	// Add a keypress listener for expand/collapse
@@ -163,17 +157,25 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		return true;
 	}
 	
-	handleSelectionChange = (selection) => {
+	_handleSelectionChange = (selection) => {
 		selection = selection || this.selection;
 		let treeRow = this.getRow(selection.focused);
+		// If selection changed (by click on a different row) and we are editing
+		// commit the edit
 		if (this._editing) {
 			if (this._editing == treeRow) return;
 			this.commitEditingName(this._editing);
 			this._editing = null;
 		}
-		this.forceUpdateOnce();
-		this.props.onSelectionChange && this.props.onSelectionChange(this.prevSelection);
-		this.prevSelection = selection.focused;
+		// Update aria-activedescendant on the tree
+		this.forceUpdate();
+		this.props.onSelectionChange && this.props.onSelectionChange();
+	}
+	
+	handleTwistyMouseUp = (event, index) => {
+		this.toggleOpenState(index);
+		event.stopPropagation();
+		this.tree.focus();
 	}
 	
 	handleActivate = (index) => {
@@ -181,12 +183,12 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		if (treeRow.isCollection() && this.editable) {
 			this._editing = treeRow;
 			treeRow.editingName = treeRow.ref.name;
-			this.forceUpdate();
+			this.tree.invalidateRow(index);
 		}
 	}
 	
-	handleEditingChange = (treeRow, e) => {
-		treeRow.editingName = e.target.value;
+	handleEditingChange = (event, index) => {
+		this.getRow(index).editingName = event.target.value
 	}
 	
 	async handleTyping(char) {
@@ -240,29 +242,101 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	stopEditing = () => {
 		this._editing = null;
 		// Returning focus to the tree container
-		document.getElementById('collection-tree').focus();
-		this.forceUpdate();
+		this.tree.invalidate();
+		this.tree.focus();
 	}
 
-	forceUpdateOnce = new function() {
-		let animationId = null;
-		return function() {
-			if (animationId !== null) {
-				return;
-			}
-			
-			let onNextFrame = window.requestAnimationFrame;
-			if (Zotero.isWin) {
-				// requestAnimationFrame on Windows doesn't redraw the tree fast enough
-				// so we have to redraw on next event loop turn instead
-				onNextFrame = window.setTimeout;
-			}
+	renderItem = (index, selection, oldDiv) => {
+		const treeRow = this.getRow(index);
+		
+		// Div creation and content
+		let div = oldDiv || document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
+		div.innerHTML = "";
+		
+		// Classes
+		div.className = "row";
+		div.classList.toggle('selected', selection.isSelected(index));
+		div.classList.toggle('highlighted', this._highlightedRows.has(treeRow.id));
+		div.classList.toggle('drop', this._dropRow == index);
+		div.classList.toggle('unread', treeRow.ref && treeRow.ref.unreadCount > 0);
 
-			animationId = onNextFrame(() => {
-				this.forceUpdate();
-				animationId = null;
+		// Depth indent
+		let depth = treeRow.level;
+		// The arrow on macOS is a full icon's width.
+		// For non-userLibrary items that are drawn under headers
+		// we do not draw the arrow and need to move all items 1 level up
+		if (Zotero.isMac && !treeRow.isHeader() && treeRow.ref
+			&& treeRow.ref.libraryID != Zotero.Libraries.userLibraryID) {
+			depth--;
+		}
+		div.style.paddingLeft = (MARGIN_LEFT + CHILD_INDENT * depth) + 'px';
+		
+		// Create a single-cell for the row (for the single-column layout)
+		let cell = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+		cell.className = "cell label primary";
+		
+		// Twisty/spacer
+		let twisty;
+		if (this.isContainerEmpty(index)) {
+			twisty = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+			twisty.classList.add("spacer-twisty");
+		}
+		else {
+			twisty = getDOMIcon("IconTwisty");
+			twisty.classList.add('twisty');
+			if (this.isContainerOpen(index)) {
+				twisty.classList.add('open');
+			}
+			twisty.style.pointerEvents = 'auto';
+			twisty.addEventListener('mousedown', event => event.stopPropagation());
+			twisty.addEventListener('mouseup', event => this.handleTwistyMouseUp(event, index),
+				{ passive: true });
+		}
+		
+		const icon = this._getIcon(index);
+		icon.classList.add('cell-icon');
+		
+		// Label
+		let label = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+		label.innerText = treeRow.getName();
+		label.className = 'cell-text';
+
+		// Editing input
+		if (treeRow == this._editing) {
+			label = document.createElementNS("http://www.w3.org/1999/xhtml", 'input');
+			label.className = 'cell-text';
+			label.setAttribute("autoFocus", true);
+			label.setAttribute("size", 5);
+			label.addEventListener('input', e => this.handleEditingChange(e, index));
+			label.addEventListener('blur', async () => {
+				await this.commitEditingName();
+				this.stopEditing();
 			});
-		};
+		}
+
+		cell.appendChild(twisty);
+		cell.appendChild(icon);
+		cell.appendChild(label);
+		div.appendChild(cell);
+
+		// Drag-and-drop stuff
+		if (this.props.dragAndDrop) {
+			div.setAttribute('draggable', treeRow != this._editing);
+		}
+		if (!oldDiv) {
+			if (this.props.dragAndDrop) {
+				div.addEventListener('dragstart', e => this.onDragStart(e, index), { passive: true });
+				div.addEventListener('dragover', e => this.onDragOver(e, index));
+				div.addEventListener('dragend', this.onDragEnd, { passive: true });
+				div.addEventListener('dragleave', this.onDragLeave, { passive: true });
+				div.addEventListener('drop', (e) => {
+					e.stopPropagation();
+					this.onDrop(e, index);
+				}, { passive: true });
+			}
+		}
+
+		return div;
 	}
 	
 	render() {
@@ -272,126 +346,41 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		}
 		itemHeight *= Zotero.Prefs.get('fontSize');
 		
-		return React.createElement(VirtualizedTree,
+		return React.createElement(VirtualizedTable,
 			{
-				height: this.props.domEl.parentElement.clientHeight,
-				width: this.props.width || window.innerWidth,
-				rowCount: this._rows.length,
+				getRowCount: () => this._rows.length,
 				rowHeight: itemHeight,
 				id: "collection-tree",
-				rowRenderer: ({ index, key, style }, { selection }) => {
-					let treeRow = this.getRow(index);
-					let depth = treeRow.level;
-					let icon = this.getIcon(treeRow);
-					let classes = cx(['tree-node',
-						{
-							focused: selection.isSelected(index),
-							highlighted: this._highlightedRows.has(treeRow.id),
-							drop: this._dropRow == treeRow.id,
-							unread: treeRow.ref && treeRow.ref.unreadCount
-						}
-					]);
+				ref: ref => this.tree = ref,
+				treeboxRef: ref => this._treebox = ref,
+				renderItem: this.renderItem,
 
-					// The arrow on macOS is a full icon's width.
-					// For non-userLibrary items that are drawn under headers
-					// we do not draw the arrow and need to move all items 1 level up
-					if (Zotero.isMac && !treeRow.isHeader() && treeRow.ref
-							&& treeRow.ref.libraryID != Zotero.Libraries.userLibraryID) {
-						depth--;
-					}
-
-
-					let props = {
-						style: Object.assign({
-							paddingLeft: (MARGIN_LEFT + CHILD_INDENT * depth) + 'px'
-						}, style),
-						key,
-						className: classes,
-						onContextMenu: async (e) => {
-							e.persist();
-							this.selection.select(index);
-							this.props.onContext && this.props.onContext(e);
-						},
-						draggable: treeRow != this._editing,
-					};
-
-					props.onDoubleClick = () => this.handleActivate(treeRow);
-					if (this.props.dragAndDrop) {
-						props.onDragStart = e => this.onDragStart(treeRow, e);
-						props.onDragOver = e => this.onDragOver(treeRow, e);
-						props.onDragEnd = e => this.onDragEnd(treeRow, e);
-						props.onDrop = e => this.onDrop(treeRow, e);
-					}
-
-					let arrowProps = {
-						onMouseDown: async (e) => {
-							e.stopPropagation();
-							e.preventDefault();
-							await this.toggleOpenState(index);
-							this.forceUpdate();
-						},
-						className: 'arrow',
-					};
-					arrowProps.className += this.isContainerOpen(index) ? ' open' : '';
-					let arrow = <IconTwisty {...arrowProps}/>;
-					if (!this.isContainer(index) || this.isContainerEmpty(index)) {
-						arrow = <span className='spacer-arrow'></span>;
-					}
-
-					let label = <span className="tree-node-label">{treeRow.getName()}</span>;
-					if (treeRow == this._editing) {
-						this._editingInputRef = React.createRef();
-						label = <input
-							className="tree-node-label"
-							ref={this._editingInputRef}
-							autoFocus={true}
-							onInput={e => this.handleEditingChange(treeRow, e)}
-							size={5}
-							onBlur={async (_) => {
-								await this.commitEditingName();
-								this.stopEditing();
-							}}
-						/>;
-					}
-
-					return (
-						<div {...props}>
-							{arrow}
-							{icon}
-							{label}
-						</div>
-					);
-				},
-				ref: tree => this.ref = tree,
-				
-				getParentIndex: this.getParentIndex,
-				getAriaLabel: index => {
-					let row = this.getRow(index);
-					return row ? row.getName() : "";
-				},
+				onSelectionChange: this._handleSelectionChange,
 				isSelectable: this.isSelectable,
-				multiSelect: false,
-				editing: !!this._editing,
+				getParentIndex: this.getParentIndex,
 				isContainer: this.isContainer,
 				isContainerEmpty: this.isContainerEmpty,
 				isContainerOpen: this.isContainerOpen,
-				toggleOpenState: async (index) => {
-					await this.toggleOpenState(index);
-					this.forceUpdate();
-				},
-				
-				onDragLeave: (e) => this.props.dragAndDrop && this.onTreeDragLeave(e),
-				onSelectionChange: this.handleSelectionChange,
+				toggleOpenState: this.toggleOpenState,
+				onItemContextMenu: (e) => this.props.onContextMenu && this.props.onContextMenu(e),
+
 				onKeyDown: this.handleKeyDown,
 				onActivate: this.handleActivate,
-
-				autoExpandAll: false,
-				autoExpandDepth: 0,
 
 				label: Zotero.getString('pane.collections.title')
 			}
 		);
 	}
+
+	_updateHeight = () => {
+		this.forceUpdate(() => {
+			if (this.tree) {
+				this.tree.rerender();
+			}
+		});
+	}
+
+	updateHeight = Zotero.Utilities.debounce(this._updateHeight, 200);
 	
 ////////////////////////////////////////////////////////////////////////////////
 ///
@@ -400,11 +389,11 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 ////////////////////////////////////////////////////////////////////////////////
 
 	get selection() {
-		return this.ref ? this.ref.selection : { select: () => 0 };
+		return this.tree ? this.tree.selection : TreeSelectionStub;
 	}
 
 	set selection(val) {
-		return this.ref.selection = val;
+		return this.tree.selection = val;
 	}
 	
 	/**
@@ -547,7 +536,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	 * @return {Promise}
 	 */
 	async selectWait(index) {
-		if (this.ref && this.selection.isSelected(index)) {
+		if (this.tree && this.selection.isSelected(index)) {
 			return;
 		}
 		var promise = this.waitForSelect();
@@ -645,7 +634,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	
 	// The caller has to ensure the tree is redrawn
 	ensureRowIsVisible(index) {
-		this.ref && this.ref.scrollToRow(index);
+		this.tree && this.tree.scrollToRow(index);
 	}
 	
 	waitForLoad() {
@@ -674,18 +663,18 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		// Actions that don't change the selection
 		//
 		if (action == 'redraw') {
-			this.forceUpdate();
+			this.tree.invalidate();
 			return;
 		}
 		if (action == 'refresh') {
 			// If trash is refreshed, we probably need to update the icon from full to empty
 			if (type == 'trash') {
-				this.forceUpdate();
+				this.tree.invalidate();
 			}
 			return;
 		}
 		if (type == 'feed' && (action == 'unreadCountUpdated' || action == 'statusChanged')) {
-			this.forceUpdate();
+			this.tree.invalidate();
 			return;
 		}
 		
@@ -800,7 +789,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 				switch (type) {
 					case 'collection':
 					case 'search':
-						await this._addSortedRow(type, id);
+						const addedIndex = await this._addSortedRow(type, id);
 						
 						if (selectRow) {
 							if (type == 'collection') {
@@ -809,6 +798,9 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 							else if (type == 'search') {
 								await this.selectByID("S" + id);
 							}
+						}
+						else if (addedIndex !== false && addedIndex <= this.selection.focused) {
+							await this.selectWait(this.selection.focused+1);
 						}
 						
 						break;
@@ -834,7 +826,6 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		this.forceUpdate();
 		var promise = this.waitForSelect();
 		this.selection.selectEventsSuppressed = false;
-		this.handleSelectionChange();
 		return promise;
 	}
 
@@ -873,7 +864,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 				this.ensureRowIsVisible(rows[0]);
 			}
 		} finally {
-			this.forceUpdate();
+			this.tree.invalidate();
 		}
 	}
 
@@ -911,7 +902,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 				await this.toggleOpenState(row);
 			}
 		}
-		this.forceUpdateOnce();
+		this.tree.invalidate();
 		return true;
 	}
 
@@ -936,7 +927,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			}
 		}
 		
-		this.forceUpdateOnce();
+		this.tree.invalidate();
 		this._saveOpenStates();
 		return true;
 	}
@@ -974,7 +965,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		// collapsed) and they'd remain as open in the persisted object.
 		closed.forEach(id => { delete this._containerState[id]; });
 		
-		this.forceUpdateOnce();
+		this.tree.invalidate();
 		this._saveOpenStates();
 	}
 	
@@ -995,6 +986,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		this.selection.selectEventsSuppressed = false;
 		
 		this._rows[index].isOpen = true;
+		this.tree.invalidate(index);
 		this._refreshRowMap();
 		this._saveOpenStates();
 	}
@@ -1024,7 +1016,6 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		var selectedRowID = this.getRow(selectedRow).id;
 		
 		await this.refresh();
-		this.forceUpdate();
 		
 		// Select new or original row
 		if (show) {
@@ -1141,7 +1132,8 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 ///
 ////////////////////////////////////////////////////////////////////////////////
 
-	onDragStart(treeRow, event) {
+	onDragStart(event, index) {
+		const treeRow = this.getRow(index);
 		// See note in #setDropEffect()
 		if (Zotero.isWin || Zotero.isLinux) {
 			event.dataTransfer.effectAllowed = 'copyMove';
@@ -1154,13 +1146,15 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		Zotero.debug("Dragging collection " + treeRow.id);
 	}
 
-	onDragOver(treeRow, event) {
+	onDragOver(event, index) {
+		if (!event.currentTarget.classList.contains('row')) return;
+		const treeRow = this.getRow(index);
 		try {
 			// Prevent modifier keys from doing their normal things
 			event.preventDefault();
 			Zotero.DragDrop.currentOrientation = getDragTargetOrient(event);
 			
-			if (!this.canDropCheck(treeRow, event.dataTransfer)) {
+			if (!this.canDropCheck(index, Zotero.DragDrop.currentOrientation, event.dataTransfer)) {
 				this.setDropEffect(event, "none");
 				return;
 			}
@@ -1246,29 +1240,32 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		} finally {
 			let prevDropRow = this._dropRow;
 			if (event.dataTransfer.dropEffect != 'none') {
-				this._dropRow = treeRow.id;
+				this._dropRow = index;
 			} else {
 				this._dropRow = null;
 			}
-			if (this._dropRow != prevDropRow) {
-				this.ref.forceUpdateGrid();
+			if (prevDropRow != this._dropRow) {
+				typeof prevDropRow == 'number' && this.tree.invalidateRow(prevDropRow);
+				this.tree.invalidateRow(index);
 			}
 		}
 	}
 	
-	onDragEnd() {
+	onDragEnd = () => {
+		let dropRow = this._dropRow;
 		this._dropRow = null;
-		this.forceUpdateOnce();
+		this.tree.invalidateRow(dropRow);
 	}
 	
-	onTreeDragLeave() {
+	onDragLeave = (e) => {
+		if (!e.currentTarget.classList.contains('row')) return;
+		let dropRow = this._dropRow;
 		this._dropRow = null;
-		this.forceUpdateOnce();
+		this.tree.invalidateRow(dropRow);
 	}
-	
-	canDropCheck(treeRow, dataTransfer) {
-		let orient = Zotero.DragDrop.currentOrientation;
-		let row = this._rowMap[treeRow.id];
+
+	canDropCheck = (row, orient, dataTransfer) => {
+		const treeRow = this.getRow(row);
 		// TEMP
 		Zotero.debug("Row is " + row + "; orient is " + orient);
 		
@@ -1518,10 +1515,10 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		return true;
 	}
 	
-	async onDrop(treeRow, event) {
+	async onDrop(event, index) {
+		const treeRow = this.getRow(index);
 		this._dropRow = null;
-		this.forceUpdateOnce();
-		event.persist();
+		this.tree.invalidate();
 		let orient = Zotero.DragDrop.currentOrientation;
 		let row = this._rowMap[treeRow.id];
 		let dataTransfer = event.dataTransfer;
@@ -1801,8 +1798,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			
 			if (targetTreeRow.isPublications()) {
 				items = Zotero.Items.keepParents(items);
-				let io = event.target.ownerDocument.defaultView
-					.ZoteroPane.showPublicationsWizard(items);
+				let io = ZoteroPane.showPublicationsWizard(items);
 				if (!io) {
 					return;
 				}
@@ -2030,7 +2026,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		var id = this.getRow(index).id;
 		let level = this.getLevel(index);
 
-		let moveSelect = index - 1;
+		let moveSelect = this.selection.focused - 1;
 		if (index <= this.selection.focused) {
 			while (moveSelect >= this._rows.length || !this.isSelectable(moveSelect)) {
 				moveSelect--;
@@ -2132,16 +2128,17 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		this._rows[row].isOpen = false;
 		this._refreshRowMap();
 		this._saveOpenStates();
-		this.forceUpdateOnce();
+		this.tree.invalidate();
 	}
 	
-	getIcon(treeRow) {
-		var collectionType = treeRow.type
+	_getIcon(index) {
+		const treeRow = this.getRow(index);
+		var collectionType = treeRow.type;
 		
 		if (collectionType == 'group') {
 			collectionType = 'Library';
 		}
-		let iconCls, iconClsName;
+		let iconClsName;
 		
 		switch (collectionType) {
 			case 'library':
@@ -2184,15 +2181,16 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		
 		collectionType = Zotero.Utilities.capitalize(collectionType);
 		iconClsName = iconClsName || "IconTreesource" + collectionType;
-		iconCls = Icons[iconClsName];
-		
-		if (!iconCls) {
-			if (collectionType != 'Separator') {
-				Zotero.debug('Could not find tree icon for "' + collectionType + '"');
-			}
-			return '';
+
+		if (collectionType == 'Separator') {
+			return document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
 		}
-		return React.createElement(iconCls);
+		
+		var icon = getDOMIcon(iconClsName);
+		if (!icon) {
+			return document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+		}
+		return icon;
 	}
 
 	/**

@@ -533,7 +533,7 @@ class VirtualizedTable extends React.Component {
 			node.addEventListener('dragstart', e => this._onDragStart(e, index), { passive: true });
 			node.addEventListener('dragend', e => this._onDragEnd(e, index), { passive: true });
 			node.addEventListener('mousedown', e => this._handleMouseDown(e, index), { passive: true });
-			node.addEventListener('mouseup', e => this._handleMouseUp(e, index), { passive: true, capture: true });
+			node.addEventListener('mouseup', e => this._handleMouseUp(e, index), { passive: true });
 			node.addEventListener('dblclick', e => this._activateNode(e, [index]), { passive: true });
 		}
 		node.id = this.props.id + "-row-" + index;
@@ -544,8 +544,8 @@ class VirtualizedTable extends React.Component {
 	_renderHeaderCells = () => {
 		return this.props.columns.filter(col => !col.hidden).map((column, index) => {
 			if (column.hidden) return;
-			let labelAttribute = this.props.intl.formatMessage({ id: column.label });
-			let label = labelAttribute;
+			let columnName = this.props.intl.formatMessage({ id: column.label });
+			let label = columnName;
 			if (column.iconLabel) {
 				label = column.iconLabel;
 			}
@@ -576,14 +576,13 @@ class VirtualizedTable extends React.Component {
 				onDragStop={this._handleColumnDragStop}
 				className={className}
 				delay={500}
-				key={column.label + '-draggable'}>
+				key={columnName + '-draggable'}>
 				<div
-					key={column.label + ''}
+					key={columnName}
 					onMouseUp={e => this._handleHeaderMouseUp(e, column.dataKey)}>
 					{resizer}
 					<span
-						key={column.label + '-label'}
-						label={labelAttribute}
+						key={columnName + '-label'}
 						className={`label ${column.dataKey}`}>
 						{label}
 					</span>
@@ -619,6 +618,9 @@ class VirtualizedTable extends React.Component {
 		};
 		if (this.props.hide) {
 			props.style = { display: "none" };
+		}
+		if (this.props.label) {
+			props.label = this.props.label;
 		}
 		if (this.selection.count > 0) {
 			const elem = this._jsWindow && this._jsWindow.getElementByIndex(this.selection.focused);

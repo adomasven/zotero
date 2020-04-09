@@ -531,18 +531,18 @@ describe("Zotero.CollectionTree", function() {
 			else {
 				var { row, orient } = targetRow;
 			}
-			let treeRow = cv.getRow(row);
+			
+			Zotero.DragDrop.currentDragSource = objectType == "item" && zp.itemsView.collectionTreeRow;
 			
 			if (!promise) {
 				promise = waitForNotifierEvent("add", objectType);
 			}
-			yield cv.onDrop(treeRow, {
+			yield cv.onDrop({
 				persist: () => 0,
 				target: {ownerDocument: {defaultView: win}},
 				dataTransfer: {
 					dropEffect: action,
 					effectAllowed: action,
-					mozSourceNode: objectType == 'item' && win.document.getElementById(`zotero-${objectType}s-tree`).treeBoxObject.treeBody,
 					types: {
 						contains: function (type) {
 							return type == `zotero/${objectType}`;
@@ -554,22 +554,21 @@ describe("Zotero.CollectionTree", function() {
 						}
 					}
 				}
-			});
+			}, row);
 			
 			// Add observer to wait for add
 			var result = yield promise;
+			Zotero.DragDrop.currentDragSource = null;
 			return result;
 		});
 		
 		
 		var canDrop = Zotero.Promise.coroutine(function* (type, targetRowID, ids) {
 			var row = cv.getRowIndexByID(targetRowID);
-			let treeRow = cv.getRow(row);
 			
 			var dt = {
 				dropEffect: 'copy',
 				effectAllowed: 'copy',
-				mozSourceNode: win.document.getElementById(`zotero-${type}s-tree`),
 				types: {
 					contains: function (type) {
 						return type == `zotero/${type}`;
@@ -581,7 +580,7 @@ describe("Zotero.CollectionTree", function() {
 					}
 				}
 			};
-			var canDrop = cv.canDropCheck(treeRow, dt);
+			var canDrop = cv.canDropCheck(row, 0, dt);
 			if (canDrop) {
 				canDrop = yield cv.canDropCheckAsync(row, 0, dt);
 			}
@@ -613,7 +612,7 @@ describe("Zotero.CollectionTree", function() {
 				yield cv.selectCollection(collection.id);
 				yield waitForItemsLoad(win);
 				
-				var itemsView = win.ZoteroPane.itemsView
+				var itemsView = win.ZoteroPane.itemsView;
 				assert.equal(itemsView.rowCount, 1);
 				var treeRow = itemsView.getRow(0);
 				assert.equal(treeRow.ref.id, item.id);

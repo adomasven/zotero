@@ -623,7 +623,7 @@ describe.only("Zotero.ItemTree", function() {
 			});
 		});
 		
-		describe("My Publications", function () {
+		describe.only("My Publications", function () {
 			before(async function () {
 				var libraryID = Zotero.Libraries.userLibraryID;
 				

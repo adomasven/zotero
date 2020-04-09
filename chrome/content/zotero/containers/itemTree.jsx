@@ -26,8 +26,6 @@
 (function () {
 const React = require('react');
 const ReactDom = require('react-dom');
-const { div } = require('react-dom-factories');
-const PropTypes = require('prop-types');
 const { IntlProvider } = require('react-intl');
 const VirtualizedTable = require('components/virtualized-table');
 const { TreeSelectionStub } = require('components/virtualized-tree');
@@ -43,7 +41,7 @@ const CHILD_INDENT = 20;
 const COLORED_TAGS_RE = new RegExp("^[0-" + Zotero.Tags.MAX_COLORED_TAGS + "]{1}$");
 
 function makeItemRenderer(itemTree) {
-	function onTwistyMouseDown(event, index) {
+	function onTwistyMouseUp(event, index) {
 		itemTree.toggleOpenState(index);
 		event.stopPropagation();
 		itemTree.tree.focus();
@@ -67,7 +65,8 @@ function makeItemRenderer(itemTree) {
 				twisty.classList.add('open');
 			}
 			twisty.style.pointerEvents = 'auto';
-			twisty.addEventListener('mousedown', event => onTwistyMouseDown(event, index),
+			twisty.addEventListener('mousedown', event => event.stopPropagation());
+			twisty.addEventListener('mouseup', event => onTwistyMouseUp(event, index),
 				{ passive: true });
 		}
 		
@@ -160,7 +159,8 @@ function makeItemRenderer(itemTree) {
 		if (oldDiv) {
 			div = oldDiv;
 			div.innerHTML = "";
-		} else {
+		}
+		else {
 			div = document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
 			div.className = "row";
 		}
@@ -199,6 +199,7 @@ function makeItemRenderer(itemTree) {
 				div.addEventListener('dragstart', e => itemTree.onDragStart(e, index), { passive: true });
 				div.addEventListener('dragover', e => itemTree.onDragOver(e, index));
 				div.addEventListener('dragend', itemTree.onDragEnd, { passive: true });
+				div.addEventListener('dragleave', itemTree.onDragLeave, { passive: true });
 				div.addEventListener('drop', (e) => {
 					e.stopBubbling();
 					itemTree.onDrop(e, index);
@@ -270,7 +271,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		
 		this._itemTreeLoadingDeferred = Zotero.Promise.defer();
 
-		this.onLoad = this._createEventBinding('load', true);
 		this.onSelect = this._createEventBinding('select');
 		this.onRefresh = this._createEventBinding('refresh');
 	}
@@ -1126,39 +1126,37 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 				{
 					getRowCount: () => this._rows.length,
 					rowHeight: itemHeight,
-					headerHeight: headerHeight,
 					id: this.id,
 					ref: ref => this.tree = ref,
 					treeboxRef: ref => this._treebox = ref,
 					columns: this._getColumns(),
-					showHeader: true,
 					renderItem: this.renderItem,
 					hide: showMessage,
 
 					multiSelect: true,
 
-					getAriaLabel: index => this.getRow(index).getField('title'),
 					onSelectionChange: this._handleSelectionChange,
 					isSelectable: () => true,
 					getParentIndex: this.getParentIndex,
 					isContainer: this.isContainer,
 					isContainerEmpty: this.isContainerEmpty,
 					isContainerOpen: this.isContainerOpen,
-					toggleOpenState: this.toggleOpenState.bind(this),
+					toggleOpenState: this.toggleOpenState,
 
-					onTreeDragEnter: (e) => this.props.dragAndDrop && this.onTreeDragEnter(e),
-					onTreeDragLeave: (e) => this.props.dragAndDrop && this.onTreeDragLeave(e),
 					onDragOver: e => this.props.dragAndDrop && this.onDragOver(e, -1),
 					onDrop: e => this.props.dragAndDrop && this.onDrop(e, -1),
 					onKeyDown: this.handleKeyDown,
 					onActivate: this.handleActivate,
+
+					onItemContextMenu: (e) => this.props.onContextMenu && this.props.onContextMenu(e),
+					label: Zotero.getString('pane.items.title'),
+
+					showHeader: true,
+					headerHeight: headerHeight,
 					onColumnPickerMenu: this._displayColumnPickerMenu,
 					onColumnResize: this._columns.resize,
 					onColumnReorder: this._columns.setOrder,
 					onHeaderClick: this._handleHeaderClick,
-					onItemContextMenu: this.props.onContextMenu,
-
-					label: Zotero.getString('pane.collections.title'),
 				}
 			);
 		}
@@ -1716,7 +1714,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		this.ensureRowIsVisible(indices[0] + maxBuffer);
 	}
 	
-	async toggleOpenState(index, skipRowMapRefresh=false) {
+	toggleOpenState = async (index, skipRowMapRefresh=false) => {
 		// Shouldn't happen but does if an item is dragged over a closed
 		// container until it opens and then released, since the container
 		// is no longer in the same place when the spring-load closes
@@ -2228,14 +2226,23 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 			} else {
 				this._dropRow = null;
 			}
-			typeof prevDropRow == 'number' && this.tree.invalidateRow(prevDropRow);
-			this.tree.invalidateRow(row);
+			if (prevDropRow != this._dropRow) {
+				typeof prevDropRow == 'number' && this.tree.invalidateRow(prevDropRow);
+				this.tree.invalidateRow(row);
+			}
 		}
 	}
 
 	onDragEnd = () => {
 		this._dragImageContainer.innerHTML = "";
+		this._dropRow = null;
 		this.tree.invalidate();
+	}
+
+	onDragLeave = () => {
+		let dropRow = this._dropRow;
+		this._dropRow = null;
+		this.tree.invalidateRow(dropRow);
 	}
 
 	/**
@@ -2256,6 +2263,10 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 
 		if (row != -1 && orient == 0) {
 			var rowItem = this.getRow(row).ref; // the item we are dragging over
+			// Cannot drop anything on attachments/notes
+			if (!rowItem.isRegularItem()) {
+				return false;
+			}
 		}
 
 		if (dataType == 'zotero/item') {
@@ -2643,14 +2654,6 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		}
 	};
 
-	onTreeDragEnter = (event) => {
-		Zotero.DragDrop.currentEvent = event;
-	}
-	
-	onTreeDragLeave = () => {
-		Zotero.DragDrop.currentEvent = null;
-	}
-
 	setDropEffect(event, effect) {
 		// On Windows (in Fx26), Firefox uses 'move' for unmodified drags
 		// and 'copy'/'link' for drags with system-default modifier keys
@@ -2686,7 +2689,7 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 	_handleSelectionChange = (selection) => {
 		// Update aria-activedescendant on the tree
 		this.forceUpdate();
-		this.props.onSelectionChange(selection);
+		this.props.onSelectionChange && this.props.onSelectionChange(selection);
 	}
 
 	/**
@@ -3473,8 +3476,12 @@ Zotero.ItemTree = class ItemTree extends React.Component {
 		if (!Icons[iconClsName]) {
 			iconClsName = "IconTreeitem";
 		}
-		// N.B. Should use css-image-set in Electron
-		return getDOMIcon(iconClsName);
+		var icon = getDOMIcon(iconClsName);
+		if (!icon) {
+			Zotero.debug('Could not find tree icon for "' + itemType + '"');
+			return document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+		}
+		return icon;
 	}
 	
 	_getTagSwatch(color) {
