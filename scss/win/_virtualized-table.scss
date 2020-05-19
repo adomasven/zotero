@@ -1,14 +1,10 @@
-.arrow svg {
+.arrow svg, .twisty svg {
   fill: #b6b6b6;
   width: 16px;
 }
 
-.arrow.open svg {
+.arrow.open svg, .twisty.open svg {
   fill: #636363;
-}
-
-.tree-node:hover .arrow svg {
-  fill: #8adbfc;
 }
 
 .spacer-arrow {

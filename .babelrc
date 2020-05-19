@@ -1,6 +1,6 @@
 {
   "compact": false,
-  "retainLines": false,
+  "retainLines": true,
   "presets": [
     "@babel/preset-react"
   ],

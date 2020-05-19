@@ -144,7 +144,7 @@ var ZoteroPane = new function()
 		Zotero.hiDPI = window.devicePixelRatio > 1;
 		Zotero.hiDPISuffix = Zotero.hiDPI ? "@2x" : "";
 
-		ZoteroPane.initCollectionsTree();
+		await ZoteroPane.initCollectionsTree();
 		await ZoteroPane.initItemsTree();
 		
 		// Add a default progress window
@@ -381,7 +381,6 @@ var ZoteroPane = new function()
 		}
 		_madeVisible = true;
 
-		yield ZoteroPane.collectionsView.makeVisible();
 		this.unserializePersist();
 		this.updateLayout();
 		this.updateToolbarPosition();
@@ -579,9 +578,41 @@ var ZoteroPane = new function()
 	
 	
 	function handleKeyPress(event) {
+		var from = event.originalTarget.id;
+		
 		if (Zotero.locked) {
 			event.preventDefault();
 			return;
+		}
+
+		if (from == 'zotero-collections-tree') {
+			if ((event.keyCode == event.DOM_VK_BACK_SPACE && Zotero.isMac) ||
+				event.keyCode == event.DOM_VK_DELETE) {
+				var deleteItems = event.metaKey || (!Zotero.isMac && event.shiftKey);
+				ZoteroPane_Local.deleteSelectedCollection(deleteItems);
+				event.preventDefault();
+				return;
+			}
+		}
+		else if (from == 'zotero-items-tree') {
+			// Focus TinyMCE explicitly on tab key, since the normal focusing doesn't work right
+			if (!event.shiftKey && event.keyCode == event.DOM_VK_TAB) {
+				var deck = document.getElementById('zotero-item-pane-content');
+				if (deck.selectedPanel.id == 'zotero-view-note') {
+					document.getElementById('zotero-note-editor').focus();
+					event.preventDefault();
+					return;
+				}
+			}
+			else if ((event.keyCode == event.DOM_VK_BACK_SPACE && Zotero.isMac) ||
+				event.keyCode == event.DOM_VK_DELETE) {
+				// If Cmd/Shift delete, use forced mode, which does different
+				// things depending on the context
+				var force = event.metaKey || (!Zotero.isMac && event.shiftKey);
+				ZoteroPane_Local.deleteSelectedItems(force);
+				event.preventDefault();
+				return;
+			}
 		}
 		
 		var command = Zotero.Keys.getCommand(event.key);
@@ -916,20 +947,27 @@ var ZoteroPane = new function()
 	};
 
 	this.initItemsTree = async function () {
+		const ItemTree = require('containers/itemTree');
 		var itemsTree = document.getElementById('zotero-items-tree');
-		ZoteroPane.itemsView = await Zotero.ItemTree.init(itemsTree, {
+		ZoteroPane.itemsView = await ItemTree.init(itemsTree, {
+			id: "main",
+			dragAndDrop: true,
+			persistColumns: true,
+			columnPicker: true,
 			onSelectionChange: Zotero.Utilities.debounce(
 				selection => ZoteroPane.itemSelected(selection), 100),
-			onContextMenu: e => ZoteroPane.onItemsContextMenuOpen(e),
-			dragAndDrop: true
+			onContextMenu: event => ZoteroPane.onItemsContextMenuOpen(event),
+			onActivate: (event, items) => ZoteroPane.viewItems(items, event),
+			emptyMessage: Zotero.getString('pane.items.loading')
 		});
 		ZoteroPane.itemsView.onRefresh.addListener(() => ZoteroPane.setTagScope());
 		ZoteroPane.itemsView.waitForLoad().then(() => Zotero.uiIsReady());
 	}
 
-	this.initCollectionsTree = function () {
+	this.initCollectionsTree = async function () {
+		const CollectionTree = require('containers/collectionTree');
 		var collectionsTree = document.getElementById('zotero-collections-tree');
-		ZoteroPane.collectionsView = Zotero.CollectionTree.init(collectionsTree, {
+		ZoteroPane.collectionsView = await CollectionTree.init(collectionsTree, {
 			onSelectionChange: Zotero.Utilities.debounce(
 				prevSelection => ZoteroPane.onCollectionSelected(prevSelection), 100),
 			onContextMenu: e => ZoteroPane.onCollectionsContextMenuOpen(e),
@@ -1057,28 +1095,6 @@ var ZoteroPane = new function()
 			
 			this._updateToolbarIconsForRow(collectionTreeRow);
 
-			// TODO: review this
-			// this.itemsView = new Zotero.ItemTreeView(collectionTreeRow);
-			// if (collectionTreeRow.isPublications()) {
-			// 	this.itemsView.collapseAll = true;
-			// }
-			// this.itemsView.onError = function () {
-			// 	// Don't reload last folder, in case that's the problem
-			// 	Zotero.Prefs.clear('lastViewedFolder');
-			// 	Zotero.crash();
-			// };
-			// this.itemsView.onRefresh.addListener(() => {
-			// 	this.setTagScope();
-			// });
-			// this.itemsView.onLoad.addListener(() => {
-			// 	// Show error if items list couldn't loaded (e.g., bad search), as set in
-			// 	// Zotero.CollectionTreeRow::getSearchResults()
-			// 	if (Zotero.CollectionTreeCache.error) {
-			// 		this.setItemsPaneMessage(Zotero.getString('pane.items.loadError'));
-			// 	}
-			// 	Zotero.uiIsReady();
-			// });
-			
 			// If item data not yet loaded for library, load it now.
 			// Other data types are loaded at startup
 			var library = Zotero.Libraries.get(collectionTreeRow.ref.libraryID);
@@ -1089,26 +1105,6 @@ var ZoteroPane = new function()
 			}
 			
 			this.itemsView.changeCollectionTreeRow(collectionTreeRow);
-
-			// try {
-			// 	let tree = document.getElementById('zotero-items-tree');
-			// 	let treecols = document.getElementById('zotero-items-columns-header');
-			// 	let treecolpicker = treecols.boxObject.firstChild.nextSibling;
-			// 	let menupopup = treecolpicker.boxObject.firstChild.nextSibling;
-			// 	// Add events to treecolpicker to update menu before showing/hiding
-			// 	let attr = menupopup.getAttribute('onpopupshowing');
-			// 	if (attr.indexOf('Zotero') == -1) {
-			// 		menupopup.setAttribute('onpopupshowing', 'ZoteroPane.itemsView.onColumnPickerShowing(event); '
-			// 			// Keep whatever else is there
-			// 			+ attr);
-			// 		menupopup.setAttribute('onpopuphidden', 'ZoteroPane.itemsView.onColumnPickerHidden(event); '
-			// 			// Keep whatever else is there
-			// 			+ menupopup.getAttribute('onpopuphidden'));
-			// 	}
-			// }
-			// catch (e) {
-			// 	Zotero.debug(e);
-			// }
 			
 			Zotero.Prefs.set('lastViewedFolder', collectionTreeRow.id);
 		} finally {
@@ -4117,21 +4113,6 @@ var ZoteroPane = new function()
 			Zotero.getString("general.error"),
 			Zotero.getString("file.error.cannotAddShortcut") + (path ? "\n\n" + path : "")
 		);
-	}
-	
-	
-	this.focusElement = function (element) {
-		switch (element) {
-			case 'note-editor':
-				let deck = document.getElementById('zotero-item-pane-content');
-				if (deck.selectedPanel.id == 'zotero-view-note') {
-					document.getElementById('zotero-note-editor').focus();
-				}
-				break;
-			default:
-				Zotero.debug(`ZoteroPane.focusElement: invalid element ${element}`);
-				break;
-		}
 	}
 	
 	

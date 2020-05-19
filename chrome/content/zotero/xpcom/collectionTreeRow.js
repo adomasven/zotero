@@ -448,3 +448,24 @@ Zotero.CollectionTreeRow.prototype.isSearchMode = function() {
 		return true;
 	}
 }
+
+Zotero.CollectionTreeCache = {
+	"lastTreeRow":null,
+	"lastTempTable":null,
+	"lastSearch":null,
+	"lastResults":null,
+
+	"clear": function () {
+		this.lastTreeRow = null;
+		this.lastSearch = null;
+		if (this.lastTempTable) {
+			let tableName = this.lastTempTable;
+			let id = Zotero.DB.addCallback('commit', async function () {
+				await Zotero.DB.queryAsync("DROP TABLE IF EXISTS " + tableName);
+				Zotero.DB.removeCallback('commit', id);
+			});
+		}
+		this.lastTempTable = null;
+		this.lastResults = null;
+	}
+}

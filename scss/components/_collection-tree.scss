@@ -1,12 +1,8 @@
 #zotero-collections-tree-container {
-  display: flex;
   height: 5.2em;
-  background-color: $shade-0;
 }
 
 #zotero-collections-tree {
-  display: flex;
-  flex-direction: column;
   width: 100%;
   
   .virtualized-table {

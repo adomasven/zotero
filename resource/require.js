@@ -1,14 +1,13 @@
 'use strict';
 
-var require = (function () {
+var require = (function() {
 	var win, Zotero;
-	var { Loader, Require, Module } = Components.utils.import('resource://zotero/loader.jsm');
+	Components.utils.import('resource://zotero/loader.jsm');
 	var requirer = Module('/', '/');
 	var _runningTimers = {};
 	if (typeof window != 'undefined') {
 		win = window;
-	}
-	else {
+	} else {
 		win = {};
 
 		win.setTimeout = function (func, ms) {
@@ -60,8 +59,10 @@ var require = (function () {
 			dump(msg + "\n\n");
 		};
 	}
-
+	
 	function getZotero() {
+		if (win.Zotero) Zotero = win.Zotero;
+		
 		if (typeof Zotero === 'undefined') {
 			try {
 				Zotero = Components.classes["@zotero.org/Zotero;1"]
@@ -81,18 +82,9 @@ var require = (function () {
 			cons[key] = text => {getZotero(); typeof Zotero !== 'undefined' && false && Zotero.debug(`console.${key}: ${text}`)};
 		}
 	}
-	let document = typeof win.document !== 'undefined' && win.document || {};
-	// Some of the react libraries require a html document attributes,
-	// which XUL documents do not have. They mainly require it to attach handlers
-	// so this will do (and hopefully in the future not create really confusing problems)
-	if (document.children) {
-		try {
-			document.body = document.head = document.children[0];
-		} catch (e) { }
-	}
 	let globals = {
 		window: win,
-		document: document,
+		document: typeof win.document !== 'undefined' && win.document || {},
 		console: cons,
 		navigator: typeof win.navigator !== 'undefined' && win.navigator || {},
 		setTimeout: win.setTimeout,

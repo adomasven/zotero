@@ -34,14 +34,14 @@ const COLUMNS = [
 		defaultIn: new Set(["default", "feed"]),
 		label: "zotero.items.title_column",
 		ignoreInColumnPicker: "true",
-		flex: "4",
+		flex: 4,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
 		dataKey: "firstCreator",
 		defaultIn: new Set(["default", "feed"]),
 		label: "zotero.items.creator_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -54,27 +54,27 @@ const COLUMNS = [
 		dataKey: "date",
 		defaultIn: new Set(["feed"]),
 		label: "zotero.items.date_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
 		dataKey: "year",
 		disabledIn: "feed",
 		label: "zotero.items.year_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
 		dataKey: "publisher",
 		label: "zotero.items.publisher_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
 		dataKey: "publicationTitle",
 		disabledIn: "feed",
 		label: "zotero.items.publication_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -82,14 +82,14 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.journalAbbr_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
 		dataKey: "language",
 		submenu: true,
 		label: "zotero.items.language_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -97,7 +97,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.accessDate_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -105,7 +105,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.libraryCatalog_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -113,28 +113,28 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.callNumber_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
 		dataKey: "rights",
 		submenu: true,
 		label: "zotero.items.rights_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
 		dataKey: "dateAdded",
 		disabledIn: "feed",
 		label: "zotero.items.dateAdded_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
 		dataKey: "dateModified",
 		disabledIn: "feed",
 		label: "zotero.items.dateModified_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -142,7 +142,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.archive_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -150,7 +150,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.archiveLocation_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -158,7 +158,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.place_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -166,7 +166,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.volume_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -174,7 +174,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.edition_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -182,7 +182,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.pages_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -190,7 +190,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.issue_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -198,7 +198,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.series_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -206,7 +206,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.seriesTitle_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -214,7 +214,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.court_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -222,7 +222,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.medium_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -230,7 +230,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.genre_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -238,14 +238,14 @@ const COLUMNS = [
 		disabledIn: "feed",
 		submenu: true,
 		label: "zotero.items.system_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
 		dataKey: "extra",
 		disabledIn: "feed",
 		label: "zotero.items.extra_column",
-		flex: "1",
+		flex: 1,
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	},
 	{
@@ -255,6 +255,7 @@ const COLUMNS = [
 		label: "zotero.tabs.attachments.label",
 		iconLabel: <Icons.IconAttachSmall />,
 		fixedWidth: true,
+		width: "14",
 		zoteroPersist: new Set(["hidden", "sortDirection"])
 	},
 	{
@@ -262,6 +263,7 @@ const COLUMNS = [
 		disabledIn: "feed",
 		label: "zotero.tabs.notes.label",
 		iconLabel: <Icons.IconTreeitemNoteSmall />,
+		width: "14",
 		zoteroPersist: new Set(["width", "hidden", "sortDirection"])
 	}
 ];
@@ -271,12 +273,17 @@ for (const column of COLUMNS) {
 }
 
 function getDefaultColumnByDataKey(dataKey) {
-	return DATA_KEY_TO_COLUMN[dataKey];
+	return Object.assign({}, DATA_KEY_TO_COLUMN[dataKey]);
+}
+
+function getDefaultColumnsByDataKeys(dataKeys) {
+	return COLUMNS.filter(column => dataKeys.includes(column.dataKey)).map(column => Object.assign({}, column));
 }
 
 module.exports = {
 	COLUMNS,
-	getDefaultColumnByDataKey
-}
+	getDefaultColumnByDataKey,
+	getDefaultColumnsByDataKeys,
+};
 
 })();

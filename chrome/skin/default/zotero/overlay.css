@@ -216,44 +216,48 @@
 }
 
 /* Used for intro text */
-#zotero-items-pane-message-box {
+.items-tree-message {
 	overflow-y: auto;
 	cursor: default;
+	width: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 }
 
-#zotero-items-pane-message-box div {
+.items-tree-message div {
 	padding: 0 35px;
 }
 
-#zotero-items-pane-message-box p {
+.items-tree-message p {
 	max-width: 800px;
 	font-size: 1.45em;
 	line-height: 1.7em;
 	text-align: left;
 }
 
-#zotero-items-pane-message-box div.publications p {
+.items-tree-message div.publications p {
 	font-size: 1.2em;
 }
 
 /* Increase size when window is wider */
-#zotero-pane.width-1000 #zotero-items-pane-message-box div.publications p {
+#zotero-pane.width-1000 .items-tree-message div.publications p {
 	font-size: 1.35em;
 }
 
-#zotero-items-pane-message-box span.text-link {
+.items-tree-message span.text-link {
 	color: rgb(0, 149, 221);
 	cursor: pointer;
 	text-decoration: underline;
 }
 
-#zotero-items-pane-message-box {
+.items-tree-message {
 	-moz-appearance: listbox;
 	text-align: center;
 	padding: 20px;
 }
 
-#zotero-items-pane-message-box description:not(:first-child) {
+.items-tree-message description:not(:first-child) {
 	margin-top: .75em;
 }
 

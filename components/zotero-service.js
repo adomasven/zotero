@@ -63,6 +63,7 @@ const xpcomFilesAll = [
 const xpcomFilesLocal = [
 	'libraryTreeView',
 	'collectionTreeRow',
+	'fileDragDataProvider',
 	'annotate',
 	'api',
 	'attachments',

@@ -1,6 +1,4 @@
 #zotero-items-pane {
-  display: flex;
-  flex-direction: column;
   min-width: 290px;
   min-height: 150px;
   height: 150px;
@@ -18,32 +16,12 @@
   }
 }
 #zotero-items-tree {
-  background-color: -moz-field;
-  overflow: hidden;
-  display: flex;
-  position: relative;
-  flex: 1;
-
   .virtualized-table-header .icon {
     width: 13px;
     height: 13px;
   }
   
   .cell.primary {
-    display: flex;
-    align-items: center;
-    
-    :not(.cell-text) {
-      flex-shrink: 0
-    }
-    
-    .cell-text {
-      flex-shrink: 1;
-      text-overflow: ellipsis;
-      overflow: hidden;
-      margin-left: 6px;
-    }
-    
     .retracted {
       width: 12px;
       margin-left: 3px;
@@ -56,16 +34,9 @@
       margin-left: 3px;
       border-radius: 1px;
     }
-    
-    .cell-icon {
-      min-width: 16px;
-    }
   }
   
   .cell.hasAttachment {
-    flex: 0;
-    min-width: 14px;
-    max-width: 14px;
     box-sizing: content-box;
     padding: 0 4px;
   }

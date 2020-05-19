@@ -1,6 +1,6 @@
 "use strict";
 
-describe.only("Zotero.ItemTree", function() {
+describe("Zotero.ItemTree", function() {
 	var win, zp, cv, itemsView;
 	var existingItemID;
 	var existingItemID2;
@@ -543,7 +543,7 @@ describe.only("Zotero.ItemTree", function() {
 			var item4 = await createDataObject('item', { title: title + " 7" });
 
 			const colIndex = itemsView._getColumns().findIndex(column => column.dataKey == 'title');
-			await itemsView._handleHeaderClick(colIndex);
+			await itemsView._handleColumnClick(colIndex);
 			
 			// Check initial sort order
 			assert.equal(itemsView.getRow(0).ref.getField('title'), title + " 1");
@@ -623,7 +623,7 @@ describe.only("Zotero.ItemTree", function() {
 			});
 		});
 		
-		describe.only("My Publications", function () {
+		describe("My Publications", function () {
 			before(async function () {
 				var libraryID = Zotero.Libraries.userLibraryID;
 				

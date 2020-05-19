@@ -26,14 +26,180 @@
 'use strict';
 
 const React = require('react');
+const PropTypes = require('prop-types');
 const JSWindow = require('./js-window');
 const { injectIntl } = require('react-intl');
-const { TreeSelection } = require('./virtualized-tree');
-const { IconDownChevron } = require('components/icons');
+const { IconDownChevron, getDomElement } = require('components/icons');
 const cx = require('classnames');
 const Draggable = require('./draggable');
 
 const RESIZER_WIDTH = 5; // px
+
+const noop = () => 0;
+
+/**
+ * Somewhat corresponds to nsITreeSelection
+ */
+class TreeSelection {
+	constructor(tree) {
+		this._tree = tree;
+		Object.assign(this, {
+			pivot: 0,
+			_focused: 0,
+			selected: new Set([]),
+			_selectEventsSuppressed: false
+		});
+	}
+
+	isSelected(index) {
+		index = Math.max(0, index);
+		return this.selected.has(index);
+	}
+
+	toggleSelect(index) {
+		index = Math.max(0, index);
+		if (this.selected.has(index)) {
+			this.selected.delete(index);
+		}
+		else {
+			this.selected.add(index);
+		}
+
+		if (this.selectEventsSuppressed) return;
+
+		if (this._tree.invalidate) {
+			this._tree.invalidateRow(index);
+		}
+		this.pivot = index;
+		this._focused = index;
+		this._updateTree();
+	}
+
+	clearSelection() {
+		this.selected = new Set();
+		this.pivot = 0;
+		if (this._tree.invalidate) {
+			this._tree.invalidate();
+		}
+		this._updateTree();
+	}
+
+	select(index) {
+		index = Math.max(0, index);
+		if (this.selected.size == 1 && this._focused == index && this.pivot == index) {
+			return;
+		}
+
+		let toInvalidate = Array.from(this.selected);
+		toInvalidate.push(index);
+		this.selected = new Set([index]);
+		this._focused = index;
+		this.pivot = index;
+
+		if (this.selectEventsSuppressed) return;
+
+		this._tree.scrollToRow(index);
+		this._updateTree();
+		if (this._tree.invalidate) {
+			toInvalidate.forEach(this._tree.invalidateRow.bind(this._tree));
+		}
+	}
+
+	_rangedSelect(from, to, augment) {
+		from = Math.max(0, from);
+		to = Math.max(0, to);
+		if (!augment) {
+			this.clearSelection();
+		}
+		for (let i = from; i <= to; i++) {
+			this.selected.add(i);
+		}
+	}
+
+	rangedSelect(from, to, augment) {
+		this._rangedSelect(from, to, augment);
+
+		if (this.selectEventsSuppressed) return;
+
+		if (this._tree.invalidate) {
+			if (augment) {
+				this._tree.invalidateRange(from, to);
+			}
+			else {
+				this._tree.invalidate();
+			}
+		}
+		this._updateTree();
+	}
+
+	shiftSelect(index) {
+		index = Math.max(0, index);
+		let from = Math.min(index, this.pivot);
+		let to = Math.max(index, this.pivot);
+		this._focused = index;
+		this._rangedSelect(from, to);
+
+		if (this.selectEventsSuppressed) return;
+
+		if (this._tree.invalidate) {
+			this._tree.invalidateRange(from, to);
+		}
+		this._updateTree();
+	}
+
+	_updateTree() {
+		if (!this.selectEventsSuppressed && this._tree.props.onSelectionChange) {
+			this._tree.props.onSelectionChange(this);
+		}
+	}
+
+	get count() {
+		return this.selected.size;
+	}
+
+	get focused() {
+		return this._focused;
+	}
+
+	set focused(index) {
+		index = Math.max(0, index);
+		let oldValue = this._focused;
+		this._focused = index;
+
+		if (this.selectEventsSuppressed) return;
+
+		this._updateTree();
+		if (this._tree.invalidate) {
+			this._tree.invalidateRow(oldValue);
+			this._tree.invalidateRow(index);
+		}
+	}
+
+	get selectEventsSuppressed() {
+		return this._selectEventsSuppressed;
+	}
+
+	set selectEventsSuppressed(val) {
+		this._selectEventsSuppressed = val;
+		if (!val) {
+			this._updateTree();
+			if (this._tree.invalidate) {
+				this._tree.invalidate();
+			}
+		}
+	}
+}
+
+let TreeSelectionStub = {};
+for (const key of Object.getOwnPropertyNames(TreeSelection.prototype)) {
+	TreeSelectionStub[key] = () => 0;
+}
+TreeSelectionStub = Object.freeze(Object.assign(TreeSelectionStub, {
+	pivot: 0,
+	focused: 0,
+	count: 0,
+	selected: new Set([])
+}));
 
 /**
  * A virtualized-table, inspired by https://github.com/bvaughn/react-virtualized
@@ -61,8 +227,21 @@ class VirtualizedTable extends React.Component {
 			resizing: null
 		};
 		this._jsWindowID = `virtualized-table-list-${Zotero.Utilities.randomString(5)}`;
+		this._containerWidth = props.containerWidth || window.innerWidth;
+		
+		this._columns = new Columns(this);
+		
+		this._rowHeight = props.rowHeight;
+		if (!this._rowHeight) {
+			this._rowHeight = 18; // px
+			if (Zotero.isLinux) {
+				this._rowHeight = 20;
+			}
+			this._rowHeight *= Zotero.Prefs.get('fontSize');
+		}
 			
 		this.selection = new TreeSelection(this);
+		
 
 		// Due to how the Draggable element works dragging (for column dragging and for resizing)
 		// is not handled via React events but via native ones attached on `document`
@@ -76,7 +255,101 @@ class VirtualizedTable extends React.Component {
 		
 		this.onSelection = oncePerAnimationFrame(this._onSelection);
 	}
-	
+
+	static defaultProps = {
+		label: '',
+
+		showHeader: false,
+		// Array of column objects like the ones in itemTreeColumns.js
+		columns: [],
+		onColumnSort: noop,
+		onColumnPickerMenu: noop,
+		getColumnPrefs: () => ({}),
+		storeColumnPrefs: noop,
+		staticColumns: false,
+
+		// Render with display: none
+		hide: false,
+
+		multiSelect: false,
+
+		onSelectionChange: noop,
+
+		// The below are for arrow-key navigation
+		isSelectable: () => true,
+		getParentIndex: noop,
+		isContainer: noop,
+		isContainerEmpty: noop,
+		isContainerOpen: noop,
+		toggleOpenState: noop,
+
+		// If you want to perform custom key handling it should be in this function
+		// if it returns false then virtualized-table's own key handler won't run
+		onKeyDown: () => true,
+
+		onDragOver: noop,
+		onDrop: noop,
+
+		// Enter, double-clicking
+		onActivate: noop(),
+
+		onItemContextMenu: noop(),
+	};
+
+	static propTypes = {
+		id: PropTypes.string.isRequired,
+
+		getRowCount: PropTypes.func.isRequired,
+		
+		renderItem: PropTypes.func,
+		rowHeight: PropTypes.number,
+		// For screen-readers
+		label: PropTypes.string,
+
+		showHeader: PropTypes.bool,
+		// Array of column objects like the ones in itemTreeColumns.js
+		columns: PropTypes.array,
+		onColumnPickerMenu: PropTypes.func,
+		onColumnSort: PropTypes.func,
+		getColumnPrefs: PropTypes.func,
+		storeColumnPrefs: PropTypes.func,
+		// Makes columns unmovable, unsortable, etc
+		staticColumns: PropTypes.bool,
+		// Used for initial column widths calculation
+		containerWidth: PropTypes.number,
+
+		ref: PropTypes.func,
+		// Internal js-window ref
+		treeboxRef: PropTypes.func,
+
+		// Render with display: none
+		hide: PropTypes.bool,
+
+		multiSelect: PropTypes.bool,
+
+		onSelectionChange: PropTypes.func,
+
+		// The below are for arrow-key navigation
+		isSelectable: PropTypes.func,
+		getParentIndex: PropTypes.func,
+		isContainer: PropTypes.func,
+		isContainerEmpty: PropTypes.func,
+		isContainerOpen: PropTypes.func,
+		toggleOpenState: PropTypes.func,
+
+		// If you want to perform custom key handling it should be in this function
+		// if it returns false then virtualized-table's own key handler won't run
+		onKeyDown: PropTypes.func,
+
+		onDragOver: PropTypes.func,
+		onDrop: PropTypes.func,
+
+		// Enter, double-clicking
+		onActivate: PropTypes.func,
+
+		onItemContextMenu: PropTypes.func,
+	};
+
 	// ------------------------ Selection Methods ------------------------- //
 		
 	_preventArrowKeyScrolling = (e) => {
@@ -114,8 +387,8 @@ class VirtualizedTable extends React.Component {
 		if (tree.id != this.props.id) return;
 		let { y, height } = tree.getBoundingClientRect();
 		let yBott = y + height;
-		let threshold = this.props.rowHeight / 3;
-		let scrollHeight = this.props.rowHeight * 3;
+		let threshold = this._rowHeight / 3;
+		let scrollHeight = this._rowHeight * 3;
 		if (e.clientY - y <= threshold) {
 			// Already at top
 			if (tree.scrollTop === 0) return;
@@ -155,7 +428,7 @@ class VirtualizedTable extends React.Component {
 			}
 		}
 		const height = document.getElementById(this._jsWindowID).clientHeight;
-		const numRows = Math.floor(height / this.props.rowHeight);
+		const numRows = Math.floor(height / this._rowHeight);
 		let destination = this.selection.focused + (direction * numRows);
 		const rowCount = this.props.getRowCount();
 		destination = Math.min(destination, rowCount - 1);
@@ -294,8 +567,11 @@ class VirtualizedTable extends React.Component {
 	}
 
 	_activateNode = (event, indices) => {
+		indices = indices || Array.from(this.selection.selected);
+		if (!indices.length) return;
+		
 		if (this.props.onActivate) {
-			this.props.onActivate(event, indices || Array.from(this.selection.selected));
+			this.props.onActivate(event, indices);
 		}
 	}
 
@@ -371,12 +647,12 @@ class VirtualizedTable extends React.Component {
 		this.setState({ resizing: index });
 		
 		let onResizeData = {};
-		const columns = this.props.columns.filter(col => !col.hidden);
+		const columns = this._getColumns().filter(col => !col.hidden);
 		for (let i = 0; i < columns.length; i++) {
 			let elem = event.target.parentNode.parentNode.children[i];
 			onResizeData[columns[i].dataKey] = elem.getBoundingClientRect().width;
 		}
-		this.props.onColumnResize(onResizeData);
+		this._columns.onResize(onResizeData);
 		this._isMouseDrag = true;
 	}
 
@@ -397,12 +673,16 @@ class VirtualizedTable extends React.Component {
 		let onResizeData = {};
 		onResizeData[aColumn.dataKey] = aColumnWidth;
 		onResizeData[bColumn.dataKey] = bColumnWidth;
-		this.props.onColumnResize(onResizeData);
+		this._columns.onResize(onResizeData);
+	}
+	
+	_getColumns() {
+		return this._columns.getAsArray();
 	}
 	
 	_getResizeColumns(index) {
 		index = typeof index != "undefined" ? index : this.state.resizing;
-		const columns = this.props.columns.filter(col => !col.hidden).sort((a, b) => a.ordinal - b.ordinal);
+		const columns = this._getColumns().filter(col => !col.hidden).sort((a, b) => a.ordinal - b.ordinal);
 		let aColumn = columns[index - 1];
 		let bColumn = columns[index];
 		if (aColumn.fixedWidth) {
@@ -437,12 +717,12 @@ class VirtualizedTable extends React.Component {
 			const elem = document.querySelector(`#${this.props.id} .virtualized-table-header .cell.${column.dataKey}`)
 			resizeData[column.dataKey] = elem.getBoundingClientRect().width;
 		}
-		this.props.onColumnResize(resizeData, true);
+		this._columns.onResize(resizeData, true);
 		this.setState({ resizing: null });
 	}
 		
 	_handleColumnDragStart = (index, event) => {
-		if (!this.props.onColumnReorder || event.button !== 0) return false;
+		if (event.button !== 0) return false;
 		this.setState({ draggingColumn: index });
 		this._isMouseDrag = true;
 	}
@@ -453,17 +733,17 @@ class VirtualizedTable extends React.Component {
 			// If inserting before the column that was being dragged
 			// there is nothing to do
 			if (this.state.draggingColumn != index) {
-				const visibleColumns = this.props.columns.filter(col => !col.hidden);
-				const dragColumn = this.props.columns.findIndex(
+				const visibleColumns = this._getColumns().filter(col => !col.hidden);
+				const dragColumn = this._getColumns().findIndex(
 					col => col == visibleColumns[this.state.draggingColumn]);
 				// Insert as final column (before end of list)
-				let insertBeforeColumn = this.props.columns.length;
+				let insertBeforeColumn = this._getColumns().length;
 				// index == visibleColumns.length if dragged to the end of the view to be ordered
 				// as the final column
 				if (index < visibleColumns.length) {
-					insertBeforeColumn = this.props.columns.findIndex(col => col == visibleColumns[index]);
+					insertBeforeColumn = this._getColumns().findIndex(col => col == visibleColumns[index]);
 				}
-				this.props.onColumnReorder(dragColumn, insertBeforeColumn);
+				this._columns.setOrder(dragColumn, insertBeforeColumn);
 			}
 		}
 		this.setState({ draggingColumn: null, dragColumnX: null });
@@ -480,8 +760,8 @@ class VirtualizedTable extends React.Component {
 			this.isHeaderMouseUp = true;
 			return;
 		}
-		this.props.onHeaderClick(
-			this.props.columns.findIndex(column => column.dataKey == dataKey));
+		this._columns.toggleSort(
+			this._getColumns().findIndex(column => column.dataKey == dataKey));
 	}
 
 	_findColumnDragPosition(x) {
@@ -512,22 +792,31 @@ class VirtualizedTable extends React.Component {
 
 	componentDidMount() {
 		this._jsWindow = new JSWindow(this._getJSWindowOptions());
-		this.props.treeboxRef(this._jsWindow);
 		this._jsWindow.initialize();
 		this._jsWindow.render();
+		this._updateWidth();
+		this.props.treeboxRef && this.props.treeboxRef(this._jsWindow);
+
+		window.addEventListener("resize", () => {
+			this._debouncedRerender();
+		});
+	}
+	
+	componentWillUnmount() {
+		this._jsWindow.destroy();
 	}
 	
 	_getJSWindowOptions() {
 		return {
 			getItemCount: this.props.getRowCount,
-			itemHeight: this.props.rowHeight,
+			itemHeight: this._rowHeight,
 			renderItem: this._renderItem,
 			targetElement: document.getElementById(this._jsWindowID),
 		};
 	}
-
+	
 	_renderItem = (index, oldElem = null) => {
-		let node = this.props.renderItem(index, this.selection, oldElem);
+		let node = this.props.renderItem(index, this.selection, oldElem, this._getColumns());
 		if (!node.dataset.eventHandlersAttached) {
 			node.dataset.eventHandlersAttached = true;
 			node.addEventListener('dragstart', e => this._onDragStart(e, index), { passive: true });
@@ -542,9 +831,12 @@ class VirtualizedTable extends React.Component {
 	}
 
 	_renderHeaderCells = () => {
-		return this.props.columns.filter(col => !col.hidden).map((column, index) => {
-			if (column.hidden) return;
-			let columnName = this.props.intl.formatMessage({ id: column.label });
+		return this._getColumns().filter(col => !col.hidden).map((column, index) => {
+			if (column.hidden) return "";
+			let columnName = column.label;
+			if (column.label in Zotero.Intl.strings) {
+				columnName = this.props.intl.formatMessage({ id: column.label });
+			}
 			let label = columnName;
 			if (column.iconLabel) {
 				label = column.iconLabel;
@@ -595,10 +887,11 @@ class VirtualizedTable extends React.Component {
 	render() {
 		let header = "";
 		let columnDragMarker = "";
-		if (this.props.columns && this.props.showHeader) {
+		if (this.props.columns.length && this.props.showHeader) {
 			const headerCells = this._renderHeaderCells();
+			const headerClassName = cx("virtualized-table-header", { "static-columns": this.props.staticColumns });
 			header = (<div
-				className="virtualized-table-header"
+				className={headerClassName}
 				onContextMenu={this.props.onColumnPickerMenu}>
 				{headerCells}
 			</div>);
@@ -661,12 +954,13 @@ class VirtualizedTable extends React.Component {
 	 * Rerenders/renders the underlying js-window. Use for container size changes
 	 * to render missing items and update widths
 	 */
-	rerender() {
+	rerender = () => {
 		if (!this._jsWindow) return;
 		this._jsWindow.render();
 		this._updateWidth();
 	}
 	
+	_debouncedRerender = Zotero.Utilities.debounce(this.rerender, 200);
 	
 	_updateWidth() {
 		if (!this.props.showHeader) return;
@@ -739,4 +1033,259 @@ function oncePerAnimationFrame(fn) {
 	};
 }
 
+var Columns = class {
+	constructor(virtualizedTable) {
+		this._virtualizedTable = virtualizedTable;
+
+		this._styleKey = virtualizedTable.props.id;
+
+		this._initializeStyleMap();
+
+		let columnsSettings = this._getPrefs();
+
+		let columns = this._columns = [];
+		for (let column of virtualizedTable.props.columns) {
+			column = Object.assign({}, column, columnsSettings[column.dataKey]);
+			column.className = cx(column.className, column.dataKey, column.dataKey + this._cssSuffix,
+				{ 'fixed-width': column.fixedWidth });
+			if (column.type) {
+				column.className += ` cell-${column.type}`;
+			}
+			columns.push(column);
+		}
+		// Sort columns by their `ordinal` field
+		columns.sort((a, b) => a.ordinal - b.ordinal);
+		// And then reset `ordinal` fields since there might be duplicates
+		// if new columns got added recently
+		columns.forEach((column, index) => column.ordinal = index);
+
+		// Setting column widths
+		const visibleColumns =
+			columns.reduce((accumulator, column) => accumulator += column.hidden ? 0 : 1, 0);
+		const containerWidth = this._virtualizedTable._containerWidth;
+		let columnWidths = {};
+		for (let i = 0; i < columns.length; i++) {
+			let column = columns[i];
+
+			if (!column.hidden) {
+				if (column.width) {
+					columnWidths[column.dataKey] = column.width;
+				}
+				else {
+					columnWidths[column.dataKey] = column.width = containerWidth / visibleColumns * (column.flex || 1);
+				}
+			}
+			// Serializing back column settings for storage
+			columnsSettings[column.dataKey] = this._getColumnPrefsToPersist(column);
+		}
+		// Storing back persist settings to account for legacy upgrades
+		this._storePrefs(columnsSettings);
+
+		// Set column width CSS rules
+		this.onResize(columnWidths);
+		// Whew, all this just to get a list of columns
+	}
+
+	_initializeStyleMap() {
+		const stylesheetClass = this._styleKey + "-style";
+		this._cssSuffix = '-' + this._styleKey;
+		this._stylesheet = document.querySelector(`.${stylesheetClass}`);
+		if (this._stylesheet) {
+			this._columnStyleMap = {};
+			for (let i = 0; i < this._stylesheet.sheet.cssRules.length; i++) {
+				const cssText = this._stylesheet.sheet.cssRules[i].cssText;
+				const dataKey = cssText.slice(1, cssText.indexOf('-'));
+				this._columnStyleMap[dataKey] = i;
+			}
+			for (let i = 0; i < this._virtualizedTable.props.columns.length; i++) {
+				let column = this._virtualizedTable.props.columns[i];
+				if (column.dataKey in this._columnStyleMap) continue;
+				const ruleIndex = Object.keys(this._columnStyleMap).length;
+				this._stylesheet.sheet.insertRule(`.${column.dataKey + this._cssSuffix} {flex-basis: 100px}`, ruleIndex);
+				this._columnStyleMap[column.dataKey] = ruleIndex;
+			}
+		} else {
+			this._stylesheet = document.createElementNS("http://www.w3.org/1999/xhtml", 'style');
+			this._stylesheet.className = stylesheetClass;
+			document.children[0].appendChild(this._stylesheet);
+			this._columnStyleMap = {};
+			for (let i = 0; i < this._virtualizedTable.props.columns.length; i++) {
+				let column = this._virtualizedTable.props.columns[i];
+				this._stylesheet.sheet.insertRule(`.${column.dataKey + this._cssSuffix} {flex-basis: 100px}`, i);
+				this._columnStyleMap[column.dataKey] = i;
+			}
+		}
+	}
+
+	_getColumnPrefsToPersist(column) {
+		if (!column.zoteroPersist) return {};
+		let persistSettings = {};
+		const persistKeys = column.zoteroPersist;
+		for (const key in column) {
+			if (persistKeys.has(key) || key == 'dataKey') {
+				persistSettings[key] = column[key];
+			}
+		}
+		return persistSettings;
+	}
+
+	_updateVirtualizedTable() {
+		this._virtualizedTable.forceUpdate(() => {
+			this._virtualizedTable._jsWindow.invalidate();
+		});
+	}
+
+	_getPrefs() {
+		return this._virtualizedTable.props.getColumnPrefs();
+	}
+	
+	_storePrefs(prefs) {
+		this._virtualizedTable.props.storeColumnPrefs(prefs);
+	}
+
+	/**
+	 * Programatically sets the injected CSS width rules for each column.
+	 * This is necessary for performance reasons
+	 *
+	 * @param columnWidths - dictionary of columnId: width (px)
+	 */
+	onResize = (columnWidths, storePrefs=false) => {
+		if (storePrefs) {
+			var prefs = this._getPrefs();
+		}
+		for (let [dataKey, width] of Object.entries(columnWidths)) {
+			if (typeof dataKey == "number") {
+				dataKey = this._columns[dataKey].dataKey;
+			}
+			const column = this._columns.find(column => column.dataKey == dataKey);
+			const styleIndex = this._columnStyleMap[dataKey];
+			if (storePrefs) {
+				prefs[dataKey] = prefs[dataKey] || {};
+				prefs[dataKey].width = width;
+			}
+			if (column.fixedWidth && column.width) {
+				this._stylesheet.sheet.cssRules[styleIndex].style.setProperty('flex', `0 0`, `important`);
+				this._stylesheet.sheet.cssRules[styleIndex].style.setProperty('max-width', `${column.width}px`, 'important');
+				this._stylesheet.sheet.cssRules[styleIndex].style.setProperty('min-width', `${column.width}px`, 'important');
+			} else {
+				this._stylesheet.sheet.cssRules[styleIndex].style.setProperty('flex-basis', `${width}px`);
+			}
+		}
+		if (storePrefs) {
+			this._storePrefs(prefs);
+		}
+	}
+
+
+	setOrder = (index, insertBefore) => {
+		const column = this._columns[index];
+		if (column.ordinal == insertBefore) return;
+		column.ordinal = insertBefore;
+		this._columns.sort((a, b) => {
+			// newly inserted column goes before the existing column with same `ordinal` value
+			if (a.ordinal == b.ordinal) return a == column ? -1 : 1;
+			return a.ordinal - b.ordinal;
+		});
+		let prefs = this._getPrefs();
+		// reassign columns their ordinal values and set the prefs
+		this._columns.forEach((column, index) => {
+			prefs[column.dataKey] = prefs[column.dataKey] || {};
+			prefs[column.dataKey].ordinal = column.ordinal = index;
+		});
+		this._storePrefs(prefs);
+		this._updateVirtualizedTable();
+	}
+
+	toggleHidden(index) {
+		const column = this._columns[index];
+		column.hidden = !column.hidden;
+
+		let prefs = this._getPrefs();
+		if (prefs[column.dataKey]) {
+			prefs[column.dataKey].hidden = column.hidden;
+		}
+		this._storePrefs(prefs);
+		this._updateVirtualizedTable();
+	}
+	
+	toggleSort(sortIndex) {
+		if (!this._virtualizedTable.props.onColumnSort) return;
+		
+		var sortedColumn;
+		this._columns.forEach((column, index) => {
+			if (index != sortIndex) {
+				delete column.sortDirection;
+			}
+			else {
+				sortedColumn = column;
+				if (column.sortDirection) {
+					column.sortDirection *= -1;
+				}
+				else {
+					column.sortDirection = 1;
+				}
+			}
+		});
+		this._virtualizedTable.props.onColumnSort(sortIndex, sortedColumn.sortDirection);
+		this._virtualizedTable.forceUpdate();
+	}
+
+	getAsArray() {
+		return this._columns;
+	}
+};
+
+function renderCell(index, data, column) {
+	let span = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+	span.className = `cell ${column.className}`;
+	span.innerText = data;
+	return span;
+}
+
+function renderCheckboxCell(index, data, column) {
+	let span = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
+	span.className = `cell checkbox ${column.className}`;
+	span.setAttribute('role', 'checkbox');
+	span.setAttribute('aria-checked', data);
+	if (data) {
+		span.appendChild(getDomElement('IconTick'));
+	}
+	return span;
+}
+
+function makeRowRenderer(getRowData) {
+	return function (index, selection, oldDiv, columns) {
+		let div;
+		if (oldDiv) {
+			div = oldDiv;
+			div.innerHTML = "";
+		}
+		else {
+			div = document.createElementNS("http://www.w3.org/1999/xhtml", 'div');
+			div.className = "row";
+		}
+
+		div.classList.toggle('selected', selection.isSelected(index));
+		const rowData = getRowData(index);
+		
+		for (let column of columns) {
+			if (column.hidden) continue;
+
+			if (column.type === 'checkbox') {
+				div.appendChild(renderCheckboxCell(index, rowData[column.dataKey], column));
+			}
+			else {
+				div.appendChild(renderCell(index, rowData[column.dataKey], column));
+			}
+		}
+
+		return div;
+	};
+}
+
 module.exports = injectIntl(VirtualizedTable, { forwardRef: true });
+module.exports.TreeSelection = TreeSelection;
+module.exports.TreeSelectionStub = TreeSelectionStub;
+module.exports.renderCell = renderCell;
+module.exports.renderCheckboxCell = renderCheckboxCell;
+module.exports.makeRowRenderer = makeRowRenderer;

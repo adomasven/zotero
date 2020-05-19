@@ -23,36 +23,33 @@
 	***** END LICENSE BLOCK *****
 */
 
-(function () {
-
-'use strict';
-
 const React = require('react');
-const ReactDOM = require('react-dom');
+const ReactDom = require('react-dom');
 const { IntlProvider } = require('react-intl');
-const VirtualizedTree = require('components/virtualized-tree');
 const VirtualizedTable = require('components/virtualized-table');
+const { TreeSelectionStub } = VirtualizedTable;
 const Icons = require('components/icons');
 const { getDomElement: getDOMIcon } = Icons;
 const { getDragTargetOrient } = require('components/utils');
-const cx = require('classnames');
+const { Cc, Ci, Cu } = require('chrome');
 
 const MARGIN_LEFT = 3;
 const CHILD_INDENT = 20;
 const TYPING_TIMEOUT = 1000;
 
-Zotero.CollectionTree = class CollectionTree extends React.Component {
-	static init(domEl, opts) {
+var CollectionTree = class CollectionTree extends React.Component {
+	static async init(domEl, opts) {
 		Zotero.debug("Initializing React CollectionTree");
 		var ref;
+		opts.domEl = domEl;
 		let elem = (
 			<IntlProvider locale={Zotero.locale} messages={Zotero.Intl.strings}>
-				<CollectionTree ref={c => ref = c } domEl={domEl} {...opts} />
+				<CollectionTree ref={c => ref = c } {...opts} />
 			</IntlProvider>
 		);
-		ReactDOM.render(elem, domEl);
-		ref.domEl = domEl;
-		
+		await new Promise(resolve => ReactDom.render(elem, domEl, resolve));
+
+		Zotero.debug('React CollectionTree initialized');
 		return ref;
 	}
 	
@@ -61,7 +58,9 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		this.itemTreeView = null;
 		this.itemToSelect = null;
 		this.hideSources = [];
-		
+
+		this.domEl = props.domEl;
+		this._ownerDocument = props.domEl.ownerDocument;
 		this._rows = [];
 		this._rowMap = {};
 		this._highlightedRows = new Set();
@@ -115,6 +114,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	
 	componentDidMount() {
 		this.selection.select(0);
+		this.makeVisible();
 	}
 	
 	componentDidUpdate() {
@@ -145,7 +145,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		}
 		else if ((event.key == 'Backspace' && Zotero.isMac) || event.key == 'Delete') {
 			var deleteItems = event.metaKey || (!Zotero.isMac && event.shiftKey);
-			ZoteroPane.deleteSelectedCollection(deleteItems);
+			window.ZoteroPane.deleteSelectedCollection(deleteItems);
 			event.preventDefault();
 		}
 		else if (event.key == "F2" && !Zotero.isMac) {
@@ -246,7 +246,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 		this.tree.focus();
 	}
 
-	renderItem = (index, selection, oldDiv) => {
+	renderItem = (index, selection, oldDiv, columns) => {
 		const treeRow = this.getRow(index);
 		
 		// Div creation and content
@@ -340,16 +340,9 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	}
 	
 	render() {
-		let itemHeight = 20; // px
-		if (Zotero.isLinux) {
-			itemHeight = 22;
-		}
-		itemHeight *= Zotero.Prefs.get('fontSize');
-		
 		return React.createElement(VirtualizedTable,
 			{
 				getRowCount: () => this._rows.length,
-				rowHeight: itemHeight,
 				id: "collection-tree",
 				ref: ref => this.tree = ref,
 				treeboxRef: ref => this._treebox = ref,
@@ -387,6 +380,10 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 ///  Component control methods
 ///
 ////////////////////////////////////////////////////////////////////////////////
+
+	get window() {
+		return this._ownerDocument.defaultView;
+	}
 
 	get selection() {
 		return this.tree ? this.tree.selection : TreeSelectionStub;
@@ -477,7 +474,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			this._refreshRowMap();
 		} catch (e) {
 			Zotero.logError(e);
-			ZoteroPane.displayErrorMessage();
+			window.ZoteroPane.displayErrorMessage();
 		}
 	}
 	
@@ -1798,7 +1795,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 			
 			if (targetTreeRow.isPublications()) {
 				items = Zotero.Items.keepParents(items);
-				let io = ZoteroPane.showPublicationsWizard(items);
+				let io = window.ZoteroPane.showPublicationsWizard(items);
 				if (!io) {
 					return;
 				}
@@ -1874,8 +1871,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 					}
 					*/
 					
-					let lastWin = Services.wm.getMostRecentWindow("navigator:browser");
-					lastWin.openDialog('chrome://zotero/content/merge.xul', '', 'chrome,modal,centerscreen', io);
+					window.openDialog('chrome://zotero/content/merge.xul', '', 'chrome,modal,centerscreen', io);
 					
 					await Zotero.DB.executeTransaction(async function () {
 						// DEBUG: This probably needs to be updated if this starts being used
@@ -1927,28 +1923,10 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 				let item;
 				if (dataType == 'text/x-moz-url') {
 					var url = data[i];
-					
-					if (url.indexOf('file:///') == 0) {
-						let win = Services.wm.getMostRecentWindow("navigator:browser");
-						// If dragging currently loaded page, only convert to
-						// file if not an HTML document
-						if (win.content.location.href != url ||
-								win.content.document.contentType != 'text/html') {
-							var nsIFPH = Components.classes["@mozilla.org/network/protocol;1?name=file"]
-									.getService(Components.interfaces.nsIFileProtocolHandler);
-							try {
-								var file = nsIFPH.getFileFromURLSpec(url);
-							}
-							catch (e) {
-								Zotero.debug(e);
-							}
-						}
-					}
-					
+				
 					// Still string, so remote URL
 					if (typeof file == 'string') {
-						let win = Services.wm.getMostRecentWindow("navigator:browser");
-						win.ZoteroPane.addItemFromURL(url, 'temporaryPDFHack', null, row); // TODO: don't do this
+						window.ZoteroPane.addItemFromURL(url, 'temporaryPDFHack', null, row); // TODO: don't do this
 						continue;
 					}
 					
@@ -1973,7 +1951,7 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 							file.remove(false);
 						}
 						catch (e) {
-							Components.utils.reportError("Error deleting original file " + file.path + " after drag");
+							Cu.reportError("Error deleting original file " + file.path + " after drag");
 						}
 					}
 				}
@@ -2610,28 +2588,6 @@ Zotero.CollectionTree = class CollectionTree extends React.Component {
 	}
 }
 
-Zotero.Utilities.Internal.makeClassEventDispatcher(Zotero.CollectionTree);
+Zotero.Utilities.Internal.makeClassEventDispatcher(CollectionTree);
 
-
-Zotero.CollectionTreeCache = {
-	"lastTreeRow":null,
-	"lastTempTable":null,
-	"lastSearch":null,
-	"lastResults":null,
-	
-	"clear": function () {
-		this.lastTreeRow = null;
-		this.lastSearch = null;
-		if (this.lastTempTable) {
-			let tableName = this.lastTempTable;
-			let id = Zotero.DB.addCallback('commit', async function () {
-				await Zotero.DB.queryAsync("DROP TABLE IF EXISTS " + tableName);
-				Zotero.DB.removeCallback('commit', id);
-			});
-		}
-		this.lastTempTable = null;
-		this.lastResults = null;
-	}
-}
-
-})();
+module.exports = CollectionTree;

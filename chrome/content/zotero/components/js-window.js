@@ -35,7 +35,7 @@ const requiredOptions = ['getItemCount', 'itemHeight', 'renderItem', 'targetElem
  *
  * This was created after the measured performance of react-window was not satisfactory
  * for a 100% fluid experience, especially once rows with multiple cells that needed
- * responsive resizing
+ * responsive resizing were introduced
  *
  * The class requires careful handholding to achieve good performance. Read method documentation!
  */
@@ -81,8 +81,10 @@ module.exports = class {
 	 * Call to remove the js-window from the container
 	 */
 	destroy() {
-		this.targetElement.removeEventListener('scroll', this._handleScroll);
-		this.targetElement.removeChild(this.innerElem);
+		if (this.innerElem) {
+			this.targetElement.removeEventListener('scroll', this._handleScroll);
+			this.targetElement.removeChild(this.innerElem);
+		}
 	}
 
 	/**
@@ -152,11 +154,6 @@ module.exports = class {
 		innerElem.style.cssText = `
 			position: relative;
 			height: ${itemHeight * itemCount}px;
-		`;
-
-		targetElement.style.cssText += `
-			max-width: 100%;
-			overflow: auto;
 		`;
 
 		this.scrollDirection = 0;

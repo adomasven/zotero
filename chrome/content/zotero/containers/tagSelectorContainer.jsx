@@ -29,7 +29,7 @@
 (function () {
 
 const React = require('react');
-const ReactDOM = require('react-dom');
+const ReactDom = require('react-dom');
 const PropTypes = require('prop-types');
 const { IntlProvider } = require('react-intl');
 const TagSelector = require('components/tagSelector.js');
@@ -756,13 +756,13 @@ Zotero.TagSelector = class TagSelectorContainer extends React.PureComponent {
 				<TagSelectorContainer ref={c => ref = c } {...opts} />
 			</IntlProvider>
 		);
-		ReactDOM.render(elem, domEl);
+		ReactDom.render(elem, domEl);
 		ref.domEl = domEl;
 		return ref;
 	}
 	
 	uninit() {
-		ReactDOM.unmountComponentAtNode(this.domEl);
+		ReactDom.unmountComponentAtNode(this.domEl);
 		Zotero.Notifier.unregisterObserver(this._notifierID);
 		Zotero.Prefs.unregisterObserver(this._prefObserverID);
 	}
