@@ -455,7 +455,7 @@ describe("ZoteroPane", function() {
 			var selected = iv.selectItem(item.id);
 			assert.ok(selected);
 			
-			var tree = doc.getElementById('zotero-items-tree');
+			var tree = doc.getElementById(iv.id);
 			tree.focus();
 			
 			yield Zotero.Promise.delay(1);
@@ -485,7 +485,7 @@ describe("ZoteroPane", function() {
 			var selected = iv.selectItem(item.id);
 			assert.ok(selected);
 			
-			var tree = doc.getElementById('zotero-items-tree');
+			var tree = doc.getElementById(iv.id);
 			tree.focus();
 			
 			yield Zotero.Promise.delay(1);
@@ -578,8 +578,10 @@ describe("ZoteroPane", function() {
 			var iv = zp.itemsView;
 			row = iv.getRowIndexByID(item1.id);
 			assert.isNumber(row);
-			clickOnItemsRow(iv, row);
+			var promise = iv.waitForSelect();
+			clickOnItemsRow(win, iv, row);
 			assert.equal(iv.selection.count, 2);
+			yield promise;
 			
 			// Show Unfiled Items
 			id = "U" + userLibraryID;
@@ -710,49 +712,6 @@ describe("ZoteroPane", function() {
 			yield promise;
 			var conditions = search.getConditions();
 			assert.lengthOf(Object.keys(conditions), 3);
-		});
-	});
-	
-	describe("#onCollectionSelected()", function() {
-		var cv;
-		
-		beforeEach(function* () {
-			cv = zp.collectionsView;
-			yield cv.selectLibrary(Zotero.Libraries.userLibraryID);
-			Zotero.Prefs.clear('itemsView.columnVisibility');
-			yield clearFeeds();
-		});
-		
-		it("should store column visibility settings when switching from default to feeds", function* () {
-			doc.getElementById('zotero-items-column-dateAdded').setAttribute('hidden', false);
-			var feed = yield createFeed();
-			yield cv.selectLibrary(feed.libraryID);
-			var settings = JSON.parse(Zotero.Prefs.get('itemsView.columnVisibility'));
-			assert.isOk(settings.default.dateAdded);
-		});
-		
-		it("should restore column visibility when switching between default and feeds", function* () {
-			doc.getElementById('zotero-items-column-dateAdded').setAttribute('hidden', false);
-			var feed = yield createFeed();
-			yield cv.selectLibrary(feed.libraryID);
-			assert.equal(doc.getElementById('zotero-items-column-dateAdded').getAttribute('hidden'), 'true');
-			doc.getElementById('zotero-items-column-firstCreator').setAttribute('hidden', true);
-			yield cv.selectLibrary(Zotero.Libraries.userLibraryID);
-			assert.equal(doc.getElementById('zotero-items-column-dateAdded').getAttribute('hidden'), 'false');
-			yield cv.selectLibrary(feed.libraryID);
-			assert.equal(doc.getElementById('zotero-items-column-firstCreator').getAttribute('hidden'), 'true');
-		});
-		
-		it("should restore column visibility settings on restart", function* () {
-			doc.getElementById('zotero-items-column-dateAdded').setAttribute('hidden', false);
-			assert.equal(doc.getElementById('zotero-items-column-dateAdded').getAttribute('hidden'), 'false');
-			
-			win.close();
-			win = yield loadZoteroPane();
-			doc = win.document;
-			zp = win.ZoteroPane;
-			
-			assert.equal(doc.getElementById('zotero-items-column-dateAdded').getAttribute('hidden'), 'false');
 		});
 	});
 })

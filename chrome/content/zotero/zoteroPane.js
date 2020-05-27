@@ -151,9 +151,6 @@ var ZoteroPane = new function()
 		ZoteroPane.progressWindow = new Zotero.ProgressWindow({ window });
 		
 		ZoteroPane.setItemsPaneMessage(Zotero.getString('pane.items.loading'));
-		// itemsTree.controllers.appendController(new Zotero.ItemTreeCommandController(itemsTree));
-		// itemsTree.addEventListener("mousedown", ZoteroPane_Local.onTreeMouseDown, true);
-		// itemsTree.addEventListener("click", ZoteroPane_Local.onTreeClick, true);
 		
 		Zotero.Keys.windowInit(document);
 		
@@ -585,16 +582,7 @@ var ZoteroPane = new function()
 			return;
 		}
 
-		if (from == 'zotero-collections-tree') {
-			if ((event.keyCode == event.DOM_VK_BACK_SPACE && Zotero.isMac) ||
-				event.keyCode == event.DOM_VK_DELETE) {
-				var deleteItems = event.metaKey || (!Zotero.isMac && event.shiftKey);
-				ZoteroPane_Local.deleteSelectedCollection(deleteItems);
-				event.preventDefault();
-				return;
-			}
-		}
-		else if (from == 'zotero-items-tree') {
+		if (from == this.itemsView.id) {
 			// Focus TinyMCE explicitly on tab key, since the normal focusing doesn't work right
 			if (!event.shiftKey && event.keyCode == event.DOM_VK_TAB) {
 				var deck = document.getElementById('zotero-item-pane-content');
@@ -954,10 +942,9 @@ var ZoteroPane = new function()
 			dragAndDrop: true,
 			persistColumns: true,
 			columnPicker: true,
-			onSelectionChange: Zotero.Utilities.debounce(
-				selection => ZoteroPane.itemSelected(selection), 100),
+			onSelectionChange: selection => ZoteroPane.itemSelected(selection),
 			onContextMenu: event => ZoteroPane.onItemsContextMenuOpen(event),
-			onActivate: (event, items) => ZoteroPane.viewItems(items, event),
+			onActivate: (event, items) => ZoteroPane.onItemTreeActivate(event, items),
 			emptyMessage: Zotero.getString('pane.items.loading')
 		});
 		ZoteroPane.itemsView.onRefresh.addListener(() => ZoteroPane.setTagScope());
@@ -968,8 +955,7 @@ var ZoteroPane = new function()
 		const CollectionTree = require('containers/collectionTree');
 		var collectionsTree = document.getElementById('zotero-collections-tree');
 		ZoteroPane.collectionsView = await CollectionTree.init(collectionsTree, {
-			onSelectionChange: Zotero.Utilities.debounce(
-				prevSelection => ZoteroPane.onCollectionSelected(prevSelection), 100),
+			onSelectionChange: prevSelection => ZoteroPane.onCollectionSelected(prevSelection),
 			onContextMenu: e => ZoteroPane.onCollectionsContextMenuOpen(e),
 			dragAndDrop: true
 		});
@@ -2833,197 +2819,12 @@ var ZoteroPane = new function()
 		yield Zotero_LocateMenu.buildContextMenu(menu, true);
 	});
 	
-	
-	this.onTreeMouseDown = function (event) {
-		var t = event.originalTarget;
-		var tree = t.parentNode;
-		
-		// Ignore click on column headers
-		if (!tree.treeBoxObject) {
-			return;
+	this.onItemTreeActivate = function(event, items) {
+		var viewOnDoubleClick = Zotero.Prefs.get('viewOnDoubleClick');
+		if (items.length == 1 && (!event.button || viewOnDoubleClick)) {
+			ZoteroPane.viewItems([items[0]], event);
 		}
-		
-		var row = {}, col = {}, obj = {};
-		tree.treeBoxObject.getCellAt(event.clientX, event.clientY, row, col, obj);
-		if (row.value == -1) {
-			return;
-		}
-		
-		if (tree.id == 'zotero-items-tree') {
-			let collectionTreeRow = ZoteroPane_Local.getCollectionTreeRow();
-			
-			// Automatically select all equivalent items when clicking on an item
-			// in duplicates view
-			if (collectionTreeRow.isDuplicates()) {
-				// Trigger only on primary-button single clicks without modifiers
-				// (so that items can still be selected and deselected manually)
-				if (!event || event.detail != 1 || event.button != 0 || event.metaKey
-					|| event.shiftKey || event.altKey || event.ctrlKey) {
-					return;
-				}
-				
-				var t = event.originalTarget;
-				
-				if (t.localName != 'treechildren') {
-					return;
-				}
-				
-				var tree = t.parentNode;
-				
-				var row = {}, col = {}, obj = {};
-				tree.treeBoxObject.getCellAt(event.clientX, event.clientY, row, col, obj);
-				
-				// obj.value == 'cell'/'text'/'image'/'twisty'
-				if (!obj.value) {
-					return;
-				}
-				
-				// Duplicated in itemTreeView.js::notify()
-				var itemID = ZoteroPane_Local.itemsView.getRow(row.value).ref.id;
-				var setItemIDs = collectionTreeRow.ref.getSetItemsByItemID(itemID);
-				ZoteroPane_Local.itemsView.selectItems(setItemIDs);
-				
-				// Prevent the tree's select event from being called here,
-				// since it's triggered by the multi-select
-				event.stopPropagation();
-			}
-		}
-	}
-	
-	
-	// Adapted from: http://www.xulplanet.com/references/elemref/ref_tree.html#cmnote-9
-	this.onTreeClick = function (event) {
-		var t = event.originalTarget;
-		
-		if (t.localName != 'treechildren') {
-			return;
-		}
-		
-		var tree = t.parentNode;
-		
-		var row = {}, col = {}, obj = {};
-		tree.treeBoxObject.getCellAt(event.clientX, event.clientY, row, col, obj);
-		
-		// We care only about primary-button double and triple clicks
-		if (!event || (event.detail != 2 && event.detail != 3) || event.button != 0) {
-			if (row.value == -1) {
-				return;
-			}
-		
-			// The Mozilla tree binding fires select() in mousedown(),
-			// but if when it gets to click() the selection differs from
-			// what it expects (say, because multiple items had been
-			// selected during mousedown(), as is the case in duplicates mode),
-			// it fires select() again. We prevent that here.
-			else if (tree.id == 'zotero-items-tree') {
-				let collectionTreeRow = ZoteroPane_Local.getCollectionTreeRow();
-				if (collectionTreeRow.isDuplicates()) {
-					if (event.button != 0 || event.metaKey || event.shiftKey
-						|| event.altKey || event.ctrlKey) {
-						return;
-					}
-					
-					if (obj.value == 'twisty') {
-						return;
-					}
-					
-					event.stopPropagation();
-					event.preventDefault();
-				}
-			}
-			
-			return;
-		}
-		
-		var collectionTreeRow = ZoteroPane_Local.getCollectionTreeRow();
-		
-		// Ignore double-clicks in duplicates view on everything except attachments
-		if (collectionTreeRow.isDuplicates()) {
-			var items = ZoteroPane_Local.getSelectedItems();
-			if (items.length != 1 || !items[0].isAttachment()) {
-				event.stopPropagation();
-				event.preventDefault();
-				return;
-			}
-		}
-		
-		// obj.value == 'cell'/'text'/'image'
-		if (!obj.value) {
-			return;
-		}
-		
-		if (tree.id == 'zotero-collections-tree') {                                                    
-			// Ignore triple clicks for collections
-			if (event.detail != 2) {
-				return;
-			}
-			
-			if (collectionTreeRow.isLibrary()) {
-				var uri = Zotero.URI.getCurrentUserLibraryURI();
-				if (uri) {
-					ZoteroPane_Local.loadURI(uri);
-					event.stopPropagation();
-				}
-				return;
-			}
-			
-			if (collectionTreeRow.isSearch()) {
-				ZoteroPane_Local.editSelectedCollection();
-				return;
-			}
-			
-			if (collectionTreeRow.isGroup()) {
-				var uri = Zotero.URI.getGroupURI(collectionTreeRow.ref, true);
-				ZoteroPane_Local.loadURI(uri);
-				event.stopPropagation();
-				return;
-			}
-			
-			// Ignore double-clicks on Unfiled/Retracted Items source rows
-			if (collectionTreeRow.isUnfiled() || collectionTreeRow.isRetracted()) {
-				return;
-			}
-			
-			if (collectionTreeRow.isHeader()) {
-				if (collectionTreeRow.ref.id == 'group-libraries-header') {
-					var uri = Zotero.URI.getGroupsURL();
-					ZoteroPane_Local.loadURI(uri);
-					event.stopPropagation();
-				}
-				return;
-			}
-
-			if (collectionTreeRow.isBucket()) {
-				ZoteroPane_Local.loadURI(collectionTreeRow.ref.uri);
-				event.stopPropagation();
-			}
-		}
-		else if (tree.id == 'zotero-items-tree') {
-			var viewOnDoubleClick = Zotero.Prefs.get('viewOnDoubleClick');
-			if (viewOnDoubleClick) {
-				// Expand/collapse on triple-click, though the double-click
-				// will still trigger
-				if (event.detail == 3) {
-					tree.view.toggleOpenState(tree.view.selection.currentIndex);
-					return;
-				}
-				
-				// Don't expand/collapse on double-click
-				event.stopPropagation();
-			}
-			
-			if (tree.view && tree.view.selection.currentIndex > -1) {
-				var item = ZoteroPane_Local.getSelectedItems()[0];
-				if (item) {
-					if (!viewOnDoubleClick && item.isRegularItem()) {
-						return;
-					}
-					ZoteroPane_Local.viewItems([item], event);
-				}
-			}
-		}
-	}
-	
+	};
 	
 	this.openPreferences = function (paneID, action) {
 		Zotero.warn("ZoteroPane.openPreferences() is deprecated"
@@ -4499,10 +4300,6 @@ var ZoteroPane = new function()
 			// Check to make sure we're still on the same item
 			var items = this.getSelectedItems();
 			if (items.length != 1 || items[0].id != feedItemID) {
-								Zotero.debug(items.length);
-				Zotero.debug(items[0].id);
-				Zotero.debug(feedItemID);
-
 				return;
 			}
 			var feedItem = items[0];

@@ -329,29 +329,10 @@ function waitForCallback(cb, interval, timeout) {
 }
 
 
-function clickOnItemsRow(itemsView, row, button = 0) {
-	var x = {};
-	var y = {};
-	var width = {};
-	var height = {};
-	itemsView._treebox.getCoordsForCellItem(
-		row,
-		itemsView._treebox.columns.getNamedColumn('zotero-items-column-title'),
-		'text',
-		x, y, width, height
-	);
-	
-	// Select row to trigger multi-select
-	var tree = itemsView._treebox.treeBody;
-	var rect = tree.getBoundingClientRect();
-	var x = rect.left + x.value;
-	var y = rect.top + y.value;
-	tree.dispatchEvent(new MouseEvent("mousedown", {
-		clientX: x,
-		clientY: y,
-		button,
-		detail: 1
-	}));
+function clickOnItemsRow(win, itemsView, row) {
+	itemsView._treebox.scrollToRow(row);
+	let elem = win.document.querySelector(`#${itemsView.id}-row-${row}`);
+	elem.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
 }
 
 

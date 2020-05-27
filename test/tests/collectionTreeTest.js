@@ -879,7 +879,7 @@ describe("Zotero.CollectionTree", function() {
 				await cv.selectLibrary(group1.libraryID);
 				await waitForItemsLoad(win);
 				
-				await drop('item', 'L' + group2.libraryID, [item.id]);
+				await onDrop('item', 'L' + group2.libraryID, [item.id]);
 				
 				assert.isFalse(await item.getLinkedItem(group2.libraryID));
 				// New collection should link back to original
@@ -1156,7 +1156,7 @@ describe("Zotero.CollectionTree", function() {
 				await cv.selectCollection(collection.id);
 				await waitForItemsLoad(win);
 				
-				await drop('collection', 'L' + group2.libraryID, [collection.id]);
+				await onDrop('collection', 'L' + group2.libraryID, [collection.id]);
 				
 				assert.isFalse(await collection.getLinkedCollection(group2.libraryID));
 				// New collection should link back to original

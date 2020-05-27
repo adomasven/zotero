@@ -59,6 +59,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 		this.itemToSelect = null;
 		this.hideSources = [];
 
+		this.id = "collection-tree";
 		this.domEl = props.domEl;
 		this._ownerDocument = props.domEl.ownerDocument;
 		this._rows = [];
@@ -107,9 +108,23 @@ var CollectionTree = class CollectionTree extends React.Component {
 		if (!selected) {
 			await this.selectByID('L' + Zotero.Libraries.userLibraryID);
 		}
-		this.selection.selectEventsSuppressed = false;
+		if (this.selection.selectEventsSuppressed) {
+			let promise = this.waitForSelect();
+			this.selection.selectEventsSuppressed = false;
+			await promise;
+		}
 		await this.runListeners('load');
 		Zotero.debug("React CollectionTree loaded");
+	}
+	
+	componentDidCatch(error, info) {
+		// Async operations might attempt to update the react components
+		// after window close in tests, which will cause unnecessary crashing.
+		if (this._uninitialized) return;
+		Zotero.debug("CollectionTree: React threw an error");
+		Zotero.logError(error);
+		Zotero.debug(info);
+		Zotero.crash();
 	}
 	
 	componentDidMount() {
@@ -135,6 +150,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 		
 		var libraryID = this.getSelectedLibraryID();
 		if (!libraryID) return true;
+		let treeRow = this.getRow(this.selection.focused);
 		
 		if (event.key == '+' && !(event.ctrlKey || event.altKey || event.metaKey)) {
 			this.expandLibrary(libraryID, true);
@@ -148,8 +164,8 @@ var CollectionTree = class CollectionTree extends React.Component {
 			window.ZoteroPane.deleteSelectedCollection(deleteItems);
 			event.preventDefault();
 		}
-		else if (event.key == "F2" && !Zotero.isMac) {
-			this.handleActivate(this.selection.focused);
+		else if (event.key == "F2" && !Zotero.isMac && treeRow.isCollection()) {
+			this.handleActivate(event, [this.selection.focused]);
 		}
 		else if (event.key.length == 1) {
 			this.handleTyping(event.key);
@@ -169,7 +185,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 		}
 		// Update aria-activedescendant on the tree
 		this.forceUpdate();
-		this.props.onSelectionChange && this.props.onSelectionChange();
+		this._onSelectionChange();
 	}
 	
 	handleTwistyMouseUp = (event, index) => {
@@ -178,17 +194,32 @@ var CollectionTree = class CollectionTree extends React.Component {
 		this.tree.focus();
 	}
 	
-	handleActivate = (index) => {
+	handleActivate = (event, indices) => {
+		let index = indices[0];
 		let treeRow = this.getRow(index);
 		if (treeRow.isCollection() && this.editable) {
 			this._editing = treeRow;
 			treeRow.editingName = treeRow.ref.name;
 			this.tree.invalidateRow(index);
 		}
+		else if (treeRow.isLibrary()) {
+			let uri = Zotero.URI.getCurrentUserLibraryURI();
+			if (uri) {
+				window.ZoteroPane.loadURI(uri);
+				event.stopPropagation();
+			}
+		}
+		else if (treeRow.isSearch()) {
+			window.ZoteroPane.editSelectedCollection();
+		}
+		else if (treeRow.isGroup()) {
+			let uri = Zotero.URI.getGroupURI(treeRow.ref, true);
+			window.ZoteroPane.loadURI(uri);
+		}
 	}
 	
 	handleEditingChange = (event, index) => {
-		this.getRow(index).editingName = event.target.value
+		this.getRow(index).editingName = event.target.value;
 	}
 	
 	async handleTyping(char) {
@@ -302,15 +333,21 @@ var CollectionTree = class CollectionTree extends React.Component {
 		label.className = 'cell-text';
 
 		// Editing input
+		div.classList.toggle('editing', treeRow == this._editing);
 		if (treeRow == this._editing) {
+			div.style.pointerEvents = 'auto';
 			label = document.createElementNS("http://www.w3.org/1999/xhtml", 'input');
 			label.className = 'cell-text';
-			label.setAttribute("autoFocus", true);
 			label.setAttribute("size", 5);
+			label.value = treeRow.editingName;
 			label.addEventListener('input', e => this.handleEditingChange(e, index));
 			label.addEventListener('blur', async () => {
 				await this.commitEditingName();
 				this.stopEditing();
+			});
+			// Feels like a bit of a hack, but it gets the job done
+			setTimeout(() => {
+				label.focus();
 			});
 		}
 
@@ -343,7 +380,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 		return React.createElement(VirtualizedTable,
 			{
 				getRowCount: () => this._rows.length,
-				id: "collection-tree",
+				id: this.id,
 				ref: ref => this.tree = ref,
 				treeboxRef: ref => this._treebox = ref,
 				renderItem: this.renderItem,
@@ -391,6 +428,13 @@ var CollectionTree = class CollectionTree extends React.Component {
 
 	set selection(val) {
 		return this.tree.selection = val;
+	}
+	
+	get selectedTreeRow() {
+		if (!this.selection || !this.selection.count) {
+			return false;
+		}
+		return this.getRow(this.selection.focused);
 	}
 	
 	/**
@@ -999,7 +1043,8 @@ var CollectionTree = class CollectionTree extends React.Component {
 	async toggleVirtualCollection(libraryID, type, show, select) {
 		const types = {
 			duplicates: 'D',
-			unfiled: 'U'
+			unfiled: 'U',
+			retracted: 'R'
 		};
 		if (!(type in types)) {
 			throw new Error("Invalid virtual collection type '" + type + "'");
@@ -1047,6 +1092,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 	}
 	
 	unregister() {
+		this._uninitialized = true;
 		Zotero.Notifier.unregisterObserver(this._unregisterID);
 	}
 
@@ -1067,7 +1113,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 	 * Return a reference to the tree row at a given row
 	 *
 	 * @return {Zotero.CollectionTreeRow}
-	 */	
+	 */
 	getRow(index) {
 		return this._rows[index];
 	}
@@ -1701,7 +1747,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 								var collectionID = await newCollection.save();
 								
 								// Record link
-								await c.addLinkedCollection(newCollection);
+								await newCollection.addLinkedCollection(c);
 								
 								// Recursively copy subcollections
 								if (desc.children.length) {
@@ -1995,6 +2041,14 @@ var CollectionTree = class CollectionTree extends React.Component {
 ///  Private methods
 ///
 ////////////////////////////////////////////////////////////////////////////////
+
+	// We notify about selection changes with a debounce to not
+	// issue a bunch of db calls/etc in the handlers and kill performance
+	_onSelectionChange = Zotero.Utilities.debounce(() => {
+		if (!this._uninitialized) {
+			this.props.onSelectionChange && this.props.onSelectionChange(this.selection);
+		}
+	}, 100)
 	
 	/**
 	* Remove a row from the main array and parent row children arrays,

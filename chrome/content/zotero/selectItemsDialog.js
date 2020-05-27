@@ -46,13 +46,6 @@ var doLoad = async function () {
 	if(io.addBorder) document.getElementsByTagName("dialog")[0].style.border = "1px solid black";
 	if(io.singleSelection) document.getElementById("zotero-items-tree").setAttribute("seltype", "single");
 	
-	collectionsView = await CollectionTree.init(document.getElementById('zotero-collections-tree'), {
-		onSelectionChange: Zotero.Utilities.debounce(() => onCollectionSelected(), 100),
-	});
-	collectionsView.hideSources = ['duplicates', 'trash', 'feeds'];
-	
-	await collectionsView.makeVisible();
-
 	itemsView = await ItemTree.init(document.getElementById('zotero-items-tree'), {
 		onSelectionChange: () => {
 			if (isEditBibliographyDialog) {
@@ -73,6 +66,13 @@ var doLoad = async function () {
 		emptyMessage: Zotero.getString('pane.items.loading')
 	});
 	itemsView.setItemsPaneMessage(Zotero.getString('pane.items.loading'));
+
+	collectionsView = await CollectionTree.init(document.getElementById('zotero-collections-tree'), {
+		onSelectionChange: Zotero.Utilities.debounce(() => onCollectionSelected(), 100),
+	});
+	collectionsView.hideSources = ['duplicates', 'trash', 'feeds'];
+
+	await collectionsView.makeVisible();
 
 	if (io.select) {
 		await collectionsView.selectItem(io.select);

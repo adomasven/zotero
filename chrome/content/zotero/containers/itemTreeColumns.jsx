@@ -273,11 +273,11 @@ for (const column of COLUMNS) {
 }
 
 function getDefaultColumnByDataKey(dataKey) {
-	return Object.assign({}, DATA_KEY_TO_COLUMN[dataKey]);
+	return Object.assign({}, DATA_KEY_TO_COLUMN[dataKey], {hidden: false});
 }
 
 function getDefaultColumnsByDataKeys(dataKeys) {
-	return COLUMNS.filter(column => dataKeys.includes(column.dataKey)).map(column => Object.assign({}, column));
+	return COLUMNS.filter(column => dataKeys.includes(column.dataKey)).map(column => Object.assign({}, column, {hidden: false}));
 }
 
 module.exports = {

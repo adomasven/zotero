@@ -66,6 +66,9 @@ var ZoteroAdvancedSearch = new function() {
 		});
 	}
 	
+	this.onUnload = function () {
+		this.itemsView.unregister();
+	}
 	
 	function search() {
 		_searchBox.updateSearch();
@@ -86,6 +89,7 @@ var ZoteroAdvancedSearch = new function() {
 			isCollection: function () { return false; },
 			isSearch: function () { return true; },
 			isPublications: () => false,
+			isDuplicates: () => false,
 			isFeed: () => false,
 			isShare: function () { return false; },
 			isTrash: function () { return false; }

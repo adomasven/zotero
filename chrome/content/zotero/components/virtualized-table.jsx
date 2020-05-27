@@ -27,11 +27,11 @@
 
 const React = require('react');
 const PropTypes = require('prop-types');
+const cx = require('classnames');
 const JSWindow = require('./js-window');
+const Draggable = require('./draggable');
 const { injectIntl } = require('react-intl');
 const { IconDownChevron, getDomElement } = require('components/icons');
-const cx = require('classnames');
-const Draggable = require('./draggable');
 
 const RESIZER_WIDTH = 5; // px
 
@@ -84,10 +84,14 @@ class TreeSelection {
 		this._updateTree();
 	}
 
+	/**
+	 * @param index
+	 * @returns {boolean} False if nothing to select and select handlers won't be called
+	 */
 	select(index) {
 		index = Math.max(0, index);
 		if (this.selected.size == 1 && this._focused == index && this.pivot == index) {
-			return;
+			return false;
 		}
 
 		let toInvalidate = Array.from(this.selected);
@@ -96,13 +100,14 @@ class TreeSelection {
 		this._focused = index;
 		this.pivot = index;
 
-		if (this.selectEventsSuppressed) return;
+		if (this.selectEventsSuppressed) return true;
 
 		this._tree.scrollToRow(index);
 		this._updateTree();
 		if (this._tree.invalidate) {
 			toInvalidate.forEach(this._tree.invalidateRow.bind(this._tree));
 		}
+		return true;
 	}
 
 	_rangedSelect(from, to, augment) {
@@ -318,7 +323,6 @@ class VirtualizedTable extends React.Component {
 		// Used for initial column widths calculation
 		containerWidth: PropTypes.number,
 
-		ref: PropTypes.func,
 		// Internal js-window ref
 		treeboxRef: PropTypes.func,
 

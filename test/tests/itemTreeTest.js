@@ -183,10 +183,8 @@ describe("Zotero.ItemTree", function() {
 				skipSelect: true
 			});
 			
-			// itemSelected should have been called once (from 'selectEventsSuppressed = false'
-			// in notify()) as a no-op
-			assert.equal(win.ZoteroPane.itemSelected.callCount, 1);
-			await assert.eventually.isFalse(win.ZoteroPane.itemSelected.returnValues[0]);
+			// No select events should have occurred
+			assert.equal(win.ZoteroPane.itemSelected.callCount, 0);
 			
 			// Existing item should still be selected
 			selected = itemsView.getSelectedItems(true);
@@ -276,10 +274,8 @@ describe("Zotero.ItemTree", function() {
 			item.setField('title', 'no select on modify');
 			yield item.saveTx();
 			
-			// itemSelected should have been called once (from 'selectEventsSuppressed = false'
-			// in notify()) as a no-op
-			assert.equal(win.ZoteroPane.itemSelected.callCount, 1);
-			assert.isFalse(win.ZoteroPane.itemSelected.returnValues[0].value());
+			// No select events should have occurred
+			assert.equal(win.ZoteroPane.itemSelected.callCount, 0);
 			
 			// Modified item should not be selected
 			assert.lengthOf(itemsView.getSelectedItems(), 0);
@@ -542,8 +538,8 @@ describe("Zotero.ItemTree", function() {
 			var item3 = await createDataObject('item', { title: title + " 5" });
 			var item4 = await createDataObject('item', { title: title + " 7" });
 
-			const colIndex = itemsView._getColumns().findIndex(column => column.dataKey == 'title');
-			await itemsView._handleColumnClick(colIndex);
+			const colIndex = itemsView.tree._getColumns().findIndex(column => column.dataKey == 'title');
+			await itemsView.tree._columns.toggleSort(colIndex);
 			
 			// Check initial sort order
 			assert.equal(itemsView.getRow(0).ref.getField('title'), title + " 1");
@@ -703,6 +699,7 @@ describe("Zotero.ItemTree", function() {
 				yield waitForItemsLoad(win);
 				
 				yield itemsView.selectItem(attachment.id);
+				yield Zotero.Promise.delay();
 				
 				var box = win.document.getElementById('zotero-item-pane-top-buttons-my-publications');
 				assert.isFalse(box.hidden);
