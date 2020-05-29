@@ -1136,6 +1136,8 @@ var ItemTree = class ItemTree extends React.Component {
 					renderItem: this.renderItem,
 					hide: showMessage,
 					key: "virtualized-table",
+					label: Zotero.getString('pane.items.title'),
+					alternatingRowColors: Zotero.isMac ? ['-moz-OddTreeRow', '-moz-EvenTreeRow'] : null,
 
 					showHeader: true,
 					columns: this._getColumns(),
@@ -1161,7 +1163,6 @@ var ItemTree = class ItemTree extends React.Component {
 					onActivate: this.handleActivate,
 
 					onItemContextMenu: (e) => this.props.onContextMenu(e),
-					label: Zotero.getString('pane.items.title'),
 				}
 			);
 		}

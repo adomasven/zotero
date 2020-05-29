@@ -151,10 +151,8 @@ module.exports = class {
 		Object.assign(this, options);
 		const { itemHeight, targetElement, innerElem } = this;
 		const itemCount = this._getItemCount();
-		innerElem.style.cssText = `
-			position: relative;
-			height: ${itemHeight * itemCount}px;
-		`;
+		innerElem.style.position = 'relative';
+		innerElem.style.height = `${itemHeight * itemCount}px`;
 
 		this.scrollDirection = 0;
 		this.scrollOffset = targetElement.scrollTop;

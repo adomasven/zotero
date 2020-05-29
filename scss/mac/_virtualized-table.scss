@@ -22,17 +22,3 @@
     border-left: 1px solid #ddd;
   }
 }
-
-// IDK why, but these heights are all over the place on macOS (not a f(x)=x)
-*[zoteroFontSize=medium] .virtualized-table-body .row {
-  height: 1.739em;
-}
-
-*[zoteroFontSize=large] .virtualized-table-body .row {
-  height: 1.68em;
-}
-
-*[zoteroFontSize=x-large] .virtualized-table-body .row {
-  height: 1.697em;
-}
-

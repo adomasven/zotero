@@ -77,7 +77,6 @@ class TreeSelection {
 
 	clearSelection() {
 		this.selected = new Set();
-		this.pivot = 0;
 		if (this._tree.invalidate) {
 			this._tree.invalidate();
 		}
@@ -239,10 +238,10 @@ class VirtualizedTable extends React.Component {
 		this._rowHeight = props.rowHeight;
 		if (!this._rowHeight) {
 			this._rowHeight = 20; // px
-			if (Zotero.isMac) {
-				this._rowHeight = 18;
-			}
 			this._rowHeight *= Zotero.Prefs.get('fontSize');
+			if (Zotero.isMac && this._rowHeight > 20) {
+				this._rowHeight -= 2;
+			}
 		}
 			
 		this.selection = new TreeSelection(this);
@@ -308,6 +307,8 @@ class VirtualizedTable extends React.Component {
 		
 		renderItem: PropTypes.func,
 		rowHeight: PropTypes.number,
+		// An array of two elements for alternating row colors
+		alternatingRowColors: PropTypes.array,
 		// For screen-readers
 		label: PropTypes.string,
 
@@ -800,6 +801,8 @@ class VirtualizedTable extends React.Component {
 		this._jsWindow.render();
 		this._updateWidth();
 		this.props.treeboxRef && this.props.treeboxRef(this._jsWindow);
+	
+		this._setAlternatingRows();
 
 		window.addEventListener("resize", () => {
 			this._debouncedRerender();
@@ -808,6 +811,20 @@ class VirtualizedTable extends React.Component {
 	
 	componentWillUnmount() {
 		this._jsWindow.destroy();
+	}
+	
+	_setAlternatingRows() {
+		if (this.props.alternatingRowColors) {
+			this._jsWindow.innerElem.style.background = `
+				repeating-linear-gradient(
+				  0deg,
+				  ${this.props.alternatingRowColors[0]},
+				  ${this.props.alternatingRowColors[0]} ${this._rowHeight}px,
+				  ${this.props.alternatingRowColors[1]} ${this._rowHeight}px,
+				  ${this.props.alternatingRowColors[1]} ${this._rowHeight * 2}px
+				)
+			`;
+		}
 	}
 	
 	_getJSWindowOptions() {
@@ -971,13 +988,14 @@ class VirtualizedTable extends React.Component {
 				+ "You should change the prop on the React component instead");
 		}
 		this._rowHeight = 20; // px
-		if (Zotero.isMac) {
-			this._rowHeight = 18;
-		}
 		this._rowHeight *= Zotero.Prefs.get('fontSize');
-		
+		if (Zotero.isMac && this._rowHeight > 20) {
+			this._rowHeight -= 2;
+		}
+
 		if (!this._jsWindow) return;
 		this._jsWindow.update(this._getJSWindowOptions());
+		this._setAlternatingRows();
 		this._jsWindow.invalidate();
 	}
 	
