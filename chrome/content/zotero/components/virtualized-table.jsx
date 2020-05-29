@@ -238,9 +238,9 @@ class VirtualizedTable extends React.Component {
 		
 		this._rowHeight = props.rowHeight;
 		if (!this._rowHeight) {
-			this._rowHeight = 18; // px
-			if (Zotero.isLinux) {
-				this._rowHeight = 20;
+			this._rowHeight = 20; // px
+			if (Zotero.isMac) {
+				this._rowHeight = 18;
 			}
 			this._rowHeight *= Zotero.Prefs.get('fontSize');
 		}
@@ -602,7 +602,7 @@ class VirtualizedTable extends React.Component {
 	 * 		  If true will add to selection
 	 *
 	 * @param {Boolean} movePivot
-	 * 		  Will move focused without adding anything to the selection
+	 * 		  Will move pivot without adding anything to the selection
 	 */
 	_onSelection = (index, shiftSelect, toggleSelection, movePivot) => {
 		if (this.selection.selectEventsSuppressed) return;
@@ -613,8 +613,8 @@ class VirtualizedTable extends React.Component {
 		}
 		// Normal selection
 		else if (!shiftSelect && !toggleSelection) {
-			while (index > 0 && !this.props.isSelectable(index)) {
-				index--;
+			if (index > 0 && !this.props.isSelectable(index)) {
+				return;
 			}
 			this.selection.select(index);
 		}
@@ -829,6 +829,7 @@ class VirtualizedTable extends React.Component {
 			node.addEventListener('mouseup', e => this._handleMouseUp(e, index), { passive: true });
 			node.addEventListener('dblclick', e => this._activateNode(e, [index]), { passive: true });
 		}
+		node.style.height = this._rowHeight + 'px';
 		node.id = this.props.id + "-row-" + index;
 		node.setAttribute('role', 'row');
 		return node;
@@ -864,7 +865,7 @@ class VirtualizedTable extends React.Component {
 					sortIndicator = <IconDownChevron className={"sort-indicator " + (column.sortDirection === 1 ? "ascending" : "descending")}/>;
 				}
 			}
-			const className = cx("cell", column.className, { draggingColumn: this.state.draggingColumn == index },
+			const className = cx("cell", column.className, { dragging: this.state.draggingColumn == index },
 				{ "cell-icon": !!column.iconLabel });
 			return (<Draggable
 				onDragStart={this._handleColumnDragStart.bind(this, index)}
@@ -962,6 +963,22 @@ class VirtualizedTable extends React.Component {
 		if (!this._jsWindow) return;
 		this._jsWindow.render();
 		this._updateWidth();
+	}
+	
+	updateFontSize = () => {
+		if (typeof this.props.rowHeight == 'number') {
+			Zotero.debug("Attempting to update virtualized-table font size with a prop-specified rowHeight."
+				+ "You should change the prop on the React component instead");
+		}
+		this._rowHeight = 20; // px
+		if (Zotero.isMac) {
+			this._rowHeight = 18;
+		}
+		this._rowHeight *= Zotero.Prefs.get('fontSize');
+		
+		if (!this._jsWindow) return;
+		this._jsWindow.update(this._getJSWindowOptions());
+		this._jsWindow.invalidate();
 	}
 	
 	_debouncedRerender = Zotero.Utilities.debounce(this.rerender, 200);

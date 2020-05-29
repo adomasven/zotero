@@ -33,7 +33,6 @@ const { getDomElement: getDOMIcon } = Icons;
 const { getDragTargetOrient } = require('components/utils');
 const { Cc, Ci, Cu } = require('chrome');
 
-const MARGIN_LEFT = 3;
 const CHILD_INDENT = 20;
 const TYPING_TIMEOUT = 1000;
 
@@ -300,7 +299,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 			&& treeRow.ref.libraryID != Zotero.Libraries.userLibraryID) {
 			depth--;
 		}
-		div.style.paddingLeft = (MARGIN_LEFT + CHILD_INDENT * depth) + 'px';
+		div.style.paddingLeft = (CHILD_INDENT * depth) + 'px';
 		
 		// Create a single-cell for the row (for the single-column layout)
 		let cell = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
@@ -910,7 +909,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 	}
 
 	/**
-	 * 
+	 *
 	 * @param rowID {String}
 	 * @returns {Promise<boolean>}
 	 */
@@ -1034,7 +1033,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 
 	/**
 	 * Toggle virtual collection (duplicates/unfiled) visibility
-	 * 
+	 *
 	 * @param libraryID {Number}
 	 * @param type {String}
 	 * @param show {Boolean}
@@ -1077,7 +1076,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 
 	/**
 	 * Deletes the selected collection and optionally items within it
-	 * 
+	 *
 	 * @param deleteItems[boolean] Whether items contained in the collection should be removed
 	 * @returns {Promise<void>}
 	 */
@@ -1089,6 +1088,10 @@ var CollectionTree = class CollectionTree extends React.Component {
 		else if (treeRow.isSearch()) {
 			await Zotero.Searches.erase(treeRow.ref.id);
 		}
+	}
+	
+	updateFontSize() {
+		this.tree.updateFontSize();
 	}
 	
 	unregister() {

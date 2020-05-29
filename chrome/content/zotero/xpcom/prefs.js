@@ -218,7 +218,8 @@ Zotero.Prefs = new function(){
 			Zotero.setFontSize(
 				Zotero.getActiveZoteroPane().document.getElementById('zotero-pane')
 			);
-			Zotero.getActiveZoteroPane().collectionsView.forceUpdate();
+			Zotero.getActiveZoteroPane().collectionsView && Zotero.getActiveZoteroPane().collectionsView.updateFontSize();
+			Zotero.getActiveZoteroPane().itemsView && Zotero.getActiveZoteroPane().itemsView.updateFontSize();
 		}],
 		[ "layout", function(val) {
 			Zotero.getActiveZoteroPane().updateLayout();

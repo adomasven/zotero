@@ -36,7 +36,6 @@ const { COLUMNS } = require('containers/itemTreeColumns');
 const { Cc, Ci, Cu } = require('chrome');
 Cu.import("resource://gre/modules/osfile.jsm");
 
-const MARGIN_LEFT = 6;
 const TYPING_TIMEOUT = 1000;
 const CHILD_INDENT = 20;
 const COLORED_TAGS_RE = new RegExp("^[0-" + Zotero.Tags.MAX_COLORED_TAGS + "]{1}$");
@@ -91,7 +90,7 @@ function makeItemRenderer(itemTree) {
 
 		// Set depth indent
 		const depth = itemTree.getLevel(index);
-		span.style.paddingLeft = (MARGIN_LEFT + CHILD_INDENT * depth) + 'px';
+		span.style.paddingLeft = (CHILD_INDENT * depth) + 'px';
 		
 		return span;
 	}
@@ -1872,7 +1871,11 @@ var ItemTree = class ItemTree extends React.Component {
 		this.tree.invalidate();
 		this.selection.selectEventsSuppressed = false;
 	}
-	
+
+	updateFontSize() {
+		this.tree.updateFontSize();
+	}
+
 	// //////////////////////////////////////////////////////////////////////////////
 	//
 	//  Data access methods

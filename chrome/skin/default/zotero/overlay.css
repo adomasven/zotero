@@ -4,60 +4,10 @@
 	overflow: hidden;
 }
 
-/* Why is this necessary? */
-#zotero-collections-tree treechildren::-moz-tree-image,
-#zotero-items-tree treechildren::-moz-tree-image {
-	margin-right: 5px;
-}
-
 #zotero-collections-pane
 {
 	min-width: 150px;
 	width: 250px;
-}
-
-#zotero-collections-tree {
-	min-height: 5.2em;
-}
-
-#zotero-collections-tree treechildren::-moz-tree-row {
-	height: 1.7em;
-}
-
-/* As of Fx37, the tree doesn't scale HiDPI images properly on Windows and Linux */
-#zotero-collections-tree treechildren::-moz-tree-image,
-#zotero-items-tree treechildren::-moz-tree-image {
-	height: 16px;
-}
-
-#zotero-collections-tree treechildren::-moz-tree-image(primary)
-{
-	margin-right: 5px;
-}
-
-#zotero-collections-tree treechildren::-moz-tree-separator {
-	border: none;
-}
-
-#zotero-collections-tree treechildren::-moz-tree-twisty(notwisty),
-#zotero-collections-tree treechildren::-moz-tree-twisty(header) {
-	width: 0;
-}
-
-/* Set by setHighlightedRows() and getRowProperties() in collectionTreeView.js) */
-#zotero-collections-tree treechildren::-moz-tree-row(highlighted)
-{
-	background: #FFFF99 !important;
-}
-@media (min-resolution: 1.25dppx) {
-	.tree-columnpicker-icon {
-		list-style-image: url(chrome://zotero/skin/firefox/columnpicker@2x.gif);
-		width: 14px;
-	}
-}
-
-#zotero-items-column-numNotes {
-	text-align: center;
 }
 
 #zotero-items-tree treechildren::-moz-tree-image(hasAttachment, pie)
@@ -198,33 +148,6 @@
 #zotero-items-tree treechildren::-moz-tree-image(selected, hasAttachment, pie63) { -moz-image-region: rect(32px, 2016px, 64px, 1984px); }
 #zotero-items-tree treechildren::-moz-tree-image(selected, hasAttachment, pie64) { -moz-image-region: rect(32px, 2048px, 64px, 2016px); }
 
-/* Style search results, display non-matches in gray */
-#zotero-items-tree treechildren::-moz-tree-cell-text(contextRow) {
-	color: gray;
-}
-
-#zotero-items-tree treechildren::-moz-tree-cell-text(contextRow, selected, focus) {
-	/* This is the default color, not the (platform-specific) highlight color, but at least it
-	   helps to differentiate when clicking on a context row. */
-	color: inherit;
-}
-
-/* Style unread items/collections in bold */
-#zotero-items-tree treechildren::-moz-tree-cell-text(unread),
-#zotero-collections-tree treechildren::-moz-tree-cell-text(unread) {
-	font-weight: bold;
-}
-
-/* Used for intro text */
-.items-tree-message {
-	overflow-y: auto;
-	cursor: default;
-	width: 100%;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-}
-
 .items-tree-message div {
 	padding: 0 35px;
 }
@@ -249,16 +172,6 @@
 	color: rgb(0, 149, 221);
 	cursor: pointer;
 	text-decoration: underline;
-}
-
-.items-tree-message {
-	-moz-appearance: listbox;
-	text-align: center;
-	padding: 20px;
-}
-
-.items-tree-message description:not(:first-child) {
-	margin-top: .75em;
 }
 
 #zotero-item-pane

@@ -1,0 +1,33 @@
+#zotero-items-tree .virtualized-table {
+  .row {
+    padding-right: 1px;
+    &.selected {
+      background-color: #e5f3ff;
+      border: 1px solid #7bc3ff;
+      color: inherit;
+      padding-left: 1px;
+      padding-right: 0;
+    }
+    &:hover {
+      background-color: #e5f3ff;
+    }
+  }
+}
+
+#zotero-items-tree .virtualized-table:not(:focus) {
+  .row {
+    &.selected {
+      color: inherit;
+      background: #f0f0f0;
+      border: none;
+      padding-left: 2px;
+      padding-right: 1px;
+    }
+    &.selected:hover {
+      background-color: #e5f3ff;
+      border: 1px solid #7bc3ff;
+      padding-left: 1px;
+      padding-right: 0;
+    }
+  }
+}
