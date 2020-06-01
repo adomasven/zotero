@@ -29,7 +29,6 @@ const symlinkFiles = [
 	// React needs to be patched by babel-worker.js, so symlink all files in resource/ except for
 	// those. Babel transpilation for React is still disabled in .babelrc.
 	'resource/**/*',
-	'!resource/jss.js',
 	'!resource/react.js',
 	'!resource/react-dom.js',
 	'!resource/react-virtualized.js',
@@ -82,7 +81,6 @@ const jsFiles = [
 	`!{${symlinkDirs.concat(copyDirs).join(',')}}/**/*.js`,
 	`!{${symlinkDirs.concat(copyDirs).join(',')}}/**/*.jsx`,
 	// Special handling for React -- see note above
-	'resource/jss.js',
 	'resource/react.js',
 	'resource/react-dom.js',
 	'resource/react-virtualized.js',

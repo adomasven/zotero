@@ -46,10 +46,6 @@ async function babelWorker(ev) {
 				.replace('document.body.appendChild(scrollDiv)', 'document.documentElement.appendChild(scrollDiv)')
 				.replace('document.body.removeChild(scrollDiv)', 'document.documentElement.removeChild(scrollDiv)');
 		}
-		else if (sourcefile === 'resource/jss.js') {
-			transformed = contents.replace(/document\.createElement\(/g, 'document.createElementNS("http://www.w3.org/1999/xhtml", ')
-				.replace(/document\.setAttribute\(/g, 'document.setAttributeNS("http://www.w3.org/1999/xhtml", ');
-		}
 		else if ('ignore' in options && options.ignore.some(ignoreGlob => multimatch(sourcefile, ignoreGlob).length)) {
 			transformed = contents;
 			isSkipped = true;
