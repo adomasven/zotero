@@ -2931,7 +2931,8 @@ var ItemTree = class ItemTree extends React.Component {
 		const legacyPersistSetting = persistSettings[legacyDataKey];
 		if (legacyPersistSetting) {
 			// Remove legacy pref
-			delete persistSettings[legacyDataKey];
+			// TODO: uncomment once xul item tree fully phased out
+			// delete persistSettings[legacyDataKey];
 			for (const key in legacyPersistSetting) {
 				if (typeof legacyPersistSetting[key] == "string") {
 					if (key == 'sortDirection') {
