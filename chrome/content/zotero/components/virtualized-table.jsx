@@ -198,12 +198,13 @@ let TreeSelectionStub = {};
 for (const key of Object.getOwnPropertyNames(TreeSelection.prototype)) {
 	TreeSelectionStub[key] = () => 0;
 }
-TreeSelectionStub = Object.freeze(Object.assign(TreeSelectionStub, {
+TreeSelectionStub = Object.assign(TreeSelectionStub, {
 	pivot: 0,
 	focused: 0,
 	count: 0,
-	selected: new Set([])
-}));
+	selected: new Set([]),
+	selectEventsSuppressed: false
+});
 
 /**
  * A virtualized-table, inspired by https://github.com/bvaughn/react-virtualized

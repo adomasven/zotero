@@ -348,13 +348,15 @@ var ItemTree = class ItemTree extends React.Component {
 		if (message.outerHTML) {
 			message = message.outerHTML;
 		}
+		const shouldRerender = this._itemsPaneMessage != message;
 		this._itemsPaneMessage = message;
-		return new Promise(resolve => this.forceUpdate(resolve));
+		return shouldRerender && new Promise(resolve => this.forceUpdate(resolve));
 	}
 	
 	async clearItemsPaneMessage() {
+		const shouldRerender = !this._itemsPaneMessage;
 		this._itemsPaneMessage = null;
-		return new Promise(resolve => this.forceUpdate(resolve));
+		return shouldRerender && new Promise(resolve => this.forceUpdate(resolve));
 	}
 	
 	refresh = Zotero.serial(async function (skipExpandMatchParents) {
@@ -1097,7 +1099,6 @@ var ItemTree = class ItemTree extends React.Component {
 	}
 	
 	render() {
-		Zotero.debug('Rendering itemTree');
 		const itemsPaneMessageHTML = this._itemsPaneMessage || this.props.emptyMessage;
 		const showMessage = !this.collectionTreeRow || this._itemsPaneMessage;
 		
@@ -1162,10 +1163,11 @@ var ItemTree = class ItemTree extends React.Component {
 					onKeyDown: this.handleKeyDown,
 					onActivate: this.handleActivate,
 
-					onItemContextMenu: (e) => this.props.onContextMenu(e),
+					onItemContextMenu: e => this.props.onContextMenu(e),
 				}
 			);
 		}
+		Zotero.debug(`itemTree.render(). Displaying ${showMessage ? "Item Pane Message" : "Item Tree"}`);
 
 		return [
 			itemsPaneMessage,
@@ -1184,6 +1186,7 @@ var ItemTree = class ItemTree extends React.Component {
 	updateHeight = Zotero.Utilities.debounce(this._updateHeight, 200);
 
 	async changeCollectionTreeRow(collectionTreeRow) {
+		this.selection.selectEventsSuppressed = true;
 		this.collectionTreeRow = collectionTreeRow;
 		this.id = "item-tree-" + this.props.id + "-" + this.collectionTreeRow.visibilityGroup;
 		if (!collectionTreeRow) {
@@ -1200,19 +1203,13 @@ var ItemTree = class ItemTree extends React.Component {
 		this.selection.clearSelection();
 		await this.refresh();
 		if (Zotero.CollectionTreeCache.error) {
-			this.setItemsPaneMessage(Zotero.getString('pane.items.loadError'));
+			return this.setItemsPaneMessage(Zotero.getString('pane.items.loadError'));
 		}
 		else {
 			this.clearItemsPaneMessage();
 		}
 		this.forceUpdate(() => {
-			if (this.tree) {
-				this.tree.invalidate();
-
-				if (this.selection) {
-					this.selection.selectEventsSuppressed = false;
-				}
-			}
+			this.selection.selectEventsSuppressed = false;
 			this._updateIntroText();
 			this._itemTreeLoadingDeferred.resolve();
 		});
@@ -2696,7 +2693,6 @@ var ItemTree = class ItemTree extends React.Component {
 
 	_handleSelectionChange = (selection) => {
 		// Update aria-activedescendant on the tree
-		this.forceUpdate();
 		if (this.collectionTreeRow.isDuplicates() && selection.count == 1) {
 			var itemID = this.getRow(selection.focused).ref.id;
 			var setItemIDs = this.collectionTreeRow.ref.getSetItemsByItemID(itemID);

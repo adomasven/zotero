@@ -637,7 +637,9 @@ describe("Zotero.CollectionTree", function() {
 					}
 				}, 'collection-item', 'test');
 				
+				let promise = zp.itemsView.waitForSelect();
 				yield onDrop('item', 'C' + collection2.id, [item.id], deferred.promise, 'move');
+				yield promise;
 				
 				Zotero.Notifier.unregisterObserver(observerID);
 				
