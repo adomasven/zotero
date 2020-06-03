@@ -935,42 +935,60 @@ var ZoteroPane = new function()
 	};
 
 	this.initItemsTree = async function () {
-		const ItemTree = require('containers/itemTree');
-		var itemsTree = document.getElementById('zotero-items-tree');
-		ZoteroPane.itemsView = await ItemTree.init(itemsTree, {
-			id: "main",
-			dragAndDrop: true,
-			persistColumns: true,
-			columnPicker: true,
-			onSelectionChange: selection => ZoteroPane.itemSelected(selection),
-			onContextMenu: event => ZoteroPane.onItemsContextMenuOpen(event),
-			onActivate: (event, items) => ZoteroPane.onItemTreeActivate(event, items),
-			emptyMessage: Zotero.getString('pane.items.loading')
-		});
-		ZoteroPane.itemsView.onRefresh.addListener(() => ZoteroPane.setTagScope());
-		ZoteroPane.itemsView.waitForLoad().then(() => Zotero.uiIsReady());
+		try {
+			const ItemTree = require('containers/itemTree');
+			var itemsTree = document.getElementById('zotero-items-tree');
+			ZoteroPane.itemsView = await ItemTree.init(itemsTree, {
+				id: "main",
+				dragAndDrop: true,
+				persistColumns: true,
+				columnPicker: true,
+				onSelectionChange: selection => ZoteroPane.itemSelected(selection),
+				onContextMenu: event => ZoteroPane.onItemsContextMenuOpen(event),
+				onActivate: (event, items) => ZoteroPane.onItemTreeActivate(event, items),
+				emptyMessage: Zotero.getString('pane.items.loading')
+			});
+			ZoteroPane.itemsView.onRefresh.addListener(() => ZoteroPane.setTagScope());
+			ZoteroPane.itemsView.waitForLoad().then(() => Zotero.uiIsReady());
+		}
+		catch (e) {
+			Zotero.logError(e);
+			Zotero.debug(e, 1);
+		}
 	}
 
 	this.initCollectionsTree = async function () {
-		const CollectionTree = require('containers/collectionTree');
-		var collectionsTree = document.getElementById('zotero-collections-tree');
-		ZoteroPane.collectionsView = await CollectionTree.init(collectionsTree, {
-			onSelectionChange: prevSelection => ZoteroPane.onCollectionSelected(prevSelection),
-			onContextMenu: e => ZoteroPane.onCollectionsContextMenuOpen(e),
-			dragAndDrop: true
-		});
+		try {
+			const CollectionTree = require('containers/collectionTree');
+			var collectionsTree = document.getElementById('zotero-collections-tree');
+			ZoteroPane.collectionsView = await CollectionTree.init(collectionsTree, {
+				onSelectionChange: prevSelection => ZoteroPane.onCollectionSelected(prevSelection),
+				onContextMenu: e => ZoteroPane.onCollectionsContextMenuOpen(e),
+				dragAndDrop: true
+			});
+		}
+		catch (e) {
+			Zotero.logError(e);
+			Zotero.debug(e, 1);
+		}
 	};
 
 	this.initTagSelector = function () {
-		var container = document.getElementById('zotero-tag-selector-container');
-		if (!container.hasAttribute('collapsed') || container.getAttribute('collapsed') == 'false') {
-			this.tagSelector = Zotero.TagSelector.init(
-				document.getElementById('zotero-tag-selector'),
-				{
-					container: 'zotero-tag-selector-container',
-					onSelection: this.updateTagFilter.bind(this),
-				}
-			);
+		try {
+			var container = document.getElementById('zotero-tag-selector-container');
+			if (!container.hasAttribute('collapsed') || container.getAttribute('collapsed') == 'false') {
+				this.tagSelector = Zotero.TagSelector.init(
+					document.getElementById('zotero-tag-selector'),
+					{
+						container: 'zotero-tag-selector-container',
+						onSelection: this.updateTagFilter.bind(this),
+					}
+				);
+			}
+		}
+		catch (e) {
+			Zotero.logError(e);
+			Zotero.debug(e, 1);
 		}
 	};
 	
@@ -4485,24 +4503,10 @@ var ZoteroPane = new function()
 		if(!serializedValues) return;
 		serializedValues = JSON.parse(serializedValues);
 		
-		// Somehow all the columns can end up non-hidden, so fix that if it happens
-		var maxColumns = 30; // 31 as of 4/2020
-		var numColumns = Object.keys(serializedValues)
-			.filter(id => id.startsWith('zotero-items-column-') && serializedValues[id].hidden != "true")
-			.length;
-		var fixColumns = numColumns > maxColumns;
-		if (fixColumns) {
-			Zotero.logError("Repairing corrupted pane.persist");
-		}
-		
-		for(var id in serializedValues) {
+		for (var id in serializedValues) {
 			var el = document.getElementById(id);
-			if(!el) return;
-			
-			// In one case where this happened, all zotero-items-column- elements were present
-			// with just "ordinal" (and no "hidden"), and "zotero-items-tree" was set to
-			// {"current-view-group":"default"}. Clearing only the columns didn't work for some reason.
-			if (fixColumns && (id.startsWith('zotero-items-column-') || id == 'zotero-items-tree')) {
+			if (!el) {
+				Zotero.debug(`Trying to restore persist data for #${id} but elem not found`, 5);
 				continue;
 			}
 			
@@ -4520,7 +4524,7 @@ var ZoteroPane = new function()
 			}
 		}
 		
-		if(this.itemsView) {
+		if (this.itemsView) {
 			// may not yet be initialized
 			try {
 				this.itemsView.sort();

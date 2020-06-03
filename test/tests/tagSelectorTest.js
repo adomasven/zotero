@@ -66,7 +66,6 @@ describe("Tag Selector", function () {
 		await Zotero.Tags.setColor(libraryID, "C", '#CCCCCC', 3);
 		
 		var item = createUnsavedDataObject('item', { collections: [collection.id] });
-		var item = createUnsavedDataObject('item');
 		await item.setTags(["A", "B"]);
 		var promise = waitForTagSelector(win);
 		await item.saveTx();

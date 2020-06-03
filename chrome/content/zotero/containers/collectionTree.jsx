@@ -26,6 +26,7 @@
 const React = require('react');
 const ReactDom = require('react-dom');
 const { IntlProvider } = require('react-intl');
+const LibraryTree = require('containers/libraryTree');
 const VirtualizedTable = require('components/virtualized-table');
 const { TreeSelectionStub } = VirtualizedTable;
 const Icons = require('components/icons');
@@ -36,7 +37,7 @@ const { Cc, Ci, Cu } = require('chrome');
 const CHILD_INDENT = 20;
 const TYPING_TIMEOUT = 1000;
 
-var CollectionTree = class CollectionTree extends React.Component {
+var CollectionTree = class CollectionTree extends LibraryTree {
 	static async init(domEl, opts) {
 		Zotero.debug("Initializing React CollectionTree");
 		var ref;
@@ -58,11 +59,9 @@ var CollectionTree = class CollectionTree extends React.Component {
 		this.itemToSelect = null;
 		this.hideSources = [];
 
+		this.type = 'collection';
+		this.name = "CollectionTree";
 		this.id = "collection-tree";
-		this.domEl = props.domEl;
-		this._ownerDocument = props.domEl.ownerDocument;
-		this._rows = [];
-		this._rowMap = {};
 		this._highlightedRows = new Set();
 		this._unregisterID = Zotero.Notifier.registerObserver(
 			this,
@@ -94,8 +93,6 @@ var CollectionTree = class CollectionTree extends React.Component {
 		this._typingTimeout = null;
 		
 		this.onLoad = this._createEventBinding('load', true, true);
-		this.onSelect = this._createEventBinding('select');
-		this.onRefresh = this._createEventBinding('refresh');
 	}
 	
 	async makeVisible() {
@@ -115,17 +112,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 		await this.runListeners('load');
 		Zotero.debug("React CollectionTree loaded");
 	}
-	
-	componentDidCatch(error, info) {
-		// Async operations might attempt to update the react components
-		// after window close in tests, which will cause unnecessary crashing.
-		if (this._uninitialized) return;
-		Zotero.debug("CollectionTree: React threw an error");
-		Zotero.logError(error);
-		Zotero.debug(info);
-		Zotero.crash();
-	}
-	
+
 	componentDidMount() {
 		this.selection.select(0);
 		this.makeVisible();
@@ -172,8 +159,8 @@ var CollectionTree = class CollectionTree extends React.Component {
 		return true;
 	}
 	
-	_handleSelectionChange = (selection) => {
-		selection = selection || this.selection;
+	_handleSelectionChange = (shouldDebounce) => {
+		let selection = this.selection;
 		let treeRow = this.getRow(selection.focused);
 		// If selection changed (by click on a different row) and we are editing
 		// commit the edit
@@ -184,13 +171,12 @@ var CollectionTree = class CollectionTree extends React.Component {
 		}
 		// Update aria-activedescendant on the tree
 		this.forceUpdate();
-		this._onSelectionChange();
-	}
-	
-	handleTwistyMouseUp = (event, index) => {
-		this.toggleOpenState(index);
-		event.stopPropagation();
-		this.tree.focus();
+		if (shouldDebounce) {
+			this._onSelectionChangeDebounced();
+		}
+		else {
+			this._onSelectionChange();
+		}
 	}
 	
 	handleActivate = (event, indices) => {
@@ -401,41 +387,12 @@ var CollectionTree = class CollectionTree extends React.Component {
 		);
 	}
 
-	_updateHeight = () => {
-		this.forceUpdate(() => {
-			if (this.tree) {
-				this.tree.rerender();
-			}
-		});
-	}
-
-	updateHeight = Zotero.Utilities.debounce(this._updateHeight, 200);
-	
 ////////////////////////////////////////////////////////////////////////////////
 ///
 ///  Component control methods
 ///
 ////////////////////////////////////////////////////////////////////////////////
 
-	get window() {
-		return this._ownerDocument.defaultView;
-	}
-
-	get selection() {
-		return this.tree ? this.tree.selection : TreeSelectionStub;
-	}
-
-	set selection(val) {
-		return this.tree.selection = val;
-	}
-	
-	get selectedTreeRow() {
-		if (!this.selection || !this.selection.count) {
-			return false;
-		}
-		return this.getRow(this.selection.focused);
-	}
-	
 	/**
 	 *  Rebuild the tree from the data access methods and clear the selection
 	 *
@@ -577,24 +534,28 @@ var CollectionTree = class CollectionTree extends React.Component {
 	 */
 	async selectWait(index) {
 		if (this.tree && this.selection.isSelected(index)) {
+			Zotero.debug(`CollectionTree.selectWait(): row ${index} already selected`);
 			return;
 		}
 		var promise = this.waitForSelect();
 		this.selection.select(index);
 		
-		if (this.selection.selectEventsSuppressed) return;
+		if (this.selection.selectEventsSuppressed) {
+			Zotero.debug(`CollectionTree.selectWait(): selectEventsSuppressed. Not waiting to select row ${index}`);
+			return;
+		}
 		return promise;
 	}
 	
 	async selectLibrary(libraryID=0) {
 		var row = this.getRowIndexByID('L' + libraryID);
-		if (row !== undefined) {
-			this.ensureRowIsVisible(row);
-			await this.selectWait(row);
-			return true;
+		if (row === undefined) {
+			Zotero.debug(`CollectionTree.selectLibrary(): library with ID ${libraryID} not found in collection tree`);
+			return false;
 		}
-		
-		return false;
+		this.ensureRowIsVisible(row);
+		await this.selectWait(row);
+		return true;
 	}
 	
 	async selectTrash(libraryID) {
@@ -671,19 +632,9 @@ var CollectionTree = class CollectionTree extends React.Component {
 		await this.itemTreeView.waitForLoad();
 		return this.itemTreeView.selectItems(itemIDs);
 	}
-	
-	// The caller has to ensure the tree is redrawn
-	ensureRowIsVisible(index) {
-		this.tree && this.tree.scrollToRow(index);
-	}
-	
+
 	waitForLoad() {
 		return this._waitForEvent('load');
-	}
-	
-	
-	waitForSelect() {
-		return this._waitForEvent('select');
 	}
 	
 	/*
@@ -1090,10 +1041,6 @@ var CollectionTree = class CollectionTree extends React.Component {
 		}
 	}
 	
-	updateFontSize() {
-		this.tree.updateFontSize();
-	}
-	
 	unregister() {
 		this._uninitialized = true;
 		Zotero.Notifier.unregisterObserver(this._unregisterID);
@@ -1105,34 +1052,18 @@ var CollectionTree = class CollectionTree extends React.Component {
 ///
 ////////////////////////////////////////////////////////////////////////////////
 
+	get selectedTreeRow() {
+		if (!this.selection || !this.selection.count) {
+			return false;
+		}
+		return this.getRow(this.selection.focused);
+	}
+
 	/**
 	 * Returns TRUE if the underlying view is editable
 	 */
 	get editable() {
 		return this.getRow(this.selection.focused).editable;
-	}
-	
-	/**
-	 * Return a reference to the tree row at a given row
-	 *
-	 * @return {Zotero.CollectionTreeRow}
-	 */
-	getRow(index) {
-		return this._rows[index];
-	}
-	
-	/**
-	 * Return the index of the row with a given ID (e.g., "C123" for collection 123)
-	 *
-	 * @param {String} - Row id
-	 * @return {Integer|false}
-	 */
-	getRowIndexByID(id) {
-		if (!(id in this._rowMap)) {
-			Zotero.debug(`CollectionTree: Trying to access a row with invalid ID ${id}`)
-			return false;
-		}
-		return this._rowMap[id];
 	}
 	
 	/**
@@ -2012,32 +1943,6 @@ var CollectionTree = class CollectionTree extends React.Component {
 			Zotero.RecognizePDF.autoRecognizeItems(addedItems);
 		}
 	}
-	
-	setDropEffect(event, effect) {
-		// On Windows (in Fx26), Firefox uses 'move' for unmodified drags
-		// and 'copy'/'link' for drags with system-default modifier keys
-		// as long as the actions are allowed by the initial effectAllowed set
-		// in onDragStart, regardless of the effectAllowed or dropEffect set
-		// in onDragOver. It doesn't seem to be possible to use 'copy' for
-		// the default and 'move' for modified, as we need to in the collections
-		// tree. To prevent inaccurate cursor feedback, we set effectAllowed to
-		// 'copy' in onDragStart, which locks the cursor at 'copy'. ('none' still
-		// changes the cursor, but 'move'/'link' do not.) It'd be better to use
-		// the unadorned 'move', but we use 'copy' instead because with 'move' text
-		// can't be dragged to some external programs (e.g., Chrome, Notepad++),
-		// which seems worse than always showing 'copy' feedback.
-		//
-		// However, since effectAllowed is enforced, leaving it at 'copy'
-		// would prevent our modified 'move' in the collections tree from working,
-		// so we also have to set effectAllowed here (called from onDragOver) to
-		// the same action as the dropEffect. This allows the dropEffect setting
-		// (which we use in the tree's canDrop() and drop() to determine the desired
-		// action) to be changed, even if the cursor doesn't reflect the new setting.
-		if (Zotero.isWin || Zotero.isLinux) {
-			event.dataTransfer.effectAllowed = effect;
-		}
-		event.dataTransfer.dropEffect = effect;
-	}
 
 ////////////////////////////////////////////////////////////////////////////////
 ///
@@ -2045,52 +1950,6 @@ var CollectionTree = class CollectionTree extends React.Component {
 ///
 ////////////////////////////////////////////////////////////////////////////////
 
-	// We notify about selection changes with a debounce to not
-	// issue a bunch of db calls/etc in the handlers and kill performance
-	_onSelectionChange = Zotero.Utilities.debounce(() => {
-		if (!this._uninitialized) {
-			this.props.onSelectionChange && this.props.onSelectionChange(this.selection);
-		}
-	}, 100)
-	
-	/**
-	* Remove a row from the main array and parent row children arrays,
-	* delete the row from the map, and optionally update all rows above it in the map
-	*/
-	_removeRow(index, skipMapUpdate) {
-		var id = this.getRow(index).id;
-		let level = this.getLevel(index);
-
-		let moveSelect = this.selection.focused - 1;
-		if (index <= this.selection.focused) {
-			while (moveSelect >= this._rows.length || !this.isSelectable(moveSelect)) {
-				moveSelect--;
-			}
-			this.selection.select(moveSelect);
-		}
-		
-		this._rows.splice(index, 1);
-		if (index != 0
-				&& this.getLevel(index - 1) < level
-				&& (!this._rows[index] || this.getLevel(index) != level)) {
-			this._rows[index - 1].isOpen = false;
-		}
-		
-		delete this._rowMap[id];
-		if (!skipMapUpdate) {
-			for (let i in this._rowMap) {
-				if (this._rowMap[i] > index) {
-					this._rowMap[i]--;
-				}
-			}
-		}
-	}
-	
-	
-	getLevel(index) {
-		return this._rows[index].level;
-	}
-	
 	isContainer = (index) => {
 		return this.getRow(index).isContainer();
 	}
@@ -2129,18 +1988,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 		let treeRow = this.getRow(index);
 		return !(treeRow.isSeparator() || treeRow.isHeader());
 	}
-	
-	getParentIndex = (index) => {
-		var thisLevel = this.getLevel(index);
-		if (thisLevel == 0) return -1;
-		for (var i = index - 1; i >= 0; i--) {
-			if (this.getLevel(i) < thisLevel) {
-				return i;
-			}
-		}
-		return -1;
-	}
-	
+
 	_closeContainer(row, skipMap) {
 		if (!this.isContainerOpen(row)) return;
 		
@@ -2231,55 +2079,6 @@ var CollectionTree = class CollectionTree extends React.Component {
 	/**
 	 * Persist the current open/closed state of rows to a pref
 	 */
-	_saveOpenStates = async function() {
-		var state = this._containerState;
-		
-		// Every so often, remove obsolete rows
-		if (Math.random() < 1/20) {
-			Zotero.debug("Purging sourceList.persist");
-			for (var id in state) {
-				var m = id.match(/^C([0-9]+)$/);
-				if (m) {
-					if (!(await Zotero.Collections.getAsync(parseInt(m[1])))) {
-						delete state[id];
-					}
-					continue;
-				}
-				
-				var m = id.match(/^G([0-9]+)$/);
-				if (m) {
-					if (!Zotero.Groups.get(parseInt(m[1]))) {
-						delete state[id];
-					}
-					continue;
-				}
-			}
-		}
-		
-		for (var i = 0, len = this._rows.length; i < len; i++) {
-			var treeRow = this.getRow(i);
-			if (!treeRow.isContainer()) {
-				continue;
-			}
-			
-			var open = this.isContainerOpen(i);
-			
-			// Collections and feeds default to closed
-			if ((!open && treeRow.isCollection()) || treeRow.isFeed()) {
-				delete state[treeRow.id];
-				continue;
-			}
-			
-			state[treeRow.id] = open;
-		}
-		
-		this._containerState = state;
-		Zotero.Prefs.set("sourceList.persist", JSON.stringify(state));
-	};
-
-	/**
-	 * Persist the current open/closed state of rows to a pref
-	 */
 	_saveOpenStates = Zotero.Utilities.debounce(async function() {
 		var state = this._containerState;
 		
@@ -2328,17 +2127,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 	_storeOpenStates = Zotero.Utilities.debounce(function(state) {
 		Zotero.Prefs.set("sourceList.persist", JSON.stringify(state));
 	})
-	
-	/**
-	 * Creates mapping of item group ids to tree rows
-	 */
-	_refreshRowMap() {
-		this._rowMap = {};
-		for (let i = 0; i < this._rows.length; i++) {
-			this._rowMap[this.getRow(i).id] = i;
-		}
-	}
-	
+
 	async _expandRow(rows, row, forceOpen) {
 		var treeRow = rows[row];
 		var level = rows[row].level;
@@ -2483,30 +2272,7 @@ var CollectionTree = class CollectionTree extends React.Component {
 		
 		return newRows;
 	}
-	
-		
-	/**
-	 * Add a tree row to the main array, update the row count, tell the treebox that the row
-	 * count changed, and update the row map
-	 *
-	 * @param {Zotero.CollectionTreeRow} treeRow
-	 * @param {Number} [beforeRow] - Row index to insert new row before
-	 */
-	_addRow(treeRow, beforeRow, skipRowMapRefresh) {
-		this._rows.splice(beforeRow, 0, treeRow);
-		if (!skipRowMapRefresh) {
-			// Increment all rows in map at or above insertion point
-			for (let i in this._rowMap) {
-				if (this._rowMap[i] >= beforeRow) {
-					this._rowMap[i]++
-				}
-			}
-			// Add new row to map
-			this._rowMap[treeRow.id] = beforeRow;
-		}
-	}
-	
-	
+
 	/**
 	 * Add a row in the appropriate place
 	 *
@@ -2644,7 +2410,5 @@ var CollectionTree = class CollectionTree extends React.Component {
 		return beforeRow;
 	}
 }
-
-Zotero.Utilities.Internal.makeClassEventDispatcher(CollectionTree);
 
 module.exports = CollectionTree;

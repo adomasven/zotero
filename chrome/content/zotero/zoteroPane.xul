@@ -340,7 +340,7 @@
 					</splitter>
 
 					<!-- itemPane.xul -->
-					<vbox id="zotero-item-pane"/>
+					<vbox id="zotero-item-pane" zotero-persist="width height"/>
 				</box>
 			</hbox>
 		</vbox>

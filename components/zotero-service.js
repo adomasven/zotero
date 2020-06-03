@@ -61,7 +61,6 @@ const xpcomFilesAll = [
 
 /** XPCOM files to be loaded only for local translation and DB access **/
 const xpcomFilesLocal = [
-	'libraryTreeView',
 	'collectionTreeRow',
 	'fileDragDataProvider',
 	'annotate',
@@ -99,7 +98,6 @@ const xpcomFilesLocal = [
 	'fulltext',
 	'id',
 	'integration',
-	'itemTreeView',
 	'locale',
 	'locateManager',
 	'mime',

@@ -56,7 +56,7 @@ class TreeSelection {
 		return this.selected.has(index);
 	}
 
-	toggleSelect(index) {
+	toggleSelect(index, shouldDebounce) {
 		index = Math.max(0, index);
 		if (this.selected.has(index)) {
 			this.selected.delete(index);
@@ -72,7 +72,7 @@ class TreeSelection {
 		}
 		this.pivot = index;
 		this._focused = index;
-		this._updateTree();
+		this._updateTree(shouldDebounce);
 	}
 
 	clearSelection() {
@@ -87,7 +87,7 @@ class TreeSelection {
 	 * @param index
 	 * @returns {boolean} False if nothing to select and select handlers won't be called
 	 */
-	select(index) {
+	select(index, shouldDebounce) {
 		index = Math.max(0, index);
 		if (this.selected.size == 1 && this._focused == index && this.pivot == index) {
 			return false;
@@ -102,7 +102,7 @@ class TreeSelection {
 		if (this.selectEventsSuppressed) return true;
 
 		this._tree.scrollToRow(index);
-		this._updateTree();
+		this._updateTree(shouldDebounce);
 		if (this._tree.invalidate) {
 			toInvalidate.forEach(this._tree.invalidateRow.bind(this._tree));
 		}
@@ -113,7 +113,7 @@ class TreeSelection {
 		from = Math.max(0, from);
 		to = Math.max(0, to);
 		if (!augment) {
-			this.clearSelection();
+			this.selected = new Set();
 		}
 		for (let i = from; i <= to; i++) {
 			this.selected.add(i);
@@ -136,24 +136,34 @@ class TreeSelection {
 		this._updateTree();
 	}
 
-	shiftSelect(index) {
+	shiftSelect(index, shouldDebounce) {
 		index = Math.max(0, index);
 		let from = Math.min(index, this.pivot);
 		let to = Math.max(index, this.pivot);
 		this._focused = index;
+		let oldSelected = this.selected;
 		this._rangedSelect(from, to);
 
 		if (this.selectEventsSuppressed) return;
 
 		if (this._tree.invalidate) {
-			this._tree.invalidateRange(from, to);
+			for (let index of this.selected) {
+				if (oldSelected.has(index)) {
+					oldSelected.delete(index);
+					continue;
+				}
+				this._tree.invalidateRow(index);
+			}
+			for (let index of oldSelected) {
+				this._tree.invalidateRow(index);
+			}
 		}
-		this._updateTree();
+		this._updateTree(shouldDebounce);
 	}
 
-	_updateTree() {
+	_updateTree(shouldDebounce) {
 		if (!this.selectEventsSuppressed && this._tree.props.onSelectionChange) {
-			this._tree.props.onSelectionChange(this);
+			this._tree.props.onSelectionChange(this, shouldDebounce);
 		}
 	}
 
@@ -465,7 +475,7 @@ class VirtualizedTable extends React.Component {
 				prevSelect--;
 			}
 			prevSelect = Math.max(0, prevSelect);
-			this.onSelection(prevSelect, shiftSelect, false, movePivot);
+			this.onSelection(prevSelect, shiftSelect, false, movePivot, e.repeat);
 			break;
 
 		case "ArrowDown":
@@ -474,7 +484,7 @@ class VirtualizedTable extends React.Component {
 				nextSelect++;
 			}
 			nextSelect = Math.min(nextSelect, rowCount - 1);
-			this.onSelection(nextSelect, shiftSelect, false, movePivot);
+			this.onSelection(nextSelect, shiftSelect, false, movePivot, e.repeat);
 			break;
 
 		case "Home":
@@ -486,11 +496,11 @@ class VirtualizedTable extends React.Component {
 			break;
 			
 		case "PageUp":
-			this._onJumpSelect(-1, shiftSelect);
+			this._onJumpSelect(-1, shiftSelect, e.repeat);
 			break;
 			
 		case "PageDown":
-			this._onJumpSelect(1, shiftSelect);
+			this._onJumpSelect(1, shiftSelect, e.repeat);
 			break;
 
 		case "a":
@@ -606,7 +616,7 @@ class VirtualizedTable extends React.Component {
 	 * @param {Boolean} movePivot
 	 * 		  Will move pivot without adding anything to the selection
 	 */
-	_onSelection = (index, shiftSelect, toggleSelection, movePivot) => {
+	_onSelection = (index, shiftSelect, toggleSelection, movePivot, shouldDebounce) => {
 		if (this.selection.selectEventsSuppressed) return;
 		
 		if (movePivot) {
@@ -618,11 +628,11 @@ class VirtualizedTable extends React.Component {
 			if (index > 0 && !this.props.isSelectable(index)) {
 				return;
 			}
-			this.selection.select(index);
+			this.selection.select(index, shouldDebounce);
 		}
 		// Range selection
 		else if (shiftSelect && this.props.multiSelect) {
-			this.selection.shiftSelect(index);
+			this.selection.shiftSelect(index, shouldDebounce);
 		}
 		// If index is not selectable and this is not normal selection we return
 		else if (!this.props.isSelectable(index)) {
@@ -630,7 +640,7 @@ class VirtualizedTable extends React.Component {
 		}
 		// Additive selection
 		else if (this.props.multiSelect) {
-			this.selection.toggleSelect(index);
+			this.selection.toggleSelect(index, shouldDebounce);
 		}
 		// None of the previous conditions were satisfied, so nothing changes
 		else {

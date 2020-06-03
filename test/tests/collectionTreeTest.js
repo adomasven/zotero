@@ -81,22 +81,22 @@ describe("Zotero.CollectionTree", function() {
 	describe("collapse/expand", function () {
 		it("should close and open My Library repeatedly", function* () {
 			yield cv.selectLibrary(userLibraryID);
-			var row = cv.selection.pivot;
+			var row = cv.selection.focused;
 			
 			cv.collapseLibrary(userLibraryID);
-			assert.equal(cv.selection.pivot, row);
+			assert.equal(cv.selection.focused, row);
 			assert.isFalse(cv.isContainerOpen(row));
 			
 			yield cv.expandLibrary(userLibraryID);
-			assert.equal(cv.selection.pivot, row);
+			assert.equal(cv.selection.focused, row);
 			assert.ok(cv.isContainerOpen(row));
 			
 			cv.collapseLibrary(userLibraryID);
-			assert.equal(cv.selection.pivot, row);
+			assert.equal(cv.selection.focused, row);
 			assert.isFalse(cv.isContainerOpen(row));
 			
 			yield cv.expandLibrary(userLibraryID);
-			assert.equal(cv.selection.pivot, row);
+			assert.equal(cv.selection.focused, row);
 			assert.ok(cv.isContainerOpen(row));
 		})
 	})
@@ -106,7 +106,7 @@ describe("Zotero.CollectionTree", function() {
 		
 		before(function* () {
 			yield cv.selectLibrary(userLibraryID);
-			libraryRow = cv.selection.pivot;
+			libraryRow = cv.selection.focused;
 		});
 		
 		beforeEach(function* () {
@@ -196,7 +196,7 @@ describe("Zotero.CollectionTree", function() {
 	describe("#selectByID()", function () {
 		it("should select the trash", function* () {
 			yield cv.selectByID("T1");
-			var row = cv.selection.pivot;
+			var row = cv.selection.focused;
 			var treeRow = cv.getRow(row);
 			assert.ok(treeRow.isTrash());
 			assert.equal(treeRow.ref.libraryID, userLibraryID);
@@ -375,7 +375,7 @@ describe("Zotero.CollectionTree", function() {
 			assert.isAbove(aRow, 0);
 			assert.isAbove(bRow, 0);
 			// skipSelect is implied for multiple collections, so library should still be selected
-			assert.equal(cv.selection.pivot, 0);
+			assert.equal(cv.selection.focused, 0);
 		});
 		
 		
@@ -493,9 +493,10 @@ describe("Zotero.CollectionTree", function() {
 		it("should switch to library root if item isn't in collection", async function () {
 			var item = await createDataObject('item');
 			var collection = await createDataObject('collection');
+			Zotero.debug(zp.itemsView._rows);
 			await cv.selectItem(item.id);
 			await waitForItemsLoad(win);
-			assert.equal(cv.selection.pivot, 0);
+			assert.equal(cv.selection.focused, 0);
 			assert.sameMembers(zp.itemsView.getSelectedItems(), [item]);
 		});
 	});
@@ -507,7 +508,7 @@ describe("Zotero.CollectionTree", function() {
 			var item2 = await createDataObject('item');
 			await cv.selectItems([item1.id, item2.id]);
 			await waitForItemsLoad(win);
-			assert.equal(cv.selection.pivot, 0);
+			assert.equal(cv.selection.focused, 0);
 			assert.sameMembers(zp.itemsView.getSelectedItems(true), [item1.id, item2.id]);
 		});
 	});

@@ -33,9 +33,10 @@ Zotero.Utilities.Internal = {
 	SNAPSHOT_SAVE_TIMEOUT: 30000,
 	
 	makeClassEventDispatcher: function (cls) {
-		cls.prototype._events = {};
+		cls.prototype._events = null;
 		cls.prototype.runListeners = async function (event) {
 			// Zotero.debug(`Running ${event} listeners on ${cls.toString()}`);
+			if (!this._events) this._events = {};
 			if (!this._events[event]) {
 				this._events[event] = {
 					listeners: new Map(),
@@ -62,6 +63,7 @@ Zotero.Utilities.Internal = {
 		 * @private
 		 */
 		cls.prototype._createEventBinding = function (event, alwaysOnce, immediateAfterTrigger) {
+			if (!this._events) this._events = {};
 			this._events[event] = {
 				listeners: new Map(),
 				immediateAfterTrigger
@@ -74,6 +76,7 @@ Zotero.Utilities.Internal = {
 		};
 	
 		cls.prototype._addListener = function (event, listener, once, immediateAfterTrigger) {
+			if (!this._events) this._events = {};
 			let ev = this._events[event];
 			if (!ev) {
 				this._events[event] = {
