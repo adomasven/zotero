@@ -721,6 +721,9 @@ class VirtualizedTable extends React.Component {
 				return;
 			}
 		}
+		if (Zotero.rtl) {
+			return [bColumn, aColumn];
+		}
 		return [aColumn, bColumn];
 	}
 

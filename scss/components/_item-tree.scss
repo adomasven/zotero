@@ -24,14 +24,14 @@
   .cell.primary {
     .retracted {
       width: 12px;
-      margin-left: 3px;
+      margin-inline-start: 3px;
     }
     
     .tag-swatch {
       display: inline-block;
       min-width: 8px;
       min-height: 8px;
-      margin-left: 3px;
+      margin-inline-start: 3px;
       border-radius: 1px;
     }
   }

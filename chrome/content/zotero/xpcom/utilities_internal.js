@@ -1910,6 +1910,9 @@ Zotero.Utilities.Internal = {
 		}
 		// Custom attribute -- allows for additional customizations in zotero.css
 		rootElement.setAttribute('zoteroFontSize', size);
+		if (Zotero.rtl) {
+			rootElement.setAttribute('dir', 'rtl');
+		}
 	},
 
 	getAncestorByTagName: function (elem, tagName){

@@ -51,7 +51,7 @@ Zotero.Intl = new function () {
 				Zotero.Utilities.Internal.quitZotero(true);
 				return;
 			}
-        }
+		}
 		
 		Components.utils.import("resource://gre/modules/PluralForm.jsm");
 

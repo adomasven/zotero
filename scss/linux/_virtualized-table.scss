@@ -2,8 +2,8 @@
   border: 1px solid #ccc;
 }
 .virtualized-table, .drag-image-container {
-  .arrow, .twisty {
-    padding-right: 3px;
+  .twisty {
+    padding-inline-end: 3px;
     svg {
       width: 5px;
     }

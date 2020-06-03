@@ -85,7 +85,7 @@ function makeItemRenderer(itemTree) {
 
 		// Set depth indent
 		const depth = itemTree.getLevel(index);
-		span.style.paddingLeft = (CHILD_INDENT * depth) + 'px';
+		span.style.paddingInlineStart = (CHILD_INDENT * depth) + 'px';
 		
 		return span;
 	}

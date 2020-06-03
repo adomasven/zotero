@@ -1,5 +1,5 @@
 .virtualized-table, .drag-image-container {
-  .arrow, .twisty {
+  .twisty {
     width: 19px;
     
     svg {
@@ -8,17 +8,17 @@
     }
   }
 
-  .focused:not(.highlighted) .arrow svg, .focused:not(.highlighted) .twisty svg {
+  .focused:not(.highlighted) .twisty svg {
     fill: #fff;
   }
 
-  .spacer-arrow, .spacer-twisty {
+  .spacer-twisty {
     min-width: 19px;
   }
 }
 
 .virtualized-table-body, .drag-image-container{
   .cell:not(:first-child) {
-    border-left: 1px solid #ddd;
+    border-inline-start: 1px solid #ddd;
   }
 }

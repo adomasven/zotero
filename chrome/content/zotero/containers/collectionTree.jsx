@@ -285,7 +285,7 @@ var CollectionTree = class CollectionTree extends LibraryTree {
 			&& treeRow.ref.libraryID != Zotero.Libraries.userLibraryID) {
 			depth--;
 		}
-		div.style.paddingLeft = (CHILD_INDENT * depth) + 'px';
+		div.style.paddingInlineStart = (CHILD_INDENT * depth) + 'px';
 		
 		// Create a single-cell for the row (for the single-column layout)
 		let cell = document.createElementNS("http://www.w3.org/1999/xhtml", 'span');
