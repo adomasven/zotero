@@ -275,7 +275,9 @@ Zotero.Server.RequestHandler.prototype._generateResponse = function (status, con
 	response += "X-Zotero-Version: "+Zotero.version+"\r\n";
 	response += "X-Zotero-Connector-API-Version: "+CONNECTOR_API_VERSION+"\r\n";
 		
-	if (this.origin === ZOTERO_CONFIG.BOOKMARKLET_ORIGIN) {
+	if (this.origin === ZOTERO_CONFIG.BOOKMARKLET_ORIGIN
+			|| this.origin === ZOTERO_CONFIG.WORD_JS_ORIGIN
+			|| this.origin?.startsWith("https://127.0.0.1:3000")) {
 		response += "Access-Control-Allow-Origin: " + this.origin + "\r\n";
 		response += "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n";
 		response += "Access-Control-Allow-Headers: Content-Type,X-Zotero-Connector-API-Version,X-Zotero-Version\r\n";
@@ -417,6 +419,8 @@ Zotero.Server.RequestHandler.prototype._processEndpoint = async function (method
 				// Allow endpoints to explicitly opt into allowing browser requests
 				// if they really want to
 				&& !endpoint.allowRequestsFromUnsafeWebContent
+				// Allow requests from the Word JS integration client
+				&& this.origin !== ZOTERO_CONFIG.WORD_JS_ORIGIN
 				&& !this.headers['x-zotero-connector-api-version']
 				&& !this.headers['zotero-allowed-request']
 				// Allow browser requests to test endpoints

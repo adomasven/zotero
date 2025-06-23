@@ -67,6 +67,8 @@ Zotero.HTTPIntegrationClient.Application = function () {
 Zotero.HTTPIntegrationClient.Application.prototype = {
 	getActiveDocument: async function () {
 		let result = await Zotero.HTTPIntegrationClient.sendCommand('Application.getActiveDocument');
+		this.primaryFieldType = result.primaryFieldType || this.primaryFieldType;
+		this.secondaryFieldType = result.secondaryFieldType || this.secondaryFieldType;
 		this.outputFormat = result.outputFormat || this.outputFormat;
 		this.supportedNotes = result.supportedNotes || this.supportedNotes;
 		this.supportsImportExport = result.supportsImportExport || this.supportsImportExport;

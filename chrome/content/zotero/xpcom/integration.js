@@ -932,7 +932,7 @@ Zotero.Integration.Interface.prototype.refresh = async function () {
 Zotero.Integration.Interface.prototype.removeCodes = async function () {
 	await this._session.init(true, false)
 	let fields = await this._session.getFields()
-	var result = await this._doc.displayAlert(Zotero.getString("integration.removeCodesWarning"),
+	var result = await this._session.displayAlert(Zotero.getString("integration.removeCodesWarning"),
 				DIALOG_ICON_WARNING, DIALOG_BUTTONS_OK_CANCEL);
 	if (result) {
 		for(var i=fields.length-1; i>=0; i--) {
