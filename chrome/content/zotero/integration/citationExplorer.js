@@ -366,7 +366,7 @@ window.ZoteroCitationExplorer = {
 		document.querySelector('#button-show-in-zotero').addEventListener('click', this.onItemActivate.bind(this));
 		document.querySelector('#button-relink-item').addEventListener('click', this.onItemRelink.bind(this));
 		
-		let lastTranslationTarget = Zotero.Prefs.get('documentCitations.lastAddToTarget');
+		let lastTranslationTarget = Zotero.Prefs.get('citationExplorer.lastAddToTarget');
 		if (lastTranslationTarget) {
 			let id = parseInt(lastTranslationTarget.substr(1));
 			if (lastTranslationTarget[0] == "L") {
@@ -798,7 +798,7 @@ window.ZoteroCitationExplorer = {
 			menu.removeChild(menu.firstChild);
 		}
 		
-		let target = Zotero.Prefs.get('documentCitations.lastAddToTarget');
+		let target = Zotero.Prefs.get('citationExplorer.lastAddToTarget');
 		if (!target) {
 			target = "L" + Zotero.Libraries.userLibraryID;
 		}
@@ -842,7 +842,7 @@ window.ZoteroCitationExplorer = {
 	
 	setAddToTarget(translationTarget) {
 		_addToTarget = translationTarget;
-		Zotero.Prefs.set('documentCitations.lastAddToTarget', translationTarget.treeViewID);
+		Zotero.Prefs.set('citationExplorer.lastAddToTarget', translationTarget.treeViewID);
 		this.setAddToButton();
 	},
 	
