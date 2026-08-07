@@ -718,6 +718,10 @@ window.ZoteroCitationExplorer = {
 	},
 
 	onItemRelink: async function () {
+		let treeRow = itemList.getRow(itemList.selection.focused);
+		if (!(treeRow instanceof CitationExplorerItemTreeRow) || treeRow.isLinked) return;
+		let oldItemID = treeRow.id;
+
 		let io = { dataIn: null, dataOut: null, multiSelect: false, deferred: Zotero.Promise.defer() };
 		window.openDialog('chrome://zotero/content/selectItemsDialog.xhtml', '',
 			'chrome,dialog=no,centerscreen,resizable=yes', io);
@@ -731,9 +735,6 @@ window.ZoteroCitationExplorer = {
 		if (!items.length) {
 			return;
 		}
-		let treeRow = itemList.getRow(itemList.selection.focused);
-		if (treeRow instanceof LibraryItemTreeRow) return;
-		const oldItemID = treeRow.id;
 		const itemIdx = itemRows.findIndex(row => row.id === oldItemID);
 		this._linkItem(items[0], oldItemID, itemIdx);
 
