@@ -1,0 +1,2 @@
+cdn.jsdelivr.net:HSTS	0	20035	1762591883275,1,1
+www.zotero.org:HSTS	27	20067	1765352498998,1,1

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+oxt="$repo_root/app/modules/zotero-libreoffice-integration/install/Zotero_LibreOffice_Integration.oxt"
+
+test -r "$oxt"
+test -r "$HOME/.zotero/zotero/amp.default/prefs.js"
+test -r "$HOME/Zotero/zotero.sqlite"
+command -v node >/dev/null
+command -v libreoffice >/dev/null
+command -v Xvfb >/dev/null
+
+echo "Zotero orb environment is ready."

@@ -1,0 +1,5 @@
+{"timestamp":94699006,"category":"devtools.main","name":"activate_split_console","extra":{"session_id":"530","width":"1700","host":"other","glean_timestamp":"1784799114768"}}
+{"timestamp":94699142,"category":"devtools.main","name":"enter_inspector","extra":{"session_id":"-1","cold":"true","panel_name":"inspector","host":"browsertoolbox","width":"1700","start_state":"initial_panel","glean_timestamp":"1784799114904"}}
+{"timestamp":107215912,"category":"devtools.main","name":"tool_timer_ruleview","extra":{"time_open":"12517266","os":"Linux 7.0.0-28-generic","session_id":"530","glean_timestamp":"1784811631674"}}
+{"timestamp":107215952,"category":"devtools.main","name":"exit_inspector","extra":{"host":"other","next_panel":"none","session_id":"530","panel_name":"inspector","glean_timestamp":"1784811631714","reason":"toolbox_close","width":"1700"}}
+{"timestamp":107215952,"category":"devtools.main","name":"close_tools","extra":{"glean_timestamp":"1784811631714","host":"other","width":"1700","session_id":"530"}}

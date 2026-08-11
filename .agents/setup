@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+echo "Configuring Zotero's upstream remote..."
+if git -C "$repo_root" remote get-url zotero >/dev/null 2>&1; then
+	git -C "$repo_root" remote set-url zotero https://github.com/zotero/zotero.git
+else
+	git -C "$repo_root" remote add zotero https://github.com/zotero/zotero.git
+fi
+git -C "$repo_root" remote set-url --push zotero DISABLED
+
+echo "Installing Zotero build, GUI, and LibreOffice dependencies..."
+export DEBIAN_FRONTEND=noninteractive
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+	ca-certificates curl dbus-x11 file gawk git-lfs imagemagick \
+	libasound2 libdbus-glib-1-2 libgtk-3-0 libnss3 libx11-xcb1 libxt6 \
+	libreoffice-java-common libreoffice-writer default-jdk \
+	nodejs npm openbox perl python3 rsync wget x11-utils xauth \
+	xvfb xz-utils zip unzip zstd
+
+node_major="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"
+if (( node_major < 18 )); then
+	echo "Node.js 18 or newer is required (found $(node --version))" >&2
+	exit 1
+fi
+
+echo "Initializing shallow recursive submodules..."
+git lfs install --skip-repo
+git -C "$repo_root" submodule sync --recursive
+git -C "$repo_root" submodule update --init --recursive --depth 1 --jobs "$(nproc)"
+
+echo "Downloading Git LFS objects..."
+git -C "$repo_root" lfs pull
+git -C "$repo_root" submodule foreach --recursive \
+	'git lfs pull'
+
+echo "Installing Zotero Node dependencies..."
+npm ci --prefix "$repo_root"
+
+echo "Installing the prefilled Zotero profile and data..."
+profile_root="$HOME/.zotero/zotero"
+profile_dir="$profile_root/amp.default"
+data_dir="$HOME/Zotero"
+mkdir -p "$profile_dir" "$data_dir"
+rsync -a --delete "$repo_root/profile/" "$profile_dir/"
+rsync -a --delete "$repo_root/data/" "$data_dir/"
+python3 - "$profile_dir/prefs.js" "$data_dir" <<'PY'
+import pathlib
+import re
+import sys
+
+prefs_path = pathlib.Path(sys.argv[1])
+data_dir = sys.argv[2]
+prefs = prefs_path.read_text()
+prefs, count = re.subn(
+	r'^user_pref\("extensions\.zotero\.dataDir",.*$',
+	f'user_pref("extensions.zotero.dataDir", "{data_dir}");',
+	prefs,
+	flags=re.MULTILINE,
+)
+if count != 1:
+	raise SystemExit(f"Expected one Zotero dataDir preference, found {count}")
+prefs_path.write_text(prefs)
+PY
+cat > "$profile_root/profiles.ini" <<EOF
+[Profile0]
+Name=default
+IsRelative=1
+Path=amp.default
+Default=1
+
+[General]
+StartWithLastProfile=1
+Version=2
+EOF
+
+oxt="$repo_root/app/modules/zotero-libreoffice-integration/install/Zotero_LibreOffice_Integration.oxt"
+test -r "$oxt"
+
+echo "Initializing LibreOffice and installing Zotero integration..."
+if pgrep -u "$(id -u)" -x soffice.bin >/dev/null; then
+	echo "Close LibreOffice before running orb setup" >&2
+	exit 1
+fi
+rm -f "$HOME/.config/libreoffice/4/.lock"
+unopkg remove org.Zotero.integration.openoffice >/dev/null 2>&1 || true
+unopkg add --force "$oxt"
+unopkg list | grep -F 'org.Zotero.integration.openoffice' >/dev/null
+
+echo "Orb setup complete. Run ./build_and_run.sh, or ./build_and_run.sh --screenshot PATH."
