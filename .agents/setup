@@ -3,14 +3,6 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo "Configuring Zotero's upstream remote..."
-if git -C "$repo_root" remote get-url zotero >/dev/null 2>&1; then
-	git -C "$repo_root" remote set-url zotero https://github.com/zotero/zotero.git
-else
-	git -C "$repo_root" remote add zotero https://github.com/zotero/zotero.git
-fi
-git -C "$repo_root" remote set-url --push zotero DISABLED
-
 echo "Installing Zotero build, GUI, and LibreOffice dependencies..."
 export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update
@@ -90,4 +82,20 @@ unopkg remove org.Zotero.integration.openoffice >/dev/null 2>&1 || true
 unopkg add --force "$oxt"
 unopkg list | grep -F 'org.Zotero.integration.openoffice' >/dev/null
 
-echo "Orb setup complete. Run ./build_and_run.sh, or ./build_and_run.sh --screenshot PATH."
+echo "Configuring the upstream checkout..."
+exclude_file="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path info/exclude)"
+mkdir -p "$(dirname "$exclude_file")"
+if ! grep -Fqx '.agents' "$exclude_file" 2>/dev/null; then
+	printf '\n.agents\n' >> "$exclude_file"
+fi
+# Preserve the orb lifecycle files when leaving the private setup branch.
+git -C "$repo_root" rm -r --cached --ignore-unmatch .agents
+if git -C "$repo_root" remote get-url zotero >/dev/null 2>&1; then
+	git -C "$repo_root" remote set-url zotero https://github.com/zotero/zotero.git
+else
+	git -C "$repo_root" remote add zotero https://github.com/zotero/zotero.git
+fi
+git -C "$repo_root" remote set-url --push zotero DISABLED
+git -C "$repo_root" fetch zotero main
+echo "Orb setup complete. Switching to zotero/main..."
+git -C "$repo_root" checkout -B main --track zotero/main
