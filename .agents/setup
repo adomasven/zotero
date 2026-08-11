@@ -19,6 +19,34 @@ if (( node_major < 18 )); then
 	exit 1
 fi
 
+echo "Preserving the prefilled Zotero profile and data..."
+profile_root="$HOME/.zotero/zotero"
+profile_dir="$profile_root/amp.default"
+data_dir="$HOME/Zotero"
+mkdir -p "$profile_dir" "$data_dir"
+rsync -a --delete "$repo_root/profile/" "$profile_dir/"
+rsync -a --delete "$repo_root/data/" "$data_dir/"
+
+echo "Configuring the upstream checkout..."
+exclude_file="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path info/exclude)"
+mkdir -p "$(dirname "$exclude_file")"
+for path in .agents build_and_run.sh AGENTS.md; do
+	if ! grep -Fqx "$path" "$exclude_file" 2>/dev/null; then
+		printf '\n%s\n' "$path" >> "$exclude_file"
+	fi
+done
+# Preserve orb-specific files when leaving the private setup branch.
+git -C "$repo_root" rm -r --cached --ignore-unmatch .agents build_and_run.sh AGENTS.md
+if git -C "$repo_root" remote get-url zotero >/dev/null 2>&1; then
+	git -C "$repo_root" remote set-url zotero https://github.com/zotero/zotero.git
+else
+	git -C "$repo_root" remote add zotero https://github.com/zotero/zotero.git
+fi
+git -C "$repo_root" remote set-url --push zotero DISABLED
+git -C "$repo_root" fetch --no-recurse-submodules zotero main
+echo "Switching to zotero/main..."
+git -C "$repo_root" checkout -B main --track zotero/main
+
 echo "Initializing shallow recursive submodules..."
 git lfs install --skip-repo
 git -C "$repo_root" submodule sync --recursive
@@ -32,13 +60,7 @@ git -C "$repo_root" submodule foreach --recursive \
 echo "Installing Zotero Node dependencies..."
 npm ci --prefix "$repo_root"
 
-echo "Installing the prefilled Zotero profile and data..."
-profile_root="$HOME/.zotero/zotero"
-profile_dir="$profile_root/amp.default"
-data_dir="$HOME/Zotero"
-mkdir -p "$profile_dir" "$data_dir"
-rsync -a --delete "$repo_root/profile/" "$profile_dir/"
-rsync -a --delete "$repo_root/data/" "$data_dir/"
+echo "Configuring the prefilled Zotero profile and data..."
 python3 - "$profile_dir/prefs.js" "$data_dir" <<'PY'
 import pathlib
 import re
@@ -81,23 +103,4 @@ rm -f "$HOME/.config/libreoffice/4/.lock"
 unopkg remove org.Zotero.integration.openoffice >/dev/null 2>&1 || true
 unopkg add --force "$oxt"
 unopkg list | grep -F 'org.Zotero.integration.openoffice' >/dev/null
-
-echo "Configuring the upstream checkout..."
-exclude_file="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path info/exclude)"
-mkdir -p "$(dirname "$exclude_file")"
-for path in .agents build_and_run.sh AGENTS.md; do
-	if ! grep -Fqx "$path" "$exclude_file" 2>/dev/null; then
-		printf '\n%s\n' "$path" >> "$exclude_file"
-	fi
-done
-# Preserve orb-specific files when leaving the private setup branch.
-git -C "$repo_root" rm -r --cached --ignore-unmatch .agents build_and_run.sh AGENTS.md
-if git -C "$repo_root" remote get-url zotero >/dev/null 2>&1; then
-	git -C "$repo_root" remote set-url zotero https://github.com/zotero/zotero.git
-else
-	git -C "$repo_root" remote add zotero https://github.com/zotero/zotero.git
-fi
-git -C "$repo_root" remote set-url --push zotero DISABLED
-git -C "$repo_root" fetch zotero main
-echo "Orb setup complete. Switching to zotero/main..."
-git -C "$repo_root" checkout -B main --track zotero/main
+echo "Orb setup complete."
