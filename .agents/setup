@@ -30,13 +30,17 @@ rsync -a --delete "$repo_root/data/" "$data_dir/"
 echo "Configuring the upstream checkout..."
 exclude_file="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path info/exclude)"
 mkdir -p "$(dirname "$exclude_file")"
-for path in .agents build_and_run.sh AGENTS.md; do
+for path in .agents .amp build_and_run.sh AGENTS.md; do
 	if ! grep -Fqx "$path" "$exclude_file" 2>/dev/null; then
 		printf '\n%s\n' "$path" >> "$exclude_file"
 	fi
 done
 # Preserve orb-specific files when leaving the private setup branch.
-git -C "$repo_root" rm -r --cached --ignore-unmatch .agents build_and_run.sh AGENTS.md
+git -C "$repo_root" rm -r --cached --ignore-unmatch .agents .amp build_and_run.sh AGENTS.md
+if [[ "$(git -C "$repo_root" rev-parse --is-shallow-repository)" == "true" ]]; then
+	echo "Fetching full Git history..."
+	git -C "$repo_root" fetch --unshallow --no-recurse-submodules origin
+fi
 if git -C "$repo_root" remote get-url zotero >/dev/null 2>&1; then
 	git -C "$repo_root" remote set-url zotero https://github.com/zotero/zotero.git
 else
