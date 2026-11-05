@@ -1487,3 +1487,48 @@ async function startHTTPServer(port = null) {
 	return { httpd, port, baseURL };
 }
 
+/**
+ * Send a request to Zotero's MCP endpoint, like zotero-mcp-stdio does
+ */
+/**
+ * POST a JSON-RPC message to /mcp, with the protocol version in a request's _meta and the
+ * request metadata headers, as zotero-mcp-stdio sends them. A header given as null is left out.
+ */
+async function postMCP(body, headers = {}) {
+	if (body.id !== undefined) {
+		body = { ...body, params: { ...body.params } };
+		body.params._meta = { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', ...body.params._meta };
+	}
+	headers = {
+		'Content-Type': 'application/json',
+		'MCP-Protocol-Version': '2026-07-28',
+		'Mcp-Method': body.method,
+		'Mcp-Name': body.method == 'tools/call' ? body.params.name : null,
+		// Requests from here have a browser user agent, which the server otherwise drops
+		'Zotero-Allowed-Request': '1',
+		...headers
+	};
+	let xmlhttp = await Zotero.HTTP.request('POST', `http://127.0.0.1:${Zotero.Server.port}/mcp`, {
+		headers: Object.fromEntries(Object.entries(headers).filter(([, value]) => value !== null)),
+		body: JSON.stringify(body),
+		responseType: 'json',
+		successCodes: false
+	});
+	return { status: xmlhttp.status, body: xmlhttp.response };
+}
+
+async function callMCPTool(name, args, clientInfo = { name: 'test-client', version: '1.0' }) {
+	let _meta = {
+		'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+		'io.modelcontextprotocol/clientCapabilities': {},
+	};
+	if (clientInfo) {
+		_meta['io.modelcontextprotocol/clientInfo'] = clientInfo;
+	}
+	let { status, body } = await postMCP(
+		{ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: args, _meta } }
+	);
+	assert.equal(status, 200);
+	assert.equal(body.id, 7);
+	return body;
+}

@@ -227,6 +227,21 @@ if [ $BUILD_LINUX == 1 ]; then
 	fi
 fi
 
+# Get zotero-mcp-stdio, the stdio MCP server AI apps launch (see chrome/content/zotero/xpcom/mcp/mcp.js)
+MCP_STDIO_DIR="$("$CALLDIR/scripts/fetch_mcp_stdio")"
+
+# Copy zotero-mcp-stdio for a platform directory from fetch_mcp_stdio (mac, win-x64, linux-x64, …)
+# into an app directory
+function copy_mcp_stdio {
+	local binary
+	binary=$(ls "$MCP_STDIO_DIR/$1"/zotero-mcp-stdio* 2>/dev/null | head -n 1)
+	if [[ -z "$binary" ]]; then
+		echo "WARNING: No zotero-mcp-stdio for $1 -- not including it" >&2
+		return
+	fi
+	cp "$binary" "$2/"
+	chmod 755 "$2/$(basename "$binary")"
+}
 
 
 # Require source dir or ZIP file
@@ -721,6 +736,8 @@ if [ $BUILD_MAC == 1 ]; then
 	check_lfs_file "$CALLDIR/mac/zotero.xz"
 	xz -d --stdout "$CALLDIR/mac/zotero.xz" > "$CONTENTSDIR/MacOS/zotero"
 	chmod 755 "$CONTENTSDIR/MacOS/zotero"
+	
+	copy_mcp_stdio mac "$CONTENTSDIR/MacOS"
 
 	# Overlay custom Firefox components (e.g., XUL or libmozglue.dylib)
 	if [ -n "$custom_components_hash_mac" ]; then
@@ -851,6 +868,9 @@ if [ $BUILD_MAC == 1 ]; then
 			"$APPDIR/Contents/MacOS/updater.app" \
 			"$APPDIR/Contents/Frameworks/ChannelPrefs.framework"
 		find "$APPDIR/Contents" -name '*.dylib' -print0 | xargs -0 /usr/bin/codesign --force --options runtime --sign "$DEVELOPER_ID"
+		if [ -e "$APPDIR/Contents/MacOS/zotero-mcp-stdio" ]; then
+			/usr/bin/codesign --force --options runtime --sign "$DEVELOPER_ID" "$APPDIR/Contents/MacOS/zotero-mcp-stdio"
+		fi
 		
 		# Sign bundled apps and main app bundle
 		entitlements_file="$CALLDIR/mac/entitlements.xml"
@@ -993,6 +1013,8 @@ if [ $BUILD_WIN == 1 ]; then
 		check_lfs_file "$CALLDIR/win/updater.exe.tar.xz"
 		tar xf "$CALLDIR/win/updater.exe.tar.xz" --to-stdout updater-$arch.exe > "$APPDIR/updater.exe"
 		
+		copy_mcp_stdio $arch "$APPDIR"
+		
 		# Update .exe version numbers (only possible on Windows)
 		if [ $WIN_NATIVE == 1 ]; then
 			# FileVersion is limited to four integers, so it won't be properly updated for non-release
@@ -1062,6 +1084,10 @@ if [ $BUILD_WIN == 1 ]; then
 			"$CALLDIR/win/codesign" "$APPDIR/xul.dll" "$SIGNATURE_DESC"
 			sleep $SIGNTOOL_DELAY
 			"$CALLDIR/win/codesign" "$APPDIR/integration/word-for-windows/libzoteroWinWordIntegration.dll" "$SIGNATURE_DESC Word Plugin"
+			if [ -e "$APPDIR/zotero-mcp-stdio.exe" ]; then
+				sleep $SIGNTOOL_DELAY
+				"$CALLDIR/win/codesign" "$APPDIR/zotero-mcp-stdio.exe" "$SIGNATURE_DESC MCP Server"
+			fi
 		fi
 		
 		# Copy over removed-files and make a precomplete file
@@ -1172,6 +1198,7 @@ if [ $BUILD_LINUX == 1 ]; then
 		# Use our own launcher that calls the original Firefox executable with -app
 		mv "$APPDIR"/firefox-bin "$APPDIR"/zotero-bin
 		cp "$CALLDIR/linux/zotero" "$APPDIR"/zotero
+		copy_mcp_stdio "linux-${arch/x86_64/x64}" "$APPDIR"
 		
 		# Copy Ubuntu launcher files
 		cp "$CALLDIR/linux/zotero.desktop" "$APPDIR"

@@ -52,3 +52,6 @@
 [submodule "app/modules/zotero-libreoffice-integration"]
 	path = app/modules/zotero-libreoffice-integration
 	url = https://github.com/zotero/zotero-libreoffice-integration.git
+[submodule "app/modules/zotero-mcp-stdio"]
+	path = app/modules/zotero-mcp-stdio
+	url = https://github.com/adomasven/zotero-mcp-stdio.git

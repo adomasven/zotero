@@ -747,6 +747,8 @@ const { CommandLineOptions } = ChromeUtils.importESModule("chrome://zotero/conte
 			if (Zotero.Prefs.get("httpServer.enabled")) {
 				await Zotero.Server.init();
 			}
+			// Not awaited: copies files, and startup doesn't depend on it
+			Zotero.MCP.init().catch(e => Zotero.logError(e));
 			
 			await Zotero.Fulltext.init();
 			

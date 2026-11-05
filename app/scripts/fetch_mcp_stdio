@@ -1,0 +1,55 @@
+#!/bin/bash
+set -euo pipefail
+
+# Get zotero-mcp-stdio binaries for the commit of the app/modules/zotero-mcp-stdio submodule and
+# print the directory holding them, laid out as in the module's CI ZIP:
+#
+#   mac/zotero-mcp-stdio, win-x64/zotero-mcp-stdio.exe, win-arm64/…, win32/…,
+#   linux-x64/zotero-mcp-stdio, linux-arm64/zotero-mcp-stdio
+#
+# Uses the prebuilt ZIP from the module's CI if there is one. Otherwise builds for this machine
+# with cargo, if it's installed, and otherwise warns and prints a directory without binaries.
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+APP_ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+ROOT_DIR="$(dirname "$APP_ROOT_DIR")"
+
+MODULE_DIR="$APP_ROOT_DIR/modules/zotero-mcp-stdio"
+BUILDS_URL="https://zotero-download.s3.amazonaws.com/ci/zotero-mcp-stdio"
+
+hash=$(git -C "$MODULE_DIR" rev-parse HEAD)
+out_dir="$ROOT_DIR/tmp/builds/zotero-mcp-stdio/$hash"
+
+if [ -e "$out_dir/.complete" ]; then
+	echo "$out_dir"
+	exit 0
+fi
+
+rm -rf "$out_dir"
+mkdir -p "$out_dir"
+
+if curl -sfL "$BUILDS_URL/$hash.zip" -o "$out_dir.zip"; then
+	unzip -q "$out_dir.zip" -d "$out_dir"
+	rm "$out_dir.zip"
+	touch "$out_dir/.complete"
+elif command -v cargo >/dev/null; then
+	echo "No prebuilt zotero-mcp-stdio for $hash -- building for this machine with cargo" >&2
+	case "$(uname -s)-$(uname -m)" in
+		Darwin-*) dir=mac ;;
+		Linux-x86_64) dir=linux-x64 ;;
+		Linux-aarch64|Linux-arm64) dir=linux-arm64 ;;
+		CYGWIN*-x86_64|MINGW*-x86_64) dir=win-x64 ;;
+		CYGWIN*-aarch64|MINGW*-aarch64) dir=win-arm64 ;;
+		*) echo "Unsupported build machine $(uname -sm)" >&2; exit 1 ;;
+	esac
+	# Logs go to stderr, so stdout carries only the directory
+	(cd "$MODULE_DIR" && cargo build --release --locked) >&2
+	mkdir "$out_dir/$dir"
+	cp "$MODULE_DIR"/target/release/zotero-mcp-stdio{,.exe} "$out_dir/$dir/" 2>/dev/null || true
+	touch "$out_dir/.complete"
+else
+	# Not marked complete, so the next build tries again
+	echo "WARNING: No prebuilt zotero-mcp-stdio for $hash and cargo isn't installed -- the build won't include it" >&2
+fi
+
+echo "$out_dir"

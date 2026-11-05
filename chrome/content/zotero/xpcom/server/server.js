@@ -31,6 +31,7 @@ Zotero.Server = new function () {
 	this.responseCodes = {
 		200:"OK",
 		201:"Created",
+		202:"Accepted",
 		204:"No Content",
 		300:"Multiple Choices",
 		304:"Not Modified",
