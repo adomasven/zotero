@@ -1404,3 +1404,11 @@ menu-edit-redo-action = Redo { $action }
 
 local-api-authorize-title = Local API Authorization
 local-api-authorize-text = “{ $appName }”, an application running on your computer, wants to modify your { -app-name } library.
+
+mcp-consent-title = AI App Permission
+# $app is the AI app's name, e.g. "claude-code". $action completes "wants to …", e.g. "edit items in My Library".
+mcp-consent-text = “{ $app }”, an AI app connected to { -app-name }, wants to { $action }.
+mcp-consent-allow-hour = Allow for 1 Hour
+mcp-permission-edit-library = edit items, collections, tags and notes in “{ $library }”
+mcp-permission-delete = move items and collections in “{ $library }” to the trash
+mcp-permission-edit-settings = change { -app-name } settings

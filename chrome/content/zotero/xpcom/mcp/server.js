@@ -180,6 +180,7 @@ Zotero.Server.MCP = class {
 					});
 				}
 				Zotero.debug(`MCP: ${clientID} called ${name}`);
+				Zotero.MCP.Permissions.recordClient(clientID);
 				let result = await Zotero.MCP.callTool(name, args, { clientID });
 				return resultResponse(id, result);
 			}

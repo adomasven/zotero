@@ -137,6 +137,7 @@ const xpcomFilesLocal = [
 	'server/server_localAPI',
 	'server/saveSession',
 	'mcp/mcp',
+	'mcp/permissions',
 	'mcp/tools',
 	'mcp/server',
 	'session',

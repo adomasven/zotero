@@ -161,6 +161,8 @@ pref("extensions.zotero.httpServer.enabled", true);
 pref("extensions.zotero.httpServer.port", 23119);	// ascii "ZO"
 pref("extensions.zotero.httpServer.localAPI.enabled", false);
 pref("extensions.zotero.mcp.enabled", false);
+// Connected AI apps and their permission grants, as JSON (see xpcom/mcp/permissions.js)
+pref("extensions.zotero.mcp.clients", "{}");
 
 // Zeroconf
 pref("extensions.zotero.zeroconf.server.enabled", false);

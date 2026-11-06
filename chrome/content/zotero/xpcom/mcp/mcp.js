@@ -47,15 +47,25 @@ Zotero.MCP = new function () {
 	const TOOLS_URL = 'resource://zotero/mcp/tools.json';
 	
 	this.PROTOCOL_VERSION = '2026-07-28';
+	// Key in a tool's _meta in tools.json naming the permission it needs (see permissions.js).
+	// Tools without one only read or act on the UI, and need none.
+	this.PERMISSION_META = 'org.zotero/permission';
 	this.BINARY_NAME = Zotero.isWin ? 'zotero-mcp-stdio.exe' : 'zotero-mcp-stdio';
 	
 	// tools.json: { instructions, tools }
 	let _toolsFile = null;
 	
+	// Aborted when MCP is turned off, cancelling calls waiting for permission
+	let _enabled = new AbortController();
+	
 	this.init = async function () {
 		Zotero.Prefs.registerObserver('mcp.enabled', (enabled) => {
 			if (enabled) {
 				this.install().catch(e => Zotero.logError(e));
+			}
+			else {
+				_enabled.abort();
+				_enabled = new AbortController();
 			}
 		});
 		if (Zotero.Prefs.get('mcp.enabled')) {
@@ -163,6 +173,9 @@ Zotero.MCP = new function () {
 	/**
 	 * Run a tool
 	 *
+	 * Asks for the permission the tool declares in tools.json first. For library permissions,
+	 * that's for the library in the libraryID argument, by default My Library.
+	 *
 	 * @param {String} name - A tool from tools.json, e.g. zotero_get_items, with a handler in
 	 *     Zotero.MCP.Tools, e.g. getItems
 	 * @param {Object} args - Arguments, as sent by the AI app
@@ -178,7 +191,21 @@ Zotero.MCP = new function () {
 		if (!handler) {
 			throw new Error(`No handler for tool ${name}`);
 		}
+		let permission = tool._meta?.[this.PERMISSION_META];
 		try {
+			if (permission) {
+				let libraryID = null;
+				if (permission != Zotero.MCP.Permissions.EDIT_SETTINGS) {
+					libraryID = args.libraryID ?? Zotero.Libraries.userLibraryID;
+					if (!Number.isInteger(libraryID) || !Zotero.Libraries.exists(libraryID)) {
+						throw new this.ToolError(`No library ${libraryID}`);
+					}
+					if (!Zotero.Libraries.get(libraryID).editable) {
+						throw new this.ToolError(`${Zotero.Libraries.get(libraryID).name} is read-only`);
+					}
+				}
+				await Zotero.MCP.Permissions.require(context.clientID, permission, libraryID, _enabled.signal);
+			}
 			return await handler(args, context);
 		}
 		catch (e) {

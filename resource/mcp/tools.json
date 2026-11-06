@@ -37,6 +37,32 @@
 			"annotations": {
 				"readOnlyHint": true
 			}
+		},
+		{
+			"name": "zotero_add_tag",
+			"title": "Add a tag",
+			"description": "Add a tag to an item. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"itemKey": { "type": "string", "description": "The item's key" },
+					"tag": { "type": "string" },
+					"libraryID": {
+						"type": "integer",
+						"description": "Defaults to My Library"
+					}
+				},
+				"required": ["itemKey", "tag"],
+				"additionalProperties": false
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": true
+			}
 		}
 	]
 }

@@ -29,6 +29,7 @@ Handlers for the MCP tools defined in resource://zotero/mcp/tools.json, keyed by
 camelCase without "zotero_", e.g. getItems for zotero_get_items.
 
 Each takes the tool's arguments and a context ({ clientID }) and returns an MCP CallToolResult.
+Permissions are declared in tools.json and checked before the handler runs (see mcp.js).
 Throw Zotero.MCP.ToolError for errors the model should see, such as invalid arguments; other
 errors are logged and reported to the model by message.
 
@@ -46,6 +47,8 @@ Zotero.MCP.Tools = {
 			zoteroVersion: Zotero.version,
 			client: clientID,
 			libraries,
+			// Reading needs no permission. Other actions ask the user unless granted here.
+			permissions: Zotero.MCP.Permissions.getGrants(clientID),
 		}, null, '\t'));
 	},
 	
@@ -71,5 +74,18 @@ Zotero.MCP.Tools = {
 			return `${item.key}: ${item.getDisplayTitle()}${byline ? ` (${byline})` : ''}`;
 		});
 		return Zotero.MCP.textResult(lines.join('\n'));
+	},
+	
+	addTag: async function ({ itemKey, tag, libraryID = Zotero.Libraries.userLibraryID }) {
+		if (typeof tag != 'string' || !tag.trim()) {
+			throw new Zotero.MCP.ToolError('tag must be a non-empty string');
+		}
+		let item = typeof itemKey == 'string' && Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
+		if (!item || item.deleted) {
+			throw new Zotero.MCP.ToolError(`No item ${itemKey} in library ${libraryID}`);
+		}
+		item.addTag(tag.trim());
+		await item.saveTx();
+		return Zotero.MCP.textResult(`Added tag "${tag.trim()}" to ${item.key}.`);
 	},
 };

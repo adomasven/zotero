@@ -17,6 +17,18 @@ describe("Zotero.Server.MCP", function () {
 			assert.equal(status, 404);
 		});
 		
+		it("should only declare known permissions, with a libraryID argument for library ones", async function () {
+			let { EDIT_LIBRARY, DELETE, EDIT_SETTINGS } = Zotero.MCP.Permissions;
+			for (let tool of await Zotero.MCP.getTools()) {
+				let permission = tool._meta?.[Zotero.MCP.PERMISSION_META];
+				if (!permission) continue;
+				assert.include([EDIT_LIBRARY, DELETE, EDIT_SETTINGS], permission, tool.name);
+				if (permission != EDIT_SETTINGS) {
+					assert.equal(tool.inputSchema.properties.libraryID?.type, 'integer', tool.name);
+				}
+			}
+		});
+		
 		it("should list the tools from tools.json", async function () {
 			let { body } = await postMCP({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
 			let names = body.result.tools.map(tool => tool.name);
