@@ -34,10 +34,13 @@ they need in tools.json, and Zotero.MCP.callTool() calls require() before runnin
 - DELETE: move items or collections in one library to the trash
 - EDIT_SETTINGS: change Zotero settings
 
-Grants are stored per app (its MCP clientInfo name), permission and library, in the
-mcp.clients pref as JSON:
+Grants are stored per app, permission and library, in the mcp.clients pref as JSON:
 
-  { <app>: { lastSeen, grants: { <permission>[:<libraryID>]: { until } } } }
+  { apps: { <app ID>: <app> }, clients: { <name>: <app> } }
+  <app>: { lastSeen, grants: { <permission>[:<libraryID>]: { until } } }
+
+Apps are identified by their MCP clientInfo name. Apps in Zotero.MCP.Apps are stored under
+their ID, so all the names an app gives share its grants; other apps under their name.
 
 A permission with no grant is asked for: a dialog offers Allow (this time only), Always Allow
 (Allow for 1 Hour for DELETE) and Deny. The dialog closes, as no answer, when MCP is turned
@@ -79,7 +82,7 @@ Zotero.MCP.Permissions = new function () {
 		if (this.isGranted(clientID, permission, libraryID)) {
 			return;
 		}
-		let key = JSON.stringify([clientID, target]);
+		let key = JSON.stringify([getOwner(clientID), target]);
 		let answer = _pending.get(key);
 		if (!answer) {
 			answer = this._ask(clientID, permission, libraryID, signal);
@@ -120,7 +123,7 @@ Zotero.MCP.Permissions = new function () {
 	 * @return {Boolean}
 	 */
 	this.isGranted = function (clientID, permission, libraryID = null) {
-		let grant = load()[clientID]?.grants[getTarget(permission, libraryID)];
+		let grant = getEntry(load(), clientID)?.grants[getTarget(permission, libraryID)];
 		return !!grant && (grant.until === null || grant.until > Date.now());
 	};
 	
@@ -129,14 +132,15 @@ Zotero.MCP.Permissions = new function () {
 	 */
 	this.grant = function (clientID, permission, libraryID, until = null) {
 		let data = load();
-		getClient(data, clientID).grants[getTarget(permission, libraryID)] = { until };
+		getEntry(data, clientID, true).grants[getTarget(permission, libraryID)] = { until };
 		save(data);
 	};
 	
 	this.revoke = function (clientID, permission, libraryID = null) {
 		let data = load();
-		if (data[clientID]) {
-			delete data[clientID].grants[getTarget(permission, libraryID)];
+		let entry = getEntry(data, clientID);
+		if (entry) {
+			delete entry.grants[getTarget(permission, libraryID)];
 			save(data);
 		}
 	};
@@ -146,8 +150,8 @@ Zotero.MCP.Permissions = new function () {
 	 */
 	this.recordClient = function (clientID) {
 		let data = load();
-		let isNew = !data[clientID];
-		let client = getClient(data, clientID);
+		let isNew = !getEntry(data, clientID);
+		let client = getEntry(data, clientID, true);
 		let now = Date.now();
 		// Don't rewrite prefs on every call
 		if (isNew || now - client.lastSeen > 60 * 60 * 1000) {
@@ -161,7 +165,7 @@ Zotero.MCP.Permissions = new function () {
 	 *     { permission, libraryID, until }
 	 */
 	this.getGrants = function (clientID) {
-		let grants = load()[clientID]?.grants || {};
+		let grants = getEntry(load(), clientID)?.grants || {};
 		return Object.entries(grants)
 			.filter(([, { until }]) => until === null || until > Date.now())
 			.map(([target, { until }]) => {
@@ -183,6 +187,7 @@ Zotero.MCP.Permissions = new function () {
 	 */
 	this._ask = function (clientID, permission, libraryID, signal = null) {
 		let { promise, resolve } = Promise.withResolvers();
+		let app = Zotero.MCP.Apps.getForClient(clientID);
 		let { PromptUtils } = ChromeUtils.importESModule('resource://gre/modules/PromptUtils.sys.mjs');
 		// Firefox's prompt dialog, with the arguments Services.prompt.confirmEx() gives it.
 		// confirmEx() opens it as a modal window and waits for it, which would block Zotero and
@@ -192,7 +197,7 @@ Zotero.MCP.Permissions = new function () {
 			promptType: 'confirmEx',
 			title: Zotero.ftl.formatValueSync('mcp-consent-title'),
 			text: Zotero.ftl.formatValueSync('mcp-consent-text', {
-				app: clientID,
+				app: Zotero.MCP.Apps.getDisplayName(clientID),
 				action: describe(permission, libraryID),
 			}),
 			button0Label: Zotero.ftl.formatValueSync('general-allow'),
@@ -212,6 +217,10 @@ Zotero.MCP.Permissions = new function () {
 			args
 		);
 		win.addEventListener('load', () => {
+			if (app) {
+				// In place of the question mark
+				win.document.getElementById('infoIcon').setAttribute('src', app.icon);
+			}
 			// Added after the dialog's own unload listener, which records the answer
 			win.addEventListener('unload', () => {
 				resolve(['allow', 'deny', 'extra'][args.getProperty('buttonNumClicked')] ?? 'deny');
@@ -261,24 +270,41 @@ Zotero.MCP.Permissions = new function () {
 		);
 	}
 	
-	function getClient(data, clientID) {
-		if (!data[clientID]) {
-			data[clientID] = { lastSeen: Date.now(), grants: {} };
+	/**
+	 * @return {String[]} Where the app's grants are stored: ['apps', <app ID>] for apps in
+	 *     Zotero.MCP.Apps, else ['clients', <name>]
+	 */
+	function getOwner(clientID) {
+		let app = Zotero.MCP.Apps.getForClient(clientID);
+		return app ? ['apps', app.id] : ['clients', clientID];
+	}
+	
+	/**
+	 * @param {Boolean} [create] - Add the app if it's not there
+	 * @return {Object|undefined} The app's { lastSeen, grants }
+	 */
+	function getEntry(data, clientID, create = false) {
+		let [group, id] = getOwner(clientID);
+		if (!data[group][id] && create) {
+			data[group][id] = { lastSeen: Date.now(), grants: {} };
 		}
-		return data[clientID];
+		return data[group][id];
 	}
 	
 	function load() {
+		let data = {};
 		try {
-			let data = JSON.parse(Zotero.Prefs.get(PREF));
-			if (data && typeof data == 'object' && !Array.isArray(data)) {
-				return data;
+			let parsed = JSON.parse(Zotero.Prefs.get(PREF));
+			if (parsed && typeof parsed == 'object' && !Array.isArray(parsed)) {
+				data = parsed;
 			}
 		}
 		catch (e) {
 			Zotero.logError(e);
 		}
-		return {};
+		data.apps ??= {};
+		data.clients ??= {};
+		return data;
 	}
 	
 	function save(data) {

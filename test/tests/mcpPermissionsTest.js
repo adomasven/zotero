@@ -118,6 +118,16 @@ describe("Zotero.MCP.Permissions", function () {
 		assert.isFalse(item.hasTag('a'));
 	});
 	
+	it("should share grants among the names an app gives", async function () {
+		let ask = sinon.stub(Permissions, '_ask').resolves('extra');
+		await addTag('a', { name: 'cursor-vscode', version: '1' });
+		assert.isTrue(Permissions.isGranted('Cursor', Permissions.EDIT_LIBRARY, item.libraryID));
+		await addTag('b', { name: 'Cursor', version: '1' });
+		assert.equal(ask.callCount, 1);
+		Permissions.revoke('Cursor', Permissions.EDIT_LIBRARY, item.libraryID);
+		assert.isFalse(Permissions.isGranted('cursor-vscode', Permissions.EDIT_LIBRARY, item.libraryID));
+	});
+	
 	it("should cancel calls waiting for permission when MCP is turned off", async function () {
 		let call = addTag('a');
 		let win = await getDialog();
@@ -158,7 +168,8 @@ describe("Zotero.MCP.Permissions", function () {
 			let win = await getDialog();
 			let dialog = win.document.getElementById('commonDialog');
 			let text = win.document.getElementById('infoBody').textContent;
-			assert.include(text, '“claude-code”');
+			assert.include(text, '“Claude Code”');
+			assert.equal(win.document.getElementById('infoIcon').getAttribute('src'), Zotero.MCP.Apps.getForClient('claude-code').icon);
 			assert.include(text, Zotero.Libraries.get(item.libraryID).name);
 			assert.equal(dialog.getButton('extra1').label, Zotero.ftl.formatValueSync('general-always-allow'));
 			// Enter allows, Escape denies
