@@ -161,6 +161,33 @@ Zotero.MCP.Permissions = new function () {
 	};
 	
 	/**
+	 * @return {Object[]} Apps that have used Zotero, as { clientID, app, lastSeen }, most
+	 *     recent first. For apps in Zotero.MCP.Apps, app is the app and clientID one of its
+	 *     names; for others, app is null.
+	 */
+	this.getClients = function () {
+		let data = load();
+		let apps = Zotero.MCP.Apps.getAll();
+		return [
+			...Object.entries(data.apps).flatMap(([id, { lastSeen }]) => {
+				let app = apps.find(app => app.id == id);
+				return app ? [{ clientID: app.clientNames[0], app, lastSeen }] : [];
+			}),
+			...Object.entries(data.clients).map(([clientID, { lastSeen }]) => ({ clientID, app: null, lastSeen })),
+		].sort((a, b) => b.lastSeen - a.lastSeen);
+	};
+	
+	/**
+	 * Remove an app and all its grants. It's listed again if it calls again.
+	 */
+	this.forgetClient = function (clientID) {
+		let data = load();
+		let [group, id] = getOwner(clientID);
+		delete data[group][id];
+		save(data);
+	};
+	
+	/**
 	 * @return {Object[]} The app's unexpired grants, as
 	 *     { permission, libraryID, until }
 	 */

@@ -55,13 +55,20 @@ Zotero.MCP = new function () {
 	// tools.json: { instructions, tools }
 	let _toolsFile = null;
 	
+	// The latest install(), so the settings pane can wait for the binary
+	this.installPromise = Promise.resolve();
+	
 	// Aborted when MCP is turned off, cancelling calls waiting for permission
 	let _enabled = new AbortController();
 	
 	this.init = async function () {
+		let install = () => {
+			this.installPromise = this.install().catch(e => Zotero.logError(e));
+			return this.installPromise;
+		};
 		Zotero.Prefs.registerObserver('mcp.enabled', (enabled) => {
 			if (enabled) {
-				this.install().catch(e => Zotero.logError(e));
+				install();
 			}
 			else {
 				_enabled.abort();
@@ -69,8 +76,25 @@ Zotero.MCP = new function () {
 			}
 		});
 		if (Zotero.Prefs.get('mcp.enabled')) {
-			await this.install();
+			await install();
 		}
+	};
+	
+	/**
+	 * Show the dialog for editing an app's permissions, modal to `parent`
+	 *
+	 * @param {String} clientID
+	 * @param {Window} parent
+	 */
+	this.openPermissionsWindow = function (clientID, parent) {
+		// One set of permissions for all the names an app gives
+		clientID = Zotero.MCP.Apps.getForClient(clientID)?.clientNames[0] ?? clientID;
+		parent.openDialog(
+			'chrome://zotero/content/mcpPermissions.xhtml',
+			'',
+			'chrome,modal,centerscreen',
+			{ clientID }
+		);
 	};
 	
 	async function getToolsFile() {

@@ -1,0 +1,57 @@
+/* AI Apps pane */
+#zotero-prefpane-mcp {
+	#mcp-settings {
+		margin-top: 12px;
+	}
+	
+	.virtualized-table-container {
+		height: 220px;
+		margin-block: 6px;
+	}
+	
+	.mcp-app-icon {
+		width: 16px;
+		height: 16px;
+		margin-inline-end: 6px;
+		flex-shrink: 0;
+		object-fit: contain;
+		-moz-context-properties: fill;
+		fill: currentColor;
+	}
+	
+	#mcp-apps-table .cell {
+		display: flex;
+		align-items: center;
+	}
+	
+	.mcp-status-icon {
+		width: 16px;
+		height: 16px;
+		margin-inline-end: 6px;
+		flex-shrink: 0;
+	}
+	
+	.mcp-status-connected {
+		@include svgicon("tick", "universal", "16");
+		fill: var(--accent-green);
+	}
+	
+	.mcp-status-notConnected {
+		@include svgicon("cross", "universal", "16");
+		fill: var(--fill-secondary);
+	}
+	
+	// error.svg is red; drawn in yellow, it's a warning
+	.mcp-status-conflict, .mcp-status-unreadable {
+		mask: url("chrome://zotero/skin/20/universal/error.svg") no-repeat center / contain;
+		background-color: var(--accent-yellow);
+	}
+	
+	.mcp-apps-buttons > button:first-child {
+		margin-inline-start: 0;
+	}
+	
+	.mcp-apps-buttons > button:last-child {
+		margin-inline-end: 0;
+	}
+}

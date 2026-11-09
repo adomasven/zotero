@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+<!--
+    ***** BEGIN LICENSE BLOCK *****
+    
+    Copyright © 2026 Corporation for Digital Scholarship
+                     Vienna, Virginia, USA
+                     https://digitalscholar.org
+    
+    This file is part of Zotero.
+    
+    Zotero is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Affero General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+    
+    Zotero is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Affero General Public License for more details.
+    
+    You should have received a copy of the GNU Affero General Public License
+    along with Zotero.  If not, see <http://www.gnu.org/licenses/>.
+    
+    ***** END LICENSE BLOCK *****
+-->
+
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero/skin/zotero.css" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero-platform/content/zotero.css" type="text/css"?>
+
+<!-- An AI app's permissions. Opened from the AI Apps settings pane; see Zotero.MCP.openPermissionsWindow(). -->
+<window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+		xmlns:html="http://www.w3.org/1999/xhtml"
+		id="zotero-mcp-permissions"
+		windowtype="zotero:mcpPermissions"
+		onload="Zotero_MCP_Permissions.init()"
+		onunload="Zotero_MCP_Permissions.uninit()">
+<linkset>
+	<html:link rel="localization" href="branding/brand.ftl"/>
+	<html:link rel="localization" href="zotero.ftl"/>
+</linkset>
+<html:style>
+	#zotero-mcp-permissions description,
+	#zotero-mcp-permissions h2 { margin-inline: 0; }
+	#zotero-mcp-permissions .virtualized-table-container { height: auto; margin-block: 12px; }
+	#mcp-permissions-libraries-table .cell.checkbox { display: flex; align-items: center; gap: 6px; }
+	.mcp-delete-until { color: var(--fill-secondary); }
+	#zotero-mcp-permissions checkbox { margin-inline: 0; padding-inline: 0; }
+	#mcp-permissions-buttons > button { margin-inline-end: 0; }
+</html:style>
+<script src="chrome://zotero/content/include.js"/>
+<script src="mcpPermissions.js"/>
+
+<vbox flex="1" style="width: 560px; padding: 16px;">
+	<html:h2 id="mcp-permissions-heading"/>
+	<description data-l10n-id="mcp-permissions-description"/>
+	<hbox class="virtualized-table-container">
+		<html:div id="mcp-permissions-libraries"/>
+	</hbox>
+	<checkbox id="mcp-permissions-settings" data-l10n-id="mcp-permissions-edit-settings" native="true"/>
+	<hbox id="mcp-permissions-buttons" pack="end">
+		<button data-l10n-id="mcp-permissions-close" oncommand="window.close()"/>
+	</hbox>
+</vbox>
+</window>

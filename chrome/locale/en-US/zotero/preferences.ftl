@@ -114,6 +114,33 @@ preferences-advanced-default-data-dir =
 
 preferences-pane-account = Account
 
+preferences-pane-mcp = AI Apps
+preferences-mcp-enable =
+    .label = Allow AI apps on this computer to use { -app-name }
+preferences-mcp-enable-description = AI apps such as Claude, ChatGPT and Codex can search and read your library. They have to ask before changing anything.
+preferences-mcp-apps-description = AI apps installed on this computer and apps that have used { -app-name }. Connecting an app adds { -app-name } to its settings; restart the app afterwards.
+preferences-mcp-binary-missing = This { -app-name } build doesn’t include the connector AI apps need, so apps can’t be connected.
+preferences-mcp-column-app = App
+preferences-mcp-column-status = Status
+preferences-mcp-column-last-used = Last Used
+preferences-mcp-app-connected = Connected
+preferences-mcp-app-notConnected = Not connected
+preferences-mcp-app-notInstalled = Not found
+preferences-mcp-app-conflict = Has another “zotero” server
+preferences-mcp-app-conflict-tooltip = { $app } already has a different server named “zotero”. Remove it in { $app }’s settings to connect.
+preferences-mcp-app-unreadable = Settings file can’t be read
+preferences-mcp-app-never-used = Never
+preferences-mcp-connect =
+    .label = Connect
+preferences-mcp-disconnect =
+    .label = Disconnect
+preferences-mcp-config-error = { -app-name } couldn’t update { $app }’s settings in { $path }. You can add { -app-name } in the app’s own settings instead.
+preferences-mcp-permissions =
+    .label = Permissions…
+preferences-mcp-forget =
+    .label = Forget
+    .tooltiptext = Remove the app’s permissions and history. It’s listed again if it uses { -app-name } again.
+
 -preferences-sync-data-syncing = Data Syncing
 preferences-sync-data-syncing-groupbox =
     .aria-label = { -preferences-sync-data-syncing }

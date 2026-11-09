@@ -1412,3 +1412,17 @@ mcp-consent-allow-hour = Allow for 1 Hour
 mcp-permission-edit-library = edit items, collections, tags and notes in “{ $library }”
 mcp-permission-delete = move items and collections in “{ $library }” to the trash
 mcp-permission-edit-settings = change { -app-name } settings
+
+mcp-permissions-window =
+    .title = Permissions for “{ $app }”
+mcp-permissions-heading = Permissions for “{ $app }”
+mcp-permissions-description = The app can always read your library. It can edit items, collections, tags and notes, or move them to the trash, without asking where that’s checked. Moving to the trash is only allowed for an hour at a time.
+mcp-permissions-library = Library
+mcp-permissions-edit = Edit Items
+mcp-permissions-delete = Move to Trash
+# $time is when the 1-hour permission ends
+mcp-permissions-allowed-until = until { $time }
+mcp-permissions-edit-settings =
+    .label = Always allow changing { -app-name } settings
+mcp-permissions-close =
+    .label = Close
