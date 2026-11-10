@@ -44,6 +44,17 @@ Zotero.MCP.Tools = new function () {
 	const STYLE_REPOSITORY = 'https://www.zotero.org/styles/';
 	const STYLE_ID_PREFIX = 'http://www.zotero.org/styles/';
 	
+	// Pages zotero_read_text extracts at a time beyond those Zotero indexed
+	const EXTRACT_PAGES = 10;
+	const LABELS_PENDING = "Page labels (the page numbers printed on the pages) and the outline "
+		+ "aren't available yet for some files. Zotero is preparing them, so a later call may "
+		+ 'include them.';
+	// Characters of context around a zotero_search_fulltext match, and the longest a passage
+	// of nearby matches grows
+	const PASSAGE_CONTEXT = 200;
+	const MAX_PASSAGE = 1000;
+	const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+	
 	// Zotero.Translate.Export translators for zotero_generate_citation's export formats
 	const EXPORT_FORMATS = {
 		bibtex: '9cb70025-a888-4a29-a210-93ec52da40d4',
@@ -51,6 +62,9 @@ Zotero.MCP.Tools = new function () {
 		ris: '32d59d2d-b65a-4da4-b0a3-bdd3cfb979e7',
 		csljson: 'bc03b4fe-436d-4a1f-ba59-de4d2d7a63f7',
 	};
+	
+	// How long a call waits for structured document text (see getStructure())
+	this._structureWait = 30 * 1000;
 	
 	/**
 	 * Zotero's version, the libraries, and the permissions the app has been granted
@@ -227,6 +241,265 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * Where words or phrases occur in the full text of attachments, with the passage around
+	 * each match. Zotero's full-text index only says which attachments match, so the matches
+	 * are found again in the text the index was built from.
+	 */
+	this.searchFulltext = async function ({
+		query, keys, collectionKey, libraryID, limit = 10, offset = 0, passagesPerFile = 3,
+	}) {
+		let deadline = Date.now() + Zotero.MCP.Tools._structureWait;
+		let labelsPending = false;
+		libraryID = getLibraryID(libraryID);
+		let terms = Zotero.SearchConditions.parseSearchString(query)
+			.map(part => part.text.trim())
+			.filter(Boolean);
+		if (!terms.length) {
+			throw new Zotero.MCP.ToolError('query has no words to search for');
+		}
+		// Attachments with every term, as in the search box
+		let ids = await getScopeAttachmentIDs(libraryID, { keys, collectionKey });
+		for (let term of terms) {
+			if (ids && !ids.length) {
+				break;
+			}
+			ids = await Zotero.FullText.findItemsWithContent(term, libraryID, ids);
+			if (!ids) {
+				throw new Zotero.MCP.ToolError(
+					`"${term}" can't be searched for in full text. Search for whole words, or for `
+						+ 'two or more Chinese, Japanese or Korean characters.'
+				);
+			}
+		}
+		let attachments = (await Zotero.Items.getAsync(ids))
+			.filter(item => !item.deleted && !item.parentItem?.deleted);
+		// The index doesn't rank matches, so files are listed as zotero_search lists items
+		let modified = item => (item.parentItem || item).dateModified;
+		attachments.sort((a, b) => (modified(a) < modified(b) ? 1 : modified(a) > modified(b) ? -1 : 0));
+		
+		let regExps = terms.map(getTermRegExp).filter(Boolean);
+		let results = [];
+		for (let attachment of attachments.slice(offset, offset + limit)) {
+			let text = await getIndexedText(attachment) ?? '';
+			let passages = [];
+			let matchCount = 0;
+			if (attachment.isPDFAttachment()) {
+				let structure = await getStructure(attachment, deadline);
+				labelsPending ||= !!structure?.pending;
+				let labels = structure?.labels;
+				// The PDF worker separates pages with form feeds
+				text.split('\f').forEach((pageText, i) => {
+					let found = findPassages(pageText, regExps);
+					matchCount += found.matchCount;
+					passages.push(...found.passages.map(passage => ({
+						page: i + 1,
+						pageLabel: labels?.[i],
+						termCount: passage.termCount,
+						text: passage.text,
+						link: getOpenLink(attachment, { page: i + 1 }),
+					})));
+				});
+			}
+			else {
+				let found = findPassages(text, regExps);
+				matchCount = found.matchCount;
+				passages = found.passages.map(passage => ({
+					offset: passage.start,
+					termCount: passage.termCount,
+					text: passage.text,
+					link: getOpenLink(attachment),
+				}));
+			}
+			// Passages with more of the terms first, then in document order
+			passages.sort((a, b) => b.termCount - a.termCount);
+			results.push({
+				key: attachment.key,
+				parentKey: attachment.parentKey || undefined,
+				title: getTitle(attachment),
+				contentType: attachment.attachmentContentType,
+				matchCount,
+				passages: passages.slice(0, passagesPerFile).map(({ termCount: _termCount, ...passage }) => passage),
+			});
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			total: attachments.length,
+			results,
+			nextOffset: offset + limit < attachments.length ? offset + limit : undefined,
+			notice: labelsPending ? LABELS_PENDING : undefined,
+		});
+	};
+	
+	/**
+	 * An attachment's text: a PDF by page, other files by character offset
+	 */
+	this.readText = async function ({ key, libraryID, startPage, endPage, offset, maxChars = 20000 }) {
+		libraryID = getLibraryID(libraryID);
+		let attachment = await getTextAttachment(libraryID, key);
+		let text = await getIndexedText(attachment);
+		let fileExists = await attachment.fileExists();
+		if (text === null && !(fileExists && attachment.isPDFAttachment())) {
+			throw new Zotero.MCP.ToolError(fileExists
+				? `Zotero couldn't get any text from the file of ${attachment.key}`
+				: `The file of ${attachment.key} isn't on this computer, and Zotero has no text for it`);
+		}
+		let result = {
+			key: attachment.key,
+			parentKey: attachment.parentKey || undefined,
+			title: getTitle(attachment),
+			contentType: attachment.attachmentContentType,
+			link: getOpenLink(attachment),
+		};
+		
+		if (!attachment.isPDFAttachment()) {
+			if (startPage || endPage) {
+				throw new Zotero.MCP.ToolError(`${attachment.key} has no pages. Read it by offset.`);
+			}
+			offset ??= 0;
+			if (offset > text.length) {
+				throw new Zotero.MCP.ToolError(`${attachment.key} has ${text.length} characters`);
+			}
+			let end = Math.min(text.length, offset + maxChars);
+			// End after a line break, or else between words, unless that leaves much less
+			if (end < text.length) {
+				let cut = [text.lastIndexOf('\n', end - 1), text.lastIndexOf(' ', end - 1)]
+					.find(i => i > offset + maxChars / 2);
+				if (cut !== undefined) {
+					end = cut + 1;
+				}
+			}
+			let { indexedChars, totalChars } = await Zotero.DB.rowQueryAsync(
+				'SELECT indexedChars, totalChars FROM fulltextItems WHERE itemID=?', attachment.id
+			) || {};
+			Object.assign(result, {
+				totalChars: text.length,
+				offset,
+				text: text.slice(offset, end),
+				nextOffset: end < text.length ? end : undefined,
+				notice: indexedChars < totalChars
+					? `Zotero extracted only the first ${indexedChars} of ${totalChars} characters`
+					: undefined,
+			});
+			return Zotero.MCP.jsonResult(result);
+		}
+		
+		if (offset) {
+			throw new Zotero.MCP.ToolError(`${attachment.key} is a PDF. Read it by page.`);
+		}
+		// The PDF worker separates pages with form feeds. Pages Zotero didn't index are
+		// extracted from the file.
+		let pages = text === null ? [] : text.split('\f');
+		let totalPages = (await Zotero.FullText.getPages(attachment.id))?.total;
+		if (!totalPages) {
+			let extracted = await extractPages(attachment, [0]);
+			totalPages = extracted.totalPages;
+			pages[0] = extracted.texts[0];
+		}
+		startPage ??= 1;
+		if (startPage > totalPages) {
+			throw new Zotero.MCP.ToolError(`${attachment.key} has ${totalPages} pages`);
+		}
+		endPage = Math.min(endPage ?? totalPages, totalPages);
+		if (endPage < startPage) {
+			throw new Zotero.MCP.ToolError('endPage is before startPage');
+		}
+		let structure = await getStructure(attachment, Date.now() + Zotero.MCP.Tools._structureWait);
+		let pageResults = [];
+		let chars = 0;
+		let page = startPage;
+		for (; page <= endPage && (!pageResults.length || chars < maxChars); page++) {
+			// Such as pages past the index limit (the fulltext.pdfMaxPages pref), a batch at a time
+			if (pages[page - 1] === undefined) {
+				let pageIndexes = [];
+				for (let i = page - 1; i < Math.min(endPage, page - 1 + EXTRACT_PAGES); i++) {
+					pageIndexes.push(i);
+				}
+				let { texts } = await extractPages(attachment, pageIndexes);
+				pageIndexes.forEach((pageIndex, i) => {
+					pages[pageIndex] = texts[i] ?? '';
+				});
+			}
+			let pageText = (pages[page - 1] ?? '').trim();
+			chars += pageText.length;
+			pageResults.push({ page, label: structure?.labels?.[page - 1], text: pageText });
+		}
+		let notice;
+		if (pageResults.every(({ text }) => !text)) {
+			notice = 'These pages have no text. If the PDF is scanned, it may need OCR.';
+		}
+		else if (structure?.pending) {
+			notice = LABELS_PENDING;
+		}
+		Object.assign(result, {
+			totalPages,
+			pages: pageResults,
+			nextPage: page <= endPage ? page : undefined,
+			outline: startPage == 1 ? structure?.outline : undefined,
+			notice,
+		});
+		return Zotero.MCP.jsonResult(result);
+	};
+	
+	/**
+	 * Notes and annotations, as Markdown or HTML
+	 */
+	this.getNotes = async function ({ keys, format = 'markdown', libraryID }) {
+		libraryID = getLibraryID(libraryID);
+		let notes = new Set();
+		let annotations = new Set();
+		let missing = [];
+		for (let key of new Set(keys)) {
+			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
+			if (!item || item.deleted) {
+				missing.push(key);
+			}
+			else if (item.isNote()) {
+				notes.add(item);
+			}
+			else if (item.isAnnotation()) {
+				annotations.add(item);
+			}
+			else if (item.isRegularItem()) {
+				Zotero.Items.get(item.getNotes()).forEach(note => notes.add(note));
+				for (let attachment of Zotero.Items.get(item.getAttachments())) {
+					if (attachment.isFileAttachment()) {
+						attachment.getAnnotations().forEach(annotation => annotations.add(annotation));
+					}
+				}
+			}
+			else if (item.isFileAttachment()) {
+				item.getAnnotations().forEach(annotation => annotations.add(annotation));
+			}
+		}
+		let noteResults = [];
+		for (let note of notes) {
+			noteResults.push({
+				key: note.key,
+				parentKey: note.parentKey || undefined,
+				title: note.getNoteTitle(),
+				tags: note.getTags().map(tag => tag.tag),
+				dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
+				content: format == 'html'
+					? note.getNote()
+					: (await exportItems([note], Zotero.Translators.TRANSLATOR_ID_NOTE_MARKDOWN))
+						.replace(/\r\n/g, '\n').trim(),
+				link: getSelectLink(note),
+			});
+		}
+		// In the order they're in the file, as in the reader's sidebar
+		let annotationResults = [...annotations]
+			.sort((a, b) => a.parentID - b.parentID
+				|| (a.annotationSortIndex < b.annotationSortIndex ? -1 : 1))
+			.map(describeAnnotation);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			notes: noteResults,
+			annotations: annotationResults,
+			missing: missing.length ? missing : undefined,
+		});
+	};
+	
+	/**
 	 * Citations and bibliographies in a CSL style, or the items in an export format
 	 */
 	this.generateCitation = async function ({
@@ -353,6 +626,273 @@ Zotero.MCP.Tools = new function () {
 		});
 	}
 	
+	/**
+	 * The attachments of the items given by keys or in a collection, or null for the whole
+	 * library
+	 */
+	async function getScopeAttachmentIDs(libraryID, { keys, collectionKey }) {
+		if (keys && collectionKey) {
+			throw new Zotero.MCP.ToolError('Give keys or collectionKey, not both');
+		}
+		let items = [];
+		if (keys) {
+			for (let key of keys) {
+				let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
+				if (!item || item.deleted) {
+					throw new Zotero.MCP.ToolError(`No item ${key} in library ${libraryID}`);
+				}
+				items.push(item);
+			}
+		}
+		else if (collectionKey) {
+			let collection = getCollection(libraryID, collectionKey);
+			let collections = [collection];
+			if (Zotero.Prefs.get('recursiveCollections')) {
+				collections.push(...Zotero.Collections.get(
+					collection.getDescendents(false, 'collection').map(descendant => descendant.id)
+				));
+			}
+			for (let collection of collections) {
+				items.push(...collection.getChildItems());
+			}
+		}
+		else {
+			return null;
+		}
+		let ids = new Set();
+		for (let item of items) {
+			if (item.isRegularItem()) {
+				item.getAttachments().forEach(id => ids.add(id));
+			}
+			else if (item.isAttachment()) {
+				ids.add(item.id);
+			}
+		}
+		return [...ids];
+	}
+	
+	/**
+	 * A file attachment Zotero can get text from, or the best one of a parent item
+	 */
+	async function getTextAttachment(libraryID, key) {
+		let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
+		if (!item || item.deleted) {
+			throw new Zotero.MCP.ToolError(`No item ${key} in library ${libraryID}`);
+		}
+		if (item.isRegularItem()) {
+			item = await item.getBestAttachment();
+			if (!item) {
+				throw new Zotero.MCP.ToolError(`${key} has no PDF, EPUB, snapshot or other file`);
+			}
+		}
+		if (!Zotero.FullText.canIndex(item)) {
+			throw new Zotero.MCP.ToolError(
+				`${item.key} isn't a file Zotero can get text from: only PDFs, EPUBs, web page `
+					+ 'snapshots and text files'
+			);
+		}
+		return item;
+	}
+	
+	/**
+	 * The text Zotero extracted from an attachment for its full-text index (indexing it now if
+	 * it hasn't been), or a text file's contents
+	 *
+	 * @return {Promise<String|null>} Null if there's no text, or the file is missing
+	 */
+	async function getIndexedText(attachment) {
+		if (!Zotero.FullText.isCachedMIMEType(attachment.attachmentContentType)) {
+			let path = await attachment.getFilePathAsync();
+			return path ? Zotero.File.getContentsAsync(path, attachment.attachmentCharset) : null;
+		}
+		let path = Zotero.FullText.getItemCacheFile(attachment).path;
+		if (!await IOUtils.exists(path) && await attachment.fileExists()) {
+			await Zotero.FullText.indexItems([attachment.id]);
+		}
+		return await IOUtils.exists(path) ? Zotero.File.getContentsAsync(path) : null;
+	}
+	
+	/**
+	 * Text of PDF pages, from the file
+	 *
+	 * @param {Integer[]} pageIndexes - Consecutive
+	 * @return {Promise<Object>} { texts, totalPages }, with texts in the order of pageIndexes
+	 */
+	async function extractPages(attachment, pageIndexes) {
+		let { text, totalPages } = await Zotero.PDFWorker.getFullText(attachment.id, pageIndexes, true);
+		return { texts: text.split('\f'), totalPages };
+	}
+	
+	/**
+	 * A PDF's page labels (the page numbers printed on its pages) and outline, from its
+	 * structured document text (see sdt.js)
+	 *
+	 * The text itself comes from the full-text index, which works even when only text synced
+	 * from another computer is here; structured document text is only for what the index
+	 * doesn't have. Like Read Aloud, it's generated if it isn't cached, at the front of the PDF
+	 * worker's queue. That takes about 25 ms a page, but the worker runs one job at a time,
+	 * and an MCP call can't take long (zotero-mcp-stdio gives up after 50 seconds), so it's
+	 * waited for only until the deadline. Generation goes on after that, so a later call has it.
+	 *
+	 * @param {Number} deadline - Date.now() time to stop waiting at
+	 * @return {Promise<Object|null>} { labels, outline }, { pending: true } if it wasn't ready
+	 *     by the deadline, or null if there's none (e.g., a password-protected PDF)
+	 */
+	async function getStructure(attachment, deadline) {
+		let reader = Zotero.SDT.getReader(attachment.id, { isPriority: true });
+		let timeout = Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => 'timeout');
+		let result = await Promise.race([reader, timeout]);
+		if (result == 'timeout') {
+			// getPack() logs its own errors
+			reader.catch(() => {});
+			return { pending: true };
+		}
+		if (!result) {
+			return null;
+		}
+		let { pages = [], outline = [] } = await result.getCatalog();
+		let getOutline = entries => entries.map((entry) => {
+			let pageIndex = entry.target?.position?.pageIndex;
+			return {
+				title: entry.title,
+				page: Number.isInteger(pageIndex) ? pageIndex + 1 : undefined,
+				children: entry.children?.length ? getOutline(entry.children) : undefined,
+			};
+		});
+		return {
+			labels: pages.map(page => page.label),
+			outline: getOutline(outline),
+		};
+	}
+	
+	/**
+	 * A RegExp for a search term in text normalized with normalizeWithOffsets(), matching as
+	 * Zotero.FullText.findItemsWithContent() does: ignoring case and diacritics, with any
+	 * whitespace and hyphens between words, from the start of a word except in CJK text
+	 */
+	function getTermRegExp(term) {
+		let pattern = Zotero.Utilities.Internal.normalizeForSearch(term)
+			.split(/[\s-]+/)
+			.filter(Boolean)
+			.map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+			.join('[\\s-]+');
+		if (!pattern) {
+			return null;
+		}
+		if (/^[\p{L}\p{N}]/u.test(pattern) && !CJK_RE.test(pattern)) {
+			pattern = '(?<![\\p{L}\\p{N}])' + pattern;
+		}
+		return new RegExp(pattern, 'gu');
+	}
+	
+	/**
+	 * Text normalized with normalizeForSearch(), and for each character of it, the offset in
+	 * the text of the character it came from, so a match can be cut from the original text
+	 */
+	function normalizeWithOffsets(text) {
+		let pieces = [];
+		let offsets = [];
+		let offset = 0;
+		for (let char of text) {
+			let piece = char.charCodeAt(0) < 0x80
+				? char.toLowerCase()
+				: Zotero.Utilities.Internal.normalizeForSearch(char);
+			pieces.push(piece);
+			for (let i = 0; i < piece.length; i++) {
+				offsets.push(offset);
+			}
+			offset += char.length;
+		}
+		offsets.push(offset);
+		return { normalized: pieces.join(''), offsets };
+	}
+	
+	/**
+	 * Passages of text around matches of the RegExps, with nearby matches in one passage
+	 *
+	 * @return {Object} { matchCount, passages: [{ start, text, termCount }] }, termCount being
+	 *     how many of the RegExps match in the passage
+	 */
+	function findPassages(text, regExps) {
+		let { normalized, offsets } = normalizeWithOffsets(text);
+		let matches = [];
+		regExps.forEach((regExp, term) => {
+			for (let match of normalized.matchAll(regExp)) {
+				matches.push({
+					term,
+					start: offsets[match.index],
+					end: offsets[match.index + match[0].length],
+				});
+			}
+		});
+		matches.sort((a, b) => a.start - b.start);
+		let ranges = [];
+		for (let match of matches) {
+			let start = Math.max(0, match.start - PASSAGE_CONTEXT);
+			let end = Math.min(text.length, match.end + PASSAGE_CONTEXT);
+			let last = ranges.at(-1);
+			if (last && start <= last.end && end - last.start <= MAX_PASSAGE) {
+				last.end = end;
+				last.terms.add(match.term);
+			}
+			else {
+				ranges.push({ start, end, terms: new Set([match.term]) });
+			}
+		}
+		let passages = ranges.map(({ start, end, terms }) => {
+			let passage = text.slice(start, end);
+			// Start and end between words
+			if (start > 0) {
+				let cut = passage.match(/^\S*\s+/)?.[0].length ?? 0;
+				passage = passage.slice(cut);
+				start += cut;
+			}
+			if (end < text.length) {
+				passage = passage.replace(/\s+\S*$/, '');
+			}
+			return {
+				start,
+				text: (start > 0 ? '…' : '') + passage.replace(/\s+/g, ' ').trim()
+					+ (end < text.length ? '…' : ''),
+				termCount: terms.size,
+			};
+		});
+		return { matchCount: matches.length, passages };
+	}
+	
+	/**
+	 * For an attachment, its parent's title
+	 */
+	function getTitle(attachment) {
+		return attachment.parentItem?.getDisplayTitle() || attachment.getField('title');
+	}
+	
+	/**
+	 * A page label, without the reader's "-" for a page whose label it couldn't determine
+	 */
+	function knownPageLabel(label) {
+		return label && label != '-' ? label : undefined;
+	}
+	
+	function describeAnnotation(annotation) {
+		let attachment = annotation.parentItem;
+		let pageIndex = attachment.isPDFAttachment()
+			? JSON.parse(annotation.annotationPosition).pageIndex
+			: undefined;
+		return {
+			key: annotation.key,
+			attachmentKey: attachment.key,
+			type: annotation.annotationType,
+			text: annotation.annotationText || undefined,
+			comment: annotation.annotationComment || undefined,
+			color: annotation.annotationColor,
+			page: Number.isInteger(pageIndex) ? pageIndex + 1 : undefined,
+			pageLabel: knownPageLabel(annotation.annotationPageLabel),
+			tags: annotation.getTags().map(tag => tag.tag),
+			link: getOpenLink(attachment, { annotation: annotation.key }),
+		};
+	}
+	
 	function getLibraryID(libraryID = Zotero.Libraries.userLibraryID) {
 		if (!Zotero.Libraries.exists(libraryID)) {
 			throw new Zotero.MCP.ToolError(`No library ${libraryID}. zotero_status lists the libraries.`);
@@ -373,6 +913,20 @@ Zotero.MCP.Tools = new function () {
 	 */
 	function getSelectLink(item) {
 		return `zotero://select/${Zotero.API.getLibraryPrefix(item.libraryID)}/items/${item.key}`;
+	}
+	
+	/**
+	 * A link that opens an attachment in Zotero, at a PDF page (1-based) or an annotation
+	 */
+	function getOpenLink(attachment, { page, annotation } = {}) {
+		let link = `zotero://open/${Zotero.API.getLibraryPrefix(attachment.libraryID)}/items/${attachment.key}`;
+		if (annotation) {
+			return `${link}?annotation=${annotation}`;
+		}
+		if (page) {
+			return `${link}?page=${page}`;
+		}
+		return link;
 	}
 	
 	/**

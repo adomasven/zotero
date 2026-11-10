@@ -251,6 +251,203 @@
 			}
 		},
 		{
+			"name": "zotero_search_fulltext",
+			"title": "Search Zotero full text",
+			"description": "Find where words or phrases occur in the text of PDFs, EPUBs, web page snapshots and other files in a Zotero library, and get the passage around each match, with its page and a link that opens the file there. Matches words, not meaning: every word or \"quoted phrase\" in the query must occur in a file, ignoring case and accents, and a word also matches words it starts (\"archive\" matches \"archives\"). Only files Zotero has indexed are searched, and by default only the first 100 pages of a PDF. Files are listed by when their item was last modified, not by relevance. Use zotero_read_text to read more around a passage, and zotero_search with fulltext: to combine full text with other criteria.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"query": { "type": "string", "minLength": 1, "description": "Words and \"quoted phrases\", e.g. 'carbon \"soil organic matter\"'" },
+					"keys": {
+						"type": "array",
+						"items": { "type": "string" },
+						"minItems": 1,
+						"maxItems": 100,
+						"description": "Only these items' files, given by item or attachment keys"
+					},
+					"collectionKey": { "type": "string", "description": "Only the files of items in this collection" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
+					"limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Files per call" },
+					"offset": { "type": "integer", "minimum": 0, "default": 0 },
+					"passagesPerFile": { "type": "integer", "minimum": 1, "maximum": 20, "default": 3 }
+				},
+				"required": ["query"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"total": { "type": "integer", "description": "Files that match" },
+					"results": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string", "description": "The attachment's key" },
+								"parentKey": { "type": "string", "description": "The key of the item it belongs to" },
+								"title": { "type": "string" },
+								"contentType": { "type": "string" },
+								"matchCount": { "type": "integer" },
+								"passages": {
+									"type": "array",
+									"description": "Passages with the most query terms first",
+									"items": {
+										"type": "object",
+										"properties": {
+											"page": { "type": "integer", "description": "PDF page, from 1, for zotero_read_text and links" },
+											"pageLabel": { "type": "string", "description": "The page number printed on the page, for citing, when Zotero has it" },
+											"offset": { "type": "integer", "description": "Character offset in a file without pages, for zotero_read_text" },
+											"text": { "type": "string" },
+											"link": { "type": "string", "description": "zotero:// link that opens the file, at the page for a PDF" }
+										},
+										"required": ["text", "link"]
+									}
+								}
+							},
+							"required": ["key", "title", "matchCount", "passages"]
+						}
+					},
+					"nextOffset": { "type": "integer", "description": "Present when there are more files" },
+					"notice": { "type": "string" }
+				},
+				"required": ["libraryID", "total", "results"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
+			"name": "zotero_read_text",
+			"title": "Read text from a Zotero file",
+			"description": "Read the text of a PDF, EPUB, web page snapshot or text file in Zotero. PDFs are read by page, with page labels (the page numbers printed on the pages, for citing) and the outline when Zotero has them; other files by character offset. Give an attachment key, or an item key to read its best file. Returns about maxChars characters per call, and nextPage or nextOffset to continue.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"key": { "type": "string", "description": "An attachment's key, or an item's key for its best file" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
+					"startPage": { "type": "integer", "minimum": 1, "description": "PDF page to start at, from 1. Defaults to 1." },
+					"endPage": { "type": "integer", "minimum": 1, "description": "Last PDF page to read" },
+					"offset": { "type": "integer", "minimum": 0, "description": "Character offset to start at, for files without pages" },
+					"maxChars": { "type": "integer", "minimum": 1000, "maximum": 100000, "default": 20000 }
+				},
+				"required": ["key"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"$defs": {
+					"outlineEntry": {
+						"type": "object",
+						"properties": {
+							"title": { "type": "string" },
+							"page": { "type": "integer" },
+							"children": { "type": "array", "items": { "$ref": "#/$defs/outlineEntry" } }
+						},
+						"required": ["title"]
+					}
+				},
+				"properties": {
+					"key": { "type": "string", "description": "The attachment's key" },
+					"parentKey": { "type": "string" },
+					"title": { "type": "string" },
+					"contentType": { "type": "string" },
+					"link": { "type": "string", "description": "zotero:// link that opens the file" },
+					"totalPages": { "type": "integer" },
+					"pages": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"page": { "type": "integer" },
+								"label": { "type": "string", "description": "The page number printed on the page" },
+								"text": { "type": "string" }
+							},
+							"required": ["page", "text"]
+						}
+					},
+					"nextPage": { "type": "integer", "description": "Present when there are more pages in the range" },
+					"outline": { "type": "array", "items": { "$ref": "#/$defs/outlineEntry" }, "description": "With startPage 1" },
+					"totalChars": { "type": "integer" },
+					"offset": { "type": "integer" },
+					"text": { "type": "string" },
+					"nextOffset": { "type": "integer", "description": "Present when there's more text" },
+					"notice": { "type": "string" }
+				},
+				"required": ["key", "title", "link"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
+			"name": "zotero_get_notes",
+			"title": "Get Zotero notes and annotations",
+			"description": "Get notes and annotations (highlights, underlines, comments and so on made in Zotero's reader). For an item, returns its notes and the annotations in its files; for an attachment, its annotations; or give note or annotation keys. Notes come as Markdown by default. Annotations are in the order they're in the file, with the page label for citing and a link that opens the file at the annotation.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"keys": {
+						"type": "array",
+						"items": { "type": "string" },
+						"minItems": 1,
+						"maxItems": 50,
+						"description": "Item, attachment, note or annotation keys"
+					},
+					"format": { "enum": ["markdown", "html"], "default": "markdown", "description": "For notes" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["keys"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"notes": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"parentKey": { "type": "string" },
+								"title": { "type": "string" },
+								"tags": { "type": "array", "items": { "type": "string" } },
+								"dateModified": { "type": "string" },
+								"content": { "type": "string" },
+								"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
+							},
+							"required": ["key", "title", "tags", "dateModified", "content", "link"]
+						}
+					},
+					"annotations": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"attachmentKey": { "type": "string" },
+								"type": { "enum": ["highlight", "underline", "note", "text", "image", "ink"] },
+								"text": { "type": "string", "description": "The highlighted or underlined text" },
+								"comment": { "type": "string" },
+								"color": { "type": "string" },
+								"page": { "type": "integer", "description": "PDF page, from 1" },
+								"pageLabel": { "type": "string", "description": "The page number printed on the page, for citing" },
+								"tags": { "type": "array", "items": { "type": "string" } },
+								"link": { "type": "string", "description": "zotero:// link that opens the file at the annotation" }
+							},
+							"required": ["key", "attachmentKey", "type", "tags", "link"]
+						}
+					},
+					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" }
+				},
+				"required": ["libraryID", "notes", "annotations"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
 			"name": "zotero_generate_citation",
 			"title": "Generate Zotero citations",
 			"description": "Format items as one citation (with page or other locators) or a bibliography in a citation style, or export them as BibTeX, BibLaTeX, RIS or CSL-JSON. Defaults to the style the user copies citations with. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",

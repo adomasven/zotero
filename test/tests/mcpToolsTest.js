@@ -190,6 +190,263 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	/**
+	 * Give an attachment known full text, as if it had been indexed, with PDF pages
+	 * separated as the PDF worker separates them
+	 */
+	async function setText(attachment, pages, { indexedPages = pages.length, totalPages = indexedPages } = {}) {
+		await Zotero.FullText.setItemContent(attachment.libraryID, attachment.key, {
+			content: pages.join('\n\n\f').trim(),
+			indexedPages,
+			totalPages,
+		}, 1);
+		assert.isTrue(await Zotero.FullText.indexSyncedContent(attachment.id));
+	}
+	
+	function stubStructure(catalog) {
+		return sinon.stub(Zotero.SDT, 'getReader').resolves({ getCatalog: async () => catalog });
+	}
+	
+	let randomWord = () => Zotero.Utilities.randomString(12, 'abcdefghijklmnopqrstuvwxyz');
+	
+	describe("zotero_search_fulltext", function () {
+		it("should return passages by page, with every term's passages first and the original text", async function () {
+			let word = randomWord();
+			let item = await createArticle();
+			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
+			await setText(attachment, [
+				`Introduction about ${word} cycles.`,
+				`Here Sôil–organic matter and ${word} interact.`,
+				`Only soil here, and organic elsewhere, with ${word}.`,
+			]);
+			// Has the word but not the phrase
+			let other = await importFileAttachment('test.pdf');
+			await setText(other, [`Just ${word}.`]);
+			stubStructure({ pages: [{ label: 'i' }, { label: '1' }, { label: '2' }] });
+			
+			let { total, results } = await call('zotero_search_fulltext', { query: `${word} "soil organic"` });
+			assert.equal(total, 1);
+			assert.equal(results[0].key, attachment.key);
+			assert.equal(results[0].parentKey, item.key);
+			assert.equal(results[0].title, item.getField('title'));
+			assert.equal(results[0].matchCount, 4);
+			assert.deepEqual(results[0].passages, [
+				{
+					page: 2,
+					pageLabel: '1',
+					text: `Here Sôil–organic matter and ${word} interact.`,
+					link: `zotero://open/library/items/${attachment.key}?page=2`,
+				},
+				{
+					page: 1,
+					pageLabel: 'i',
+					text: `Introduction about ${word} cycles.`,
+					link: `zotero://open/library/items/${attachment.key}?page=1`,
+				},
+				{
+					page: 3,
+					pageLabel: '2',
+					text: `Only soil here, and organic elsewhere, with ${word}.`,
+					link: `zotero://open/library/items/${attachment.key}?page=3`,
+				},
+			]);
+		});
+		
+		it("should cut long text into passages between words", async function () {
+			let word = randomWord();
+			let attachment = await importFileAttachment('test.pdf');
+			// ß is ss when normalized for search, so matches are found at other offsets than
+			// they're cut at
+			let filler = 'maße ipsum '.repeat(70);
+			await setText(attachment, [`${filler}${word} ${filler}`]);
+			
+			let { results } = await call('zotero_search_fulltext', { query: word });
+			let [{ text }] = results[0].passages;
+			assert.match(text, new RegExp(`^…(maße|ipsum) .* ${word} .* (maße|ipsum)…$`));
+			// About 200 characters on each side
+			assert.closeTo(text.indexOf(word), 195, 10);
+			assert.closeTo(text.length - text.indexOf(word) - word.length, 195, 10);
+		});
+		
+		it("should search only the given items' files", async function () {
+			let word = randomWord();
+			let items = [];
+			for (let i = 0; i < 2; i++) {
+				let item = await createArticle();
+				await setText(await importFileAttachment('test.pdf', { parentID: item.id }), [word]);
+				items.push(item);
+			}
+			
+			assert.equal((await call('zotero_search_fulltext', { query: word })).total, 2);
+			let { results } = await call('zotero_search_fulltext', { query: word, keys: [items[1].key] });
+			assert.deepEqual(results.map(result => result.parentKey), [items[1].key]);
+		});
+	});
+	
+	describe("zotero_read_text", function () {
+		beforeEach(function () {
+			// No structured document text, as for a password-protected PDF
+			sinon.stub(Zotero.SDT, 'getPack').resolves({ ok: false, reason: 'unavailable' });
+		});
+		
+		afterEach(function () {
+			Zotero.MCP.Tools._structureWait = 30 * 1000;
+		});
+		
+		it("should read a PDF by page, up to about maxChars, with labels and the outline", async function () {
+			let item = await createArticle();
+			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
+			let pages = ['a', 'b', 'c'].map(letter => `${letter} `.repeat(300).trim());
+			await setText(attachment, pages);
+			stubStructure({
+				pages: [{ label: 'i' }, { label: '1' }, { label: '2' }],
+				outline: [{
+					title: 'Chapter',
+					target: { position: { pageIndex: 1 } },
+					children: [{ title: 'Section', target: { position: { pageIndex: 2 } } }],
+				}],
+			});
+			
+			// The parent's key reads its PDF
+			let result = await call('zotero_read_text', { key: item.key, maxChars: 1000 });
+			assert.equal(result.key, attachment.key);
+			assert.equal(result.totalPages, 3);
+			assert.deepEqual(result.pages, [
+				{ page: 1, label: 'i', text: pages[0] },
+				{ page: 2, label: '1', text: pages[1] },
+			]);
+			assert.equal(result.nextPage, 3);
+			assert.deepEqual(result.outline, [
+				{ title: 'Chapter', page: 2, children: [{ title: 'Section', page: 3 }] },
+			]);
+			assert.notProperty(result, 'notice');
+			
+			result = await call('zotero_read_text', { key: attachment.key, startPage: 3 });
+			assert.deepEqual(result.pages, [{ page: 3, label: '2', text: pages[2] }]);
+			assert.notProperty(result, 'nextPage');
+			assert.notProperty(result, 'outline');
+		});
+		
+		it("should wait for page labels only until the deadline, and have them later", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			await setText(attachment, ['One', 'Two']);
+			Zotero.MCP.Tools._structureWait = 200;
+			let getReader = sinon.stub(Zotero.SDT, 'getReader');
+			let catalog = { pages: [{ label: 'i' }, { label: 'ii' }] };
+			let generated = Zotero.Promise.delay(1000).then(() => ({ getCatalog: async () => catalog }));
+			getReader.returns(generated);
+			
+			let result = await call('zotero_read_text', { key: attachment.key, startPage: 2 });
+			assert.deepEqual(result.pages, [{ page: 2, text: 'Two' }]);
+			assert.match(result.notice, /Page labels .* aren't available yet/);
+			assert.isTrue(getReader.calledWith(attachment.id, sinon.match({ isPriority: true })));
+			
+			// Generation went on, so a later call has the labels
+			await generated;
+			result = await call('zotero_read_text', { key: attachment.key, startPage: 2 });
+			assert.deepEqual(result.pages, [{ page: 2, label: 'ii', text: 'Two' }]);
+			assert.notProperty(result, 'notice');
+		});
+		
+		it("should extract pages past the ones Zotero indexed", async function () {
+			this.timeout(30000);
+			Zotero.Prefs.set('fulltext.pdfMaxPages', 1);
+			try {
+				let attachment = await importFileAttachment('wonderland_short.pdf');
+				assert.equal((await Zotero.FullText.getPages(attachment.id)).indexedPages, 1);
+				let expected = (await Zotero.PDFWorker.getFullText(attachment.id, [1, 2])).text
+					.split('\f').map(text => text.trim());
+				
+				let result = await call('zotero_read_text', { key: attachment.key, startPage: 2, endPage: 3 });
+				assert.equal(result.totalPages, 29);
+				assert.deepEqual(result.pages, [{ page: 2, text: expected[0] }, { page: 3, text: expected[1] }]);
+				assert.isNotEmpty(expected[0]);
+				assert.notEqual(expected[0], expected[1]);
+			}
+			finally {
+				Zotero.Prefs.clear('fulltext.pdfMaxPages');
+			}
+		});
+		
+		it("should read other files in chunks that end between words", async function () {
+			// Words and their spaces are 7 characters, so the character after each 1000 is a space
+			let words = [];
+			for (let i = 0; i < 600; i++) {
+				words.push(`w${String(i).padStart(5, '0')}`);
+			}
+			let content = words.join(' ');
+			let path = PathUtils.join(await getTempDirectory(), 'words.txt');
+			await Zotero.File.putContentsAsync(path, content);
+			let attachment = await Zotero.Attachments.importFromFile({ file: path });
+			
+			let chunks = [];
+			let offset = 0;
+			while (offset !== undefined) {
+				let result = await call('zotero_read_text', { key: attachment.key, offset, maxChars: 1000 });
+				assert.equal(result.totalChars, content.length);
+				assert.isAtMost(result.text.length, 1000);
+				chunks.push(result.text);
+				offset = result.nextOffset;
+			}
+			assert.isAbove(chunks.length, 3);
+			assert.equal(chunks.join(''), content);
+			assert.isTrue(chunks.slice(0, -1).every(chunk => chunk.endsWith(' ')));
+		});
+		
+		it("should reject items without a readable file", async function () {
+			let note = await createDataObject('item', { itemType: 'note' });
+			assert.match(await callForError('zotero_read_text', { key: note.key }), /isn't a file Zotero can get text from/);
+			let item = await createArticle();
+			assert.match(await callForError('zotero_read_text', { key: item.key }), /has no PDF/);
+		});
+	});
+	
+	describe("zotero_get_notes", function () {
+		it("should return an item's notes as Markdown and its annotations in file order", async function () {
+			let item = await createArticle();
+			let note = await createDataObject('item', {
+				itemType: 'note',
+				parentID: item.id,
+				note: '<h1>Findings</h1><p>Some <strong>bold</strong> text</p>',
+			});
+			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
+			let annotations = [];
+			for (let [pageIndex, position] of [[4, '000500'], [0, '000100'], [4, '000200']]) {
+				let annotation = await createAnnotation('highlight', attachment);
+				annotation.annotationSortIndex = `${String(pageIndex).padStart(5, '0')}|${position}|00000`;
+				annotation.annotationPosition = JSON.stringify({ pageIndex, rects: [[0, 0, 1, 1]] });
+				annotation.addTag('important');
+				await annotation.saveTx();
+				annotations.push(annotation);
+			}
+			let [last, first, middle] = annotations;
+			
+			let result = await call('zotero_get_notes', { keys: [item.key, 'AAAAAAAA'] });
+			assert.deepEqual(result.missing, ['AAAAAAAA']);
+			assert.lengthOf(result.notes, 1);
+			assert.equal(result.notes[0].key, note.key);
+			assert.equal(result.notes[0].title, 'Findings');
+			assert.match(result.notes[0].content, /^# Findings\n\nSome \*\*bold\*\* text$/);
+			assert.deepEqual(result.annotations.map(annotation => annotation.key), [first.key, middle.key, last.key]);
+			assert.deepEqual(result.annotations[2], {
+				key: last.key,
+				attachmentKey: attachment.key,
+				type: 'highlight',
+				text: last.annotationText,
+				comment: last.annotationComment,
+				color: '#ffd400',
+				page: 5,
+				pageLabel: last.annotationPageLabel,
+				tags: ['important'],
+				link: `zotero://open/library/items/${attachment.key}?annotation=${last.key}`,
+			});
+			
+			result = await call('zotero_get_notes', { keys: [note.key], format: 'html' });
+			assert.include(result.notes[0].content, '<strong>bold</strong>');
+			assert.lengthOf(result.annotations, 0);
+		});
+	});
+	
 	describe("zotero_generate_citation", function () {
 		const STYLE_ID = 'http://www.zotero.org/styles/zotero-mcp-test';
 		let item;
