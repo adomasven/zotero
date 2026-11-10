@@ -46,9 +46,11 @@ var Zotero_MCP_Permissions = { // eslint-disable-line no-unused-vars
 		let title = { app: Zotero.MCP.Apps.getDisplayName(this.clientID) };
 		document.l10n.setAttributes(document.documentElement, 'mcp-permissions-window', title);
 		document.l10n.setAttributes(document.getElementById('mcp-permissions-heading'), 'mcp-permissions-heading', title);
-		document.getElementById('mcp-permissions-settings').addEventListener('command', (event) => {
-			this.setAllowed(Zotero.MCP.Permissions.EDIT_SETTINGS, null, event.target.checked);
-		});
+		for (let [id, permission] of this._getCheckboxes()) {
+			document.getElementById(id).addEventListener('command', (event) => {
+				this.setAllowed(permission, null, event.target.checked);
+			});
+		}
 		await this._initTree();
 		// Grants also change from consent dialogs while the window is open
 		this._observer = Zotero.Prefs.registerObserver('mcp.clients', () => this.update());
@@ -75,8 +77,9 @@ var Zotero_MCP_Permissions = { // eslint-disable-line no-unused-vars
 			}));
 		this._tree.invalidate();
 		this._fitTable();
-		document.getElementById('mcp-permissions-settings').checked
-			= !!find(Permissions.EDIT_SETTINGS, null);
+		for (let [id, permission] of this._getCheckboxes()) {
+			document.getElementById(id).checked = !!find(permission, null);
+		}
 	},
 	
 	/**
@@ -91,6 +94,16 @@ var Zotero_MCP_Permissions = { // eslint-disable-line no-unused-vars
 			this._tree.rerender();
 			window.sizeToContent();
 		}
+	},
+	
+	/**
+	 * @return {Array[]} The checkboxes for permissions that aren't per library, as [id, permission]
+	 */
+	_getCheckboxes() {
+		return [
+			['mcp-permissions-settings', Zotero.MCP.Permissions.EDIT_SETTINGS],
+			['mcp-permissions-styles', Zotero.MCP.Permissions.INSTALL_STYLES],
+		];
 	},
 	
 	async _initTree() {

@@ -33,6 +33,7 @@ they need in tools.json, and Zotero.MCP.callTool() calls require() before runnin
 - EDIT_LIBRARY: add or change items, collections, tags and notes in one library
 - DELETE: move items or collections in one library to the trash
 - EDIT_SETTINGS: change Zotero settings
+- INSTALL_STYLES: install citation styles from the Zotero Style Repository
 
 Grants are stored per app, permission and library, in the mcp.clients pref as JSON:
 
@@ -55,6 +56,7 @@ Zotero.MCP.Permissions = new function () {
 	this.EDIT_LIBRARY = 'editLibrary';
 	this.DELETE = 'delete';
 	this.EDIT_SETTINGS = 'editSettings';
+	this.INSTALL_STYLES = 'installStyles';
 	
 	// How long DELETE is allowed for at a time
 	this.TEMPORARY_GRANT = 60 * 60 * 1000;
@@ -71,7 +73,7 @@ Zotero.MCP.Permissions = new function () {
 	 * Make sure the app may do something, asking the user if needed
 	 *
 	 * @param {String} clientID - The AI app's name
-	 * @param {String} permission - EDIT_LIBRARY, DELETE or EDIT_SETTINGS
+	 * @param {String} permission - One of the permissions above
 	 * @param {Integer} [libraryID] - Required for EDIT_LIBRARY and DELETE
 	 * @param {AbortSignal} [signal] - Aborted when MCP is turned off, which closes the dialog
 	 * @throws {Zotero.MCP.ToolError} If the user denies it or doesn't answer, or MCP is turned
@@ -268,7 +270,9 @@ Zotero.MCP.Permissions = new function () {
 	};
 	
 	function getTarget(permission, libraryID) {
-		if (permission == Zotero.MCP.Permissions.EDIT_SETTINGS) {
+		let { EDIT_SETTINGS, INSTALL_STYLES } = Zotero.MCP.Permissions;
+		// Not per library
+		if (permission == EDIT_SETTINGS || permission == INSTALL_STYLES) {
 			return permission;
 		}
 		if (permission != Zotero.MCP.Permissions.EDIT_LIBRARY
@@ -287,6 +291,9 @@ Zotero.MCP.Permissions = new function () {
 	function describe(permission, libraryID) {
 		if (permission == Zotero.MCP.Permissions.EDIT_SETTINGS) {
 			return Zotero.ftl.formatValueSync('mcp-permission-edit-settings');
+		}
+		if (permission == Zotero.MCP.Permissions.INSTALL_STYLES) {
+			return Zotero.ftl.formatValueSync('mcp-permission-install-styles');
 		}
 		let library = Zotero.Libraries.get(libraryID).name;
 		return Zotero.ftl.formatValueSync(

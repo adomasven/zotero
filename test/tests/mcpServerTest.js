@@ -18,12 +18,12 @@ describe("Zotero.Server.MCP", function () {
 		});
 		
 		it("should only declare known permissions, with a libraryID argument for library ones", async function () {
-			let { EDIT_LIBRARY, DELETE, EDIT_SETTINGS } = Zotero.MCP.Permissions;
+			let { EDIT_LIBRARY, DELETE, EDIT_SETTINGS, INSTALL_STYLES } = Zotero.MCP.Permissions;
 			for (let tool of await Zotero.MCP.getTools()) {
 				let permission = tool._meta?.[Zotero.MCP.PERMISSION_META];
 				if (!permission) continue;
-				assert.include([EDIT_LIBRARY, DELETE, EDIT_SETTINGS], permission, tool.name);
-				if (permission != EDIT_SETTINGS) {
+				assert.include([EDIT_LIBRARY, DELETE, EDIT_SETTINGS, INSTALL_STYLES], permission, tool.name);
+				if (permission == EDIT_LIBRARY || permission == DELETE) {
 					assert.equal(tool.inputSchema.properties.libraryID?.type, 'integer', tool.name);
 				}
 			}
@@ -32,7 +32,7 @@ describe("Zotero.Server.MCP", function () {
 		it("should list the tools from tools.json", async function () {
 			let { body } = await postMCP({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
 			let names = body.result.tools.map(tool => tool.name);
-			assert.includeMembers(names, ['zotero_status', 'zotero_search_items']);
+			assert.includeMembers(names, ['zotero_status', 'zotero_search']);
 			assert.deepEqual(body.result.tools, await Zotero.MCP.getTools());
 			assert.equal(body.result.resultType, 'complete');
 			assert.equal(body.result.ttlMs, 0);
@@ -58,28 +58,25 @@ describe("Zotero.Server.MCP", function () {
 			assert.equal(body.error.code, -32601);
 		});
 		
-		it("should search items by title", async function () {
-			let title = Zotero.Utilities.randomString();
-			let item = await createDataObject('item', { title });
-			await createDataObject('item', { title: 'Something else' });
-			
-			let { result } = await callMCPTool('zotero_search_items', { query: title });
+		it("should return tool results as structured content", async function () {
+			let { result } = await callMCPTool('zotero_status', {});
 			assert.equal(result.resultType, 'complete');
 			assert.notOk(result.isError);
-			assert.equal(result.content[0].text, `${item.key}: ${title}`);
+			assert.equal(result.structuredContent.zoteroVersion, Zotero.version);
 		});
 		
-		it("should report invalid tool arguments as a tool error", async function () {
-			let { result } = await callMCPTool('zotero_search_items', { query: '' });
+		it("should report arguments that don't match the input schema as a tool error", async function () {
+			let { result } = await callMCPTool('zotero_search', { query: 'a', limit: 0, colour: 'red' });
 			assert.isTrue(result.isError);
-			assert.match(result.content[0].text, /query/);
+			assert.match(result.content[0].text, /^Invalid arguments: /);
+			assert.match(result.content[0].text, /\/limit/);
+			assert.match(result.content[0].text, /colour/);
+			assert.notProperty(result, 'structuredContent');
 		});
 		
 		it("should identify the AI app by its clientInfo name", async function () {
 			let { result } = await callMCPTool('zotero_status', {});
-			let status = JSON.parse(result.content[0].text);
-			assert.equal(status.client, 'test-client');
-			assert.equal(status.zoteroVersion, Zotero.version);
+			assert.equal(result.structuredContent.client, 'test-client');
 		});
 		
 		it("should refuse tool calls from an app that doesn't name itself", async function () {

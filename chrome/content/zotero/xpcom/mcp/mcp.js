@@ -54,6 +54,8 @@ Zotero.MCP = new function () {
 	
 	// tools.json: { instructions, tools }
 	let _toolsFile = null;
+	// Argument validators, by tool name
+	let _validators = new Map();
 	
 	// The latest install(), so the settings pane can wait for the binary
 	this.installPromise = Promise.resolve();
@@ -200,6 +202,9 @@ Zotero.MCP = new function () {
 	 * Asks for the permission the tool declares in tools.json first. For library permissions,
 	 * that's for the library in the libraryID argument, by default My Library.
 	 *
+	 * Arguments that don't match the tool's inputSchema are reported to the model, so it can
+	 * correct them.
+	 *
 	 * @param {String} name - A tool from tools.json, e.g. zotero_get_items, with a handler in
 	 *     Zotero.MCP.Tools, e.g. getItems
 	 * @param {Object} args - Arguments, as sent by the AI app
@@ -216,7 +221,10 @@ Zotero.MCP = new function () {
 			throw new Error(`No handler for tool ${name}`);
 		}
 		let permission = tool._meta?.[this.PERMISSION_META];
+		// For permissions a handler asks for itself
+		context = { ...context, signal: _enabled.signal };
 		try {
+			checkArguments(tool, args);
 			if (permission) {
 				let libraryID = null;
 				if (permission != Zotero.MCP.Permissions.EDIT_SETTINGS) {
@@ -228,7 +236,7 @@ Zotero.MCP = new function () {
 						throw new this.ToolError(`${Zotero.Libraries.get(libraryID).name} is read-only`);
 					}
 				}
-				await Zotero.MCP.Permissions.require(context.clientID, permission, libraryID, _enabled.signal);
+				await Zotero.MCP.Permissions.require(context.clientID, permission, libraryID, context.signal);
 			}
 			return await handler(args, context);
 		}
@@ -253,6 +261,41 @@ Zotero.MCP = new function () {
 	this.textResult = function (text) {
 		return { content: [{ type: 'text', text }] };
 	};
+	
+	/**
+	 * @param {Object} value - Matching the tool's outputSchema
+	 * @return {Object} An MCP CallToolResult with the value as structured content, and as JSON
+	 *     text for apps that don't read structured content
+	 */
+	this.jsonResult = function (value) {
+		// Without the undefined properties left out of the JSON
+		let structuredContent = JSON.parse(JSON.stringify(value));
+		return {
+			content: [{ type: 'text', text: JSON.stringify(structuredContent) }],
+			structuredContent,
+		};
+	};
+	
+	/**
+	 * @throws {Zotero.MCP.ToolError} If the arguments don't match the tool's inputSchema
+	 */
+	function checkArguments(tool, args) {
+		let validator = _validators.get(tool.name);
+		if (!validator) {
+			let { JsonSchema } = ChromeUtils.importESModule('resource://gre/modules/JsonSchema.sys.mjs');
+			// MCP's default JSON Schema version
+			validator = new JsonSchema.Validator(tool.inputSchema, { draft: '2020-12', shortCircuit: false });
+			_validators.set(tool.name, validator);
+		}
+		let { valid, errors } = validator.validate(args);
+		if (!valid) {
+			throw new Zotero.MCP.ToolError(
+				'Invalid arguments: '
+					+ errors.map(error => `${error.instanceLocation.replace(/^#\/?/, '/')}: ${error.error}`)
+						.join('; ')
+			);
+		}
+	}
 	
 	/**
 	 * The command zotero-mcp-stdio runs to start this Zotero

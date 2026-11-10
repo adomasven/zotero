@@ -1530,5 +1530,14 @@ async function callMCPTool(name, args, clientInfo = { name: 'test-client', versi
 	);
 	assert.equal(status, 200);
 	assert.equal(body.id, 7);
+	// Results match the tool's outputSchema, with the same JSON as text for apps that don't
+	// read structured content
+	let tool = (await Zotero.MCP.getTools()).find(tool => tool.name == name);
+	if (body.result && !body.result.isError && tool?.outputSchema) {
+		let { JsonSchema } = ChromeUtils.importESModule('resource://gre/modules/JsonSchema.sys.mjs');
+		let { valid, errors } = JsonSchema.validate(body.result.structuredContent, tool.outputSchema, { draft: '2020-12' });
+		assert.isTrue(valid, `${name} result doesn't match its outputSchema: ${JSON.stringify(errors)}`);
+		assert.deepEqual(JSON.parse(body.result.content[0].text), body.result.structuredContent);
+	}
 	return body;
 }

@@ -4,35 +4,297 @@
 		{
 			"name": "zotero_status",
 			"title": "Zotero status",
-			"description": "Check that Zotero is reachable and report its version and libraries. Call this when other Zotero tools fail, to tell the user what's wrong.",
+			"description": "Check that Zotero is reachable, and get its version, the libraries (with their libraryIDs) and the permissions the user has granted this app. Call this when other Zotero tools fail, to tell the user what's wrong.",
 			"inputSchema": {
 				"type": "object",
 				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"zoteroVersion": { "type": "string" },
+					"client": { "type": "string", "description": "The name this app gave Zotero" },
+					"libraries": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"libraryID": { "type": "integer" },
+								"type": { "type": "string" },
+								"name": { "type": "string" },
+								"editable": { "type": "boolean" }
+							},
+							"required": ["libraryID", "type", "name", "editable"]
+						}
+					},
+					"permissions": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"permission": { "type": "string" },
+								"libraryID": { "type": ["integer", "null"] },
+								"until": { "type": ["string", "null"], "description": "When the permission ends, or null for never" }
+							},
+							"required": ["permission", "libraryID", "until"]
+						}
+					}
+				},
+				"required": ["zoteroVersion", "client", "libraries", "permissions"]
 			},
 			"annotations": {
 				"readOnlyHint": true
 			}
 		},
 		{
-			"name": "zotero_search_items",
-			"title": "Search Zotero items",
-			"description": "Search the user's Zotero library by title, creator and year. Returns matching items with their keys.",
+			"name": "zotero_search",
+			"title": "Search Zotero",
+			"description": "Find items in a Zotero library the way Zotero's search box does. Free text matches according to mode. Clauses filter: by:smith, year:2020, year:2015-2020, after:2019, before:2021, in:Nature (publication), type:book, tag:\"to read\", abstract:crispr, fulltext:crispr (attachment content), added:2024, `added in the last 7 days`, and any field by its name, e.g. doi:10.1038, `title starts with grounded`, `citation key:smith2020`. no and has test whether a field is empty or a thing exists: `no doi`, `has abstract`, `no tags`, `no attachments`, `no notes`, `has annotations`; `number of notes > 2` compares counts. Annotations match by type:annotation, color:yellow, `annotation comment:unclear`. Combine clauses with and/or and parentheses. Matches in notes, attachments and annotations return the item they belong to, unless the query is type:note, type:attachment or type:annotation.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"query": {
-						"type": "string",
-						"description": "Words to match in titles, creator names and years"
+					"query": { "type": "string", "description": "Empty lists all items in the scope" },
+					"mode": {
+						"enum": ["titleCreatorYear", "fields", "everything"],
+						"description": "What free text matches: title, creators and year; all fields, tags and notes; or those and attachment full text. Defaults to the user's search mode."
 					},
-					"limit": {
-						"type": "integer",
-						"minimum": 1,
-						"maximum": 50,
-						"default": 20
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
+					"collectionKey": { "type": "string", "description": "Only items in this collection" },
+					"sort": { "enum": ["dateModified", "dateAdded", "date", "title", "creator"], "default": "dateModified" },
+					"direction": { "enum": ["asc", "desc"], "description": "Defaults to newest first for dates, A to Z otherwise" },
+					"limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 25 },
+					"offset": { "type": "integer", "minimum": 0, "default": 0 }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"total": { "type": "integer" },
+					"items": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"itemType": { "type": "string" },
+								"parentKey": { "type": "string" },
+								"title": { "type": "string" },
+								"creators": { "type": "string" },
+								"date": { "type": "string" },
+								"citationKey": { "type": "string" },
+								"file": {
+									"type": "object",
+									"description": "The best PDF, EPUB or snapshot attachment",
+									"properties": {
+										"key": { "type": "string" },
+										"contentType": { "type": "string" }
+									},
+									"required": ["key"]
+								},
+								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
+							},
+							"required": ["key", "itemType", "title", "link"]
+						}
+					},
+					"nextOffset": { "type": "integer", "description": "Present when there are more results" }
+				},
+				"required": ["libraryID", "total", "items"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
+			"name": "zotero_get_items",
+			"title": "Get Zotero items",
+			"description": "Get the full data of items, in Zotero web API JSON, with their attachments and notes.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"keys": {
+						"type": "array",
+						"items": { "type": "string" },
+						"minItems": 1,
+						"maxItems": 50
+					},
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["keys"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"items": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"description": "The item's fields, creators, tags, collections and so on, plus these",
+							"properties": {
+								"key": { "type": "string" },
+								"itemType": { "type": "string" },
+								"link": { "type": "string" },
+								"attachments": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"properties": {
+											"key": { "type": "string" },
+											"title": { "type": "string" },
+											"contentType": { "type": "string" },
+											"linkMode": { "type": "string" },
+											"fileExists": { "type": "boolean" },
+											"annotationCount": { "type": "integer" }
+										},
+										"required": ["key", "title", "linkMode"]
+									}
+								},
+								"notes": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"properties": {
+											"key": { "type": "string" },
+											"title": { "type": "string" }
+										},
+										"required": ["key", "title"]
+									}
+								}
+							},
+							"required": ["key", "itemType", "link"]
+						}
+					},
+					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys with no item" }
+				},
+				"required": ["libraryID", "items"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
+			"name": "zotero_list_collections",
+			"title": "List Zotero collections",
+			"description": "List a library's collections, or a collection's subcollections at any depth.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
+					"parentKey": { "type": "string" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"collections": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"name": { "type": "string" },
+								"parentKey": { "type": "string" },
+								"itemCount": { "type": "integer" }
+							},
+							"required": ["key", "name", "itemCount"]
+						}
 					}
 				},
-				"required": ["query"],
+				"required": ["libraryID", "collections"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
+			"name": "zotero_list_tags",
+			"title": "List Zotero tags",
+			"description": "List a library's tags with how many items have each. Coloured tags, which the user assigned to number keys, come first.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
+					"query": { "type": "string", "description": "Only tags containing this" },
+					"limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 },
+					"offset": { "type": "integer", "minimum": 0, "default": 0 }
+				},
 				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"total": { "type": "integer" },
+					"tags": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"name": { "type": "string" },
+								"count": { "type": "integer" },
+								"color": { "type": "string" }
+							},
+							"required": ["name", "count"]
+						}
+					},
+					"nextOffset": { "type": "integer" }
+				},
+				"required": ["libraryID", "total", "tags"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
+			"name": "zotero_generate_citation",
+			"title": "Generate Zotero citations",
+			"description": "Format items as one citation (with page or other locators) or a bibliography in a citation style, or export them as BibTeX, BibLaTeX, RIS or CSL-JSON. Defaults to the style the user copies citations with. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"items": {
+						"type": "array",
+						"description": "In citation order",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"locator": { "type": "string", "description": "For format citation, e.g. \"23\" or \"23-25\"" },
+								"label": {
+									"enum": ["act", "appendix", "article-locator", "book", "canon", "chapter", "column", "elocation", "equation", "figure", "folio", "issue", "line", "note", "opus", "page", "paragraph", "part", "rule", "scene", "section", "sub-verbo", "table", "timestamp", "title-locator", "verse", "volume"],
+									"default": "page"
+								}
+							},
+							"required": ["key"],
+							"additionalProperties": false
+						},
+						"minItems": 1,
+						"maxItems": 100
+					},
+					"format": { "enum": ["citation", "bibliography", "bibtex", "biblatex", "ris", "csljson"] },
+					"style": { "type": "string", "description": "A style's short name, e.g. \"apa\", or its ID" },
+					"locale": { "type": "string", "description": "e.g. \"en-GB\"" },
+					"html": { "type": "boolean", "default": false, "description": "HTML instead of plain text" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["items", "format"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"format": { "type": "string" },
+					"style": { "type": "string" },
+					"styleTitle": { "type": "string" },
+					"locale": { "type": "string" },
+					"output": { "type": "string" }
+				},
+				"required": ["format", "output"]
 			},
 			"annotations": {
 				"readOnlyHint": true

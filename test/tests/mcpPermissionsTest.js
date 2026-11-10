@@ -42,7 +42,7 @@ describe("Zotero.MCP.Permissions", function () {
 	
 	it("should let apps read without asking", async function () {
 		let ask = sinon.stub(Permissions, '_ask');
-		let { result } = await callMCPTool('zotero_search_items', { query: 'x' });
+		let { result } = await callMCPTool('zotero_search', { query: 'x' });
 		assert.notOk(result.isError);
 		assert.isFalse(ask.called);
 	});
@@ -75,7 +75,7 @@ describe("Zotero.MCP.Permissions", function () {
 		assert.isFalse(Permissions.isGranted('test-client', Permissions.EDIT_LIBRARY, group.libraryID));
 		
 		let { result } = await callMCPTool('zotero_status', {});
-		let { permissions } = JSON.parse(result.content[0].text);
+		let { permissions } = result.structuredContent;
 		assert.deepEqual(permissions, [
 			{ permission: Permissions.EDIT_LIBRARY, libraryID: item.libraryID, until: null }
 		]);
