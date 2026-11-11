@@ -20,7 +20,7 @@ describe("Zotero.MCP.Permissions", function () {
 	});
 	
 	function addTag(tag, clientInfo) {
-		return callMCPTool('zotero_add_tag', { itemKey: item.key, tag }, clientInfo);
+		return callMCPTool('zotero_update_items', { changes: [{ key: item.key, addTags: [tag] }] }, clientInfo);
 	}
 	
 	async function getDialog() {
@@ -96,7 +96,9 @@ describe("Zotero.MCP.Permissions", function () {
 	
 	it("should check the library before asking", async function () {
 		let ask = sinon.stub(Permissions, '_ask');
-		let { result } = await callMCPTool('zotero_add_tag', { itemKey: item.key, tag: 'a', libraryID: 99999 });
+		let { result } = await callMCPTool(
+			'zotero_update_items', { changes: [{ key: item.key, addTags: ['a'] }], libraryID: 99999 }
+		);
 		assert.isTrue(result.isError);
 		assert.match(result.content[0].text, /No library/);
 		assert.isFalse(ask.called);

@@ -1399,6 +1399,8 @@ undo-action-merge-annotations = { $count ->
     [one] Merge { $count } Annotation
    *[other] Merge { $count } Annotations
 }
+# $app is an AI app's name, e.g. "Claude"
+undo-action-mcp-changes = Changes by { $app }
 menu-edit-undo-action = Undo { $action }
 menu-edit-redo-action = Redo { $action }
 

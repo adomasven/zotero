@@ -214,7 +214,7 @@
 		{
 			"name": "zotero_list_tags",
 			"title": "List Zotero tags",
-			"description": "List a library's tags with how many items have each. Coloured tags, which the user assigned to number keys, come first.",
+			"description": "List a library's tags with how many items have each. Colored tags, which the user assigned to number keys, come first.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -617,21 +617,129 @@
 			}
 		},
 		{
-			"name": "zotero_add_tag",
-			"title": "Add a tag",
-			"description": "Add a tag to an item. Zotero asks the user for permission unless it was already granted.",
+			"name": "zotero_update_items",
+			"title": "Edit Zotero items",
+			"description": "Change items' metadata, tags and collections: set or clear fields (title, date, DOI, abstractNote and so on), replace creators, add or remove tags, and add items to or remove them from collections. Use it to tag, retitle, correct or file items. Up to 50 items per call. The whole call succeeds or changes nothing: if any change is invalid (an unknown key, or a field the item's type doesn't have), the error says why and nothing is changed. The user can undo the whole call in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"itemKey": { "type": "string", "description": "The item's key" },
-					"tag": { "type": "string" },
-					"libraryID": {
-						"type": "integer",
-						"description": "Defaults to My Library"
+					"changes": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string", "description": "The item's key" },
+								"fields": {
+									"type": "object",
+									"description": "Fields to set, by Zotero field name (as in zotero_get_items), e.g. {\"title\": \"…\", \"date\": \"2020-05\"}. An empty string clears a field.",
+									"additionalProperties": { "type": "string" }
+								},
+								"creators": {
+									"type": "array",
+									"description": "Replaces all of the item's creators, in order",
+									"items": {
+										"type": "object",
+										"properties": {
+											"creatorType": { "type": "string", "description": "e.g. \"author\" or \"editor\"" },
+											"firstName": { "type": "string" },
+											"lastName": { "type": "string" },
+											"name": { "type": "string", "description": "Instead of firstName and lastName, for an organization or a one-part name" }
+										},
+										"required": ["creatorType"],
+										"oneOf": [
+											{ "required": ["lastName"], "not": { "required": ["name"] } },
+											{ "required": ["name"], "not": { "anyOf": [{ "required": ["firstName"] }, { "required": ["lastName"] }] } }
+										],
+										"additionalProperties": false
+									}
+								},
+								"addTags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+								"removeTags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+								"addToCollections": { "type": "array", "items": { "type": "string" }, "description": "Collection keys. An item stays in the collections it's already in." },
+								"removeFromCollections": { "type": "array", "items": { "type": "string" }, "description": "Collection keys. The item stays in the library." }
+							},
+							"required": ["key"],
+							"additionalProperties": false
+						},
+						"minItems": 1,
+						"maxItems": 50
+					},
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["changes"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"items": {
+						"type": "array",
+						"description": "The items as they are now",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"itemType": { "type": "string" },
+								"parentKey": { "type": "string" },
+								"title": { "type": "string" },
+								"creators": { "type": "string" },
+								"date": { "type": "string" },
+								"citationKey": { "type": "string" },
+								"file": {
+									"type": "object",
+									"properties": {
+										"key": { "type": "string" },
+										"contentType": { "type": "string" }
+									},
+									"required": ["key"]
+								},
+								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
+							},
+							"required": ["key", "itemType", "title", "link"]
+						}
 					}
 				},
-				"required": ["itemKey", "tag"],
+				"required": ["libraryID", "items"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": true
+			}
+		},
+		{
+			"name": "zotero_manage_collections",
+			"title": "Create, rename or move a Zotero collection",
+			"description": "Create a collection, rename one, or move one into another collection or to the top level. To put items in a collection, use zotero_update_items. The user can undo the call in Zotero with Edit → Undo, which moves a new collection to the trash. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"action": { "enum": ["create", "rename", "move"] },
+					"key": { "type": "string", "description": "The collection to rename or move" },
+					"name": { "type": "string", "minLength": 1, "description": "For create and rename" },
+					"parentKey": {
+						"type": ["string", "null"],
+						"description": "For create, the collection to create it in (top level if omitted). For move, where to move it, or null for the top level."
+					},
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["action"],
 				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string" },
+					"name": { "type": "string" },
+					"parentKey": { "type": "string" },
+					"link": { "type": "string", "description": "zotero:// link that shows the collection in Zotero" }
+				},
+				"required": ["libraryID", "key", "name", "link"]
 			},
 			"_meta": {
 				"org.zotero/permission": "editLibrary"
@@ -639,6 +747,71 @@
 			"annotations": {
 				"readOnlyHint": false,
 				"destructiveHint": false,
+				"idempotentHint": false
+			}
+		},
+		{
+			"name": "zotero_add_note",
+			"title": "Add a Zotero note",
+			"description": "Add a note, written in Markdown, under an item (a child note) or as a standalone note, optionally in a collection. Supports CommonMark with tables, ~~strikethrough~~ and TeX math: $…$ inline, and display math between lines of just $$. As when Markdown is pasted into a Zotero note, dollar signs only become math around something that looks like math (a TeX command, braces or an operator), so $x$ alone or $5 stays text. Raw HTML is shown as text, and images become links. The user can undo it in Zotero with Edit → Undo, which moves the note to the trash. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"markdown": { "type": "string", "minLength": 1, "description": "The note. Its first line becomes its title, so start with a heading." },
+					"parentKey": { "type": "string", "description": "The regular item (e.g. a journal article) to add the note under" },
+					"collectionKey": { "type": "string", "description": "For a standalone note, a collection to put it in" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["markdown"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string" },
+					"parentKey": { "type": "string" },
+					"title": { "type": "string" },
+					"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
+				},
+				"required": ["libraryID", "key", "title", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false
+			}
+		},
+		{
+			"name": "zotero_trash",
+			"title": "Move to or restore from the Zotero trash",
+			"description": "Move items (with their notes and attachments) or collections (with their subcollections) to the trash, or restore them from it. Items in a trashed collection stay in the library. The user can restore trashed things from the trash, or undo the whole call in Zotero with Edit → Undo, until the trash is emptied. Zotero asks the user for permission unless it was already granted: to trash, for an hour at most.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"keys": { "type": "array", "items": { "type": "string" }, "maxItems": 100, "description": "Items, notes or attachments" },
+					"collectionKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100 },
+					"restore": { "type": "boolean", "default": false, "description": "Restore from the trash instead" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"restored": { "type": "boolean" },
+					"items": { "type": "array", "items": { "type": "string" } },
+					"collections": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" }
+				},
+				"required": ["libraryID", "restored", "items", "collections"]
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
 				"idempotentHint": true
 			}
 		}

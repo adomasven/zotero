@@ -68,6 +68,13 @@ const browserifyConfigs = [
 		}
 	},
 	{
+		src: 'node_modules/markdown-it/dist/index.cjs.js',
+		dest: 'resource/markdown-it.js',
+		config: {
+			standalone: 'markdown-it'
+		}
+	},
+	{
 		src: 'node_modules/url/url.js',
 		dest: 'resource/url.js',
 		config: {

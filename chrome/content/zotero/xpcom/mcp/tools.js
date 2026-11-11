@@ -627,6 +627,262 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * Change items' fields, creators, tags and collections, all or none: everything is checked
+	 * before anything changes
+	 */
+	this.updateItems = async function ({ changes, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		let checked = [];
+		for (let change of changes) {
+			let item = await getItem(libraryID, change.key);
+			if (!item.isEditable()) {
+				throw new Zotero.MCP.ToolError(`${item.key} can't be edited`);
+			}
+			for (let field of Object.keys(change.fields ?? {})) {
+				checkField(item, field);
+			}
+			if (change.creators) {
+				checkCreators(item, change.creators);
+			}
+			let tags = [...change.addTags ?? [], ...change.removeTags ?? []];
+			if (tags.some(tag => !tag.trim())) {
+				throw new Zotero.MCP.ToolError('Tags must not be empty');
+			}
+			let addTo = (change.addToCollections ?? []).map(key => getCollection(libraryID, key));
+			let removeFrom = (change.removeFromCollections ?? []).map(key => getCollection(libraryID, key));
+			if ((addTo.length || removeFrom.length) && !item.isTopLevelItem()) {
+				throw new Zotero.MCP.ToolError(
+					`${item.key} is a child item, which is in the collections of its parent item `
+						+ `${item.parentKey}`
+				);
+			}
+			checked.push({ item, change, addTo, removeFrom });
+		}
+		
+		let items = [...new Set(checked.map(({ item }) => item))];
+		try {
+			await edit(clientID, async () => {
+				for (let { item, change, addTo, removeFrom } of checked) {
+					for (let [field, value] of Object.entries(change.fields ?? {})) {
+						item.setField(field, value);
+					}
+					if (change.creators) {
+						item.setCreators(change.creators, { strict: true });
+					}
+					for (let tag of change.addTags ?? []) {
+						item.addTag(tag.trim());
+					}
+					for (let tag of change.removeTags ?? []) {
+						item.removeTag(tag.trim());
+					}
+					for (let collection of addTo) {
+						item.addToCollection(collection.id);
+					}
+					for (let collection of removeFrom) {
+						item.removeFromCollection(collection.id);
+					}
+					await item.save();
+				}
+			});
+		}
+		catch (e) {
+			// The transaction was rolled back, but the items still have the changes in memory
+			for (let item of items) {
+				await item.reload(null, true);
+			}
+			throw e;
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			items: await Promise.all(items.map(summarize)),
+		});
+	};
+	
+	/**
+	 * Create, rename or move a collection
+	 */
+	this.manageCollections = async function ({ action, key, name, parentKey, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		name = name?.trim();
+		if (action != 'move' && !name) {
+			throw new Zotero.MCP.ToolError(`${action} needs a name`);
+		}
+		if (action == 'move' && parentKey === undefined) {
+			throw new Zotero.MCP.ToolError('move needs a parentKey, or null to move to the top level');
+		}
+		let collection;
+		if (action == 'create') {
+			collection = new Zotero.Collection({ libraryID });
+		}
+		else if (key) {
+			collection = getCollection(libraryID, key);
+		}
+		else {
+			throw new Zotero.MCP.ToolError(`${action} needs the key of the collection`);
+		}
+		let parent = parentKey ? getCollection(libraryID, parentKey) : null;
+		let result;
+		try {
+			// Checked and changed inside the transaction, so that concurrent calls can't
+			// interleave, e.g. two moves that together put a collection inside itself
+			await edit(clientID, async () => {
+				if (parent && collection.id
+						&& (parent.id == collection.id || collection.hasDescendent('collection', parent.id))) {
+					throw new Zotero.MCP.ToolError(`${collection.key} can't be moved into itself or a subcollection`);
+				}
+				if (action != 'move') {
+					collection.name = name;
+				}
+				if (action != 'rename') {
+					collection.parentKey = parent?.key ?? false;
+				}
+				// New collections aren't selected, so as not to disturb the user
+				await collection.save({ skipSelect: true });
+				result = {
+					libraryID,
+					key: collection.key,
+					name: collection.name,
+					parentKey: collection.parentKey || undefined,
+					link: `zotero://select/${Zotero.API.getLibraryPrefix(libraryID)}/collections/${collection.key}`,
+				};
+			});
+		}
+		catch (e) {
+			// The transaction was rolled back, but the collection still has the changes in memory
+			if (collection.id) {
+				await collection.reload(null, true);
+			}
+			throw e;
+		}
+		return Zotero.MCP.jsonResult(result);
+	};
+	
+	/**
+	 * A note from Markdown, under an item, in a collection, or standalone
+	 */
+	this.addNote = async function ({ markdown, parentKey, collectionKey, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		if (!markdown.trim()) {
+			throw new Zotero.MCP.ToolError('The note must not be empty');
+		}
+		if (parentKey && collectionKey) {
+			throw new Zotero.MCP.ToolError(
+				'Give parentKey or collectionKey, not both: a note under an item shows wherever the item is'
+			);
+		}
+		let note = new Zotero.Item('note');
+		note.libraryID = libraryID;
+		if (parentKey) {
+			let parent = await getItem(libraryID, parentKey);
+			if (!parent.isRegularItem()) {
+				throw new Zotero.MCP.ToolError(
+					`${parent.key} is ${parent.isNote() ? 'a note' : 'an ' + parent.itemType}. Notes can `
+						+ "only be added under regular items, such as a journal article."
+				);
+			}
+			note.parentID = parent.id;
+		}
+		if (collectionKey) {
+			note.addToCollection(getCollection(libraryID, collectionKey).id);
+		}
+		note.setNote(markdownToNoteHTML(markdown));
+		// Not selected, so as not to disturb the user
+		await edit(clientID, () => note.save({ skipSelect: true }));
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			key: note.key,
+			parentKey: note.parentKey || undefined,
+			title: note.getNoteTitle(),
+			link: getSelectLink(note),
+		});
+	};
+	
+	/**
+	 * Move items and collections to the trash, or restore them from it
+	 *
+	 * Trashing needs DELETE, but restoring only EDIT_LIBRARY, so this asks for the permission
+	 * itself instead of declaring one in tools.json.
+	 */
+	this.trash = async function ({
+		keys = [], collectionKeys = [], restore = false, libraryID,
+	}, { clientID, signal }) {
+		libraryID = getLibraryID(libraryID);
+		let library = Zotero.Libraries.get(libraryID);
+		if (!library.editable || !library.hasTrash) {
+			throw new Zotero.MCP.ToolError(`${library.name} is read-only`);
+		}
+		if (!keys.length && !collectionKeys.length) {
+			throw new Zotero.MCP.ToolError('Give keys or collectionKeys');
+		}
+		let check = (object, type, key) => {
+			if (!object) {
+				throw new Zotero.MCP.ToolError(`No ${type} ${key} in library ${libraryID}`);
+			}
+			if (object.deleted != restore) {
+				throw new Zotero.MCP.ToolError(
+					`${key} ${restore ? "isn't in the trash" : 'is already in the trash'}`
+				);
+			}
+			if (!object.isEditable()) {
+				throw new Zotero.MCP.ToolError(`${key} can't be changed`);
+			}
+			return object;
+		};
+		let items = [];
+		for (let key of new Set(keys)) {
+			let item = check(await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key), 'item', key);
+			if (item.isAnnotation()) {
+				throw new Zotero.MCP.ToolError(`${key} is an annotation, which can't be moved to the trash`);
+			}
+			items.push(item);
+		}
+		let collections = [...new Set(collectionKeys)]
+			.map(key => check(Zotero.Collections.getByLibraryAndKey(libraryID, key), 'collection', key));
+		// Subcollections go with their collection
+		collections = collections.filter(collection => !collections.some(
+			other => other != collection && other.hasDescendent('collection', collection.id)
+		));
+		
+		let { EDIT_LIBRARY, DELETE } = Zotero.MCP.Permissions;
+		await Zotero.MCP.Permissions.require(clientID, restore ? EDIT_LIBRARY : DELETE, libraryID, signal);
+		await edit(clientID, async () => {
+			if (!restore) {
+				await Zotero.Items.trash(items.map(item => item.id));
+				for (let collection of collections) {
+					collection.deleted = true;
+					await collection.save();
+				}
+				return;
+			}
+			// As when the user restores only parent items and collections in the trash
+			// (ZoteroPane.restoreSelectedItems()), their children come back too
+			let restored = [...items, ...collections];
+			for (let item of items) {
+				if (item.isRegularItem()) {
+					restored.push(...Zotero.Items.get([...item.getNotes(true), ...item.getAttachments(true)]));
+				}
+			}
+			for (let collection of collections) {
+				restored.push(...Zotero.Collections.get(
+					collection.getDescendents(false, 'collection', true).map(descendant => descendant.id)
+				));
+			}
+			for (let object of new Set(restored)) {
+				if (object.deleted) {
+					object.deleted = false;
+					await object.save();
+				}
+			}
+		});
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			restored: restore,
+			items: items.map(item => item.key),
+			collections: collections.map(collection => collection.key),
+		});
+	};
+	
+	/**
 	 * An installed style, or one installed from the Zotero Style Repository with the user's
 	 * permission
 	 *
@@ -1113,17 +1369,175 @@ Zotero.MCP.Tools = new function () {
 		items.sort((a, b) => sign * compare(values.get(a), values.get(b)));
 	}
 	
-	// Removed in a later commit
-	this.addTag = async function ({ itemKey, tag, libraryID = Zotero.Libraries.userLibraryID }) {
-		if (!tag.trim()) {
-			throw new Zotero.MCP.ToolError('tag must not be empty');
-		}
-		let item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
+	/**
+	 * Run an app's changes in one transaction, which the user undoes in one step (Edit → Undo
+	 * Changes by <app>). Undo moves new items and collections to the trash.
+	 */
+	function edit(clientID, fn) {
+		return Zotero.DB.executeTransaction(async () => {
+			let result = await fn();
+			// After fn(), as the last label staged wins over e.g. Zotero.Items.trash()'s own
+			Zotero.UndoHistory.stageAction('undo-action-mcp-changes', {
+				app: Zotero.MCP.Apps.getDisplayName(clientID)
+			});
+			return result;
+		});
+	}
+	
+	async function getItem(libraryID, key) {
+		let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
 		if (!item || item.deleted) {
-			throw new Zotero.MCP.ToolError(`No item ${itemKey} in library ${libraryID}`);
+			throw new Zotero.MCP.ToolError(`No item ${key} in library ${libraryID}`);
 		}
-		item.addTag(tag.trim());
-		await item.saveTx();
-		return Zotero.MCP.textResult(`Added tag "${tag.trim()}" to ${item.key}.`);
-	};
+		return item;
+	}
+	
+	/**
+	 * @throws {Zotero.MCP.ToolError} If a field isn't valid for the item's type
+	 */
+	function checkField(item, field) {
+		let fieldID = Zotero.ItemFields.getID(field);
+		// Base fields (e.g. publicationTitle) stand for the type's own (e.g. bookTitle)
+		fieldID = fieldID && (Zotero.ItemFields.getFieldIDFromTypeAndBase(item.itemTypeID, fieldID) || fieldID);
+		if (!fieldID || !Zotero.ItemFields.isValidForType(fieldID, item.itemTypeID)) {
+			let fields = Zotero.ItemFields.getItemTypeFields(item.itemTypeID)
+				.map(id => Zotero.ItemFields.getName(id));
+			throw new Zotero.MCP.ToolError(
+				`${item.key}: ${field} isn't a field of item type ${item.itemType}. `
+					+ (fields.length ? `Its fields are ${fields.join(', ')}.` : 'It has no fields.')
+			);
+		}
+	}
+	
+	/**
+	 * @throws {Zotero.MCP.ToolError} If a creator type isn't valid for the item's type
+	 */
+	function checkCreators(item, creators) {
+		let types = Zotero.CreatorTypes.getTypesForItemType(item.itemTypeID).map(type => type.name);
+		for (let creator of creators) {
+			if (!types.includes(creator.creatorType)) {
+				throw new Zotero.MCP.ToolError(
+					`${item.key}: ${creator.creatorType} isn't a creator type of item type ${item.itemType}. `
+						+ (types.length ? `Its creator types are ${types.join(', ')}.` : 'It has no creators.')
+				);
+			}
+		}
+	}
+	
+	let _markdownIt;
+	
+	/**
+	 * Note HTML from Markdown, as the note editor makes from pasted Markdown (CommonMark with
+	 * tables, strikethrough and TeX math, and no raw HTML), and with bare URLs made links
+	 */
+	function markdownToNoteHTML(markdown) {
+		if (!_markdownIt) {
+			// The note editor's configuration (note-editor/src/core/plugins/markdown-parser.js),
+			// plus the linkify rule, which the commonmark preset leaves off even with
+			// linkify: true
+			_markdownIt = require('markdown-it')('commonmark', { html: false, linkify: true, breaks: false })
+				.enable(['table', 'strikethrough', 'linkify']);
+			addMath(_markdownIt);
+			// Notes only show images stored in Zotero, so other images become links
+			_markdownIt.renderer.rules.image = (tokens, i, options, env, self) => {
+				let src = _markdownIt.utils.escapeHtml(tokens[i].attrGet('src'));
+				let alt = self.renderInlineAsText(tokens[i].children, options, env);
+				return `<a href="${src}">${_markdownIt.utils.escapeHtml(alt) || src}</a>`;
+			};
+		}
+		return `<div data-schema-version="9">${_markdownIt.render(markdown)}</div>`;
+	}
+	
+	/**
+	 * TeX math as the note editor stores it: <span class="math">$…$</span> and
+	 * <pre class="math">$$…$$</pre>
+	 *
+	 * The same rules as when Markdown is pasted into a note, copied from the note editor
+	 * (note-editor/src/core/plugins/markdown-parser.js), so a note reads the same either way:
+	 * dollar signs become math only around content that looks like math (a TeX command,
+	 * braces or an operator), and display math is fenced by lines of just $$.
+	 */
+	function addMath(md) {
+		let { escapeHtml } = md.utils;
+		
+		function isMathish(content) {
+			let text = String(content).trim();
+			if (!text) return false;
+			// Ignore trivial numeric values (helps with currency like "$20")
+			if (/^\d+(?:[.,]\d+)?$/.test(text)) return false;
+			let hasCommand = /\\[a-zA-Z]+/.test(text);
+			// Leading +/- of a number isn't an operator
+			let sanitized = text.replace(/(^|\s)[+-](?=\d)/g, ' ');
+			let hasOperator = /[+\-*/=^_]/.test(sanitized);
+			let open = (text.match(/{/g) || []).length;
+			let close = (text.match(/}/g) || []).length;
+			if ((open || close) && open !== close) return false;
+			return hasCommand || open > 0 || hasOperator;
+		}
+		
+		md.inline.ruler.after('escape', 'math_inline', (state, silent) => {
+			let start = state.pos;
+			if (state.src[start] !== '$' || state.src[start + 1] === '$') return false;
+			// Avoid matching inside code spans
+			if (state.tokens && state.tokens.some(t => t.type === 'code_inline')) return false;
+			let pos = start + 1;
+			let found = false;
+			while (pos < state.posMax) {
+				if (state.src[pos] === '$') {
+					// An odd number of backslashes escapes it
+					let backslashes = 0;
+					for (let prev = pos - 1; prev >= 0 && state.src[prev] === '\\'; prev--) {
+						backslashes++;
+					}
+					if (backslashes % 2 === 0) {
+						found = true;
+						break;
+					}
+				}
+				pos++;
+			}
+			if (!found) return false;
+			let content = state.src.slice(start + 1, pos);
+			if (!content || /^\s+$/.test(content) || !isMathish(content)) return false;
+			if (!silent) {
+				state.push('math_inline', '', 0).content = content;
+			}
+			state.pos = pos + 1;
+			return true;
+		});
+		
+		md.block.ruler.after('fence', 'math_block', (state, startLine, endLine, silent) => {
+			// A line of $$ and nothing else but spaces and tabs
+			let isFence = (line) => {
+				let start = state.bMarks[line] + state.tShift[line];
+				return /^\$\$[ \t]*$/.test(state.src.slice(start, state.eMarks[line]));
+			};
+			if (!isFence(startLine)) return false;
+			let contentStart = state.bMarks[startLine] + state.tShift[startLine] + 2;
+			let nextLine = startLine;
+			let contentEnd;
+			while (true) {
+				nextLine++;
+				if (nextLine >= endLine) return false;
+				if (isFence(nextLine)) {
+					contentEnd = state.bMarks[nextLine];
+					break;
+				}
+			}
+			if (silent) return true;
+			let content = state.src.slice(contentStart, contentEnd).replace(/^\s*\n?|\n?\s*$/g, '');
+			if (!isMathish(content)) return false;
+			state.line = nextLine + 1;
+			let token = state.push('math_block', '', 0);
+			token.block = true;
+			token.map = [startLine, nextLine + 1];
+			token.content = content;
+			return true;
+		});
+		
+		// eslint-disable-next-line camelcase
+		md.renderer.rules.math_inline = (tokens, i) => `<span class="math">$${escapeHtml(tokens[i].content)}$</span>`;
+		// eslint-disable-next-line camelcase
+		md.renderer.rules.math_block = (tokens, i) => `<pre class="math">$$${escapeHtml(tokens[i].content)}$$</pre>\n`;
+	}
 };
