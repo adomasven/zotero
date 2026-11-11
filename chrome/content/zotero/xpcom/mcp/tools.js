@@ -55,6 +55,9 @@ Zotero.MCP.Tools = new function () {
 	const MAX_PASSAGE = 1000;
 	const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 	
+	// Most selected items zotero_get_context lists
+	const MAX_CONTEXT_ITEMS = 50;
+	
 	// Zotero.Translate.Export translators for zotero_generate_citation's export formats
 	const EXPORT_FORMATS = {
 		bibtex: '9cb70025-a888-4a29-a210-93ec52da40d4',
@@ -500,6 +503,57 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * What the user is looking at in the main window: the library tab's selection, and the
+	 * open reader or note
+	 */
+	this.getContext = async function () {
+		let win = Zotero.getMainWindow();
+		if (!win?.ZoteroPane?.collectionsView) {
+			return Zotero.MCP.jsonResult({ window: false });
+		}
+		let { ZoteroPane, Zotero_Tabs } = win;
+		let libraryID = ZoteroPane.getSelectedLibraryIDs()[0];
+		let items = ZoteroPane.getSelectedItems(false, { libraryTabOnly: true });
+		let result = {
+			window: true,
+			tab: Zotero_Tabs.selectedType,
+			libraryID,
+			libraryName: libraryID ? Zotero.Libraries.get(libraryID).name : undefined,
+			collections: ZoteroPane.getSelectedCollections().map(collection => ({
+				key: collection.key,
+				name: collection.name,
+			})),
+			savedSearches: ZoteroPane.getSelectedSavedSearches().map(search => ({
+				key: search.key,
+				name: search.name,
+			})),
+			selectedItemCount: items.length,
+			selectedItems: await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(summarize)),
+		};
+		
+		if (Zotero_Tabs.selectedType == 'reader') {
+			let reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
+			let attachment = reader && Zotero.Items.get(reader.itemID);
+			if (attachment) {
+				result.reader = describeReader(reader, attachment);
+			}
+		}
+		else if (Zotero_Tabs.selectedType == 'note') {
+			let note = Zotero.Items.get(Zotero_Tabs.getTabInfo(Zotero_Tabs.selectedID)?.data.itemID);
+			if (note) {
+				result.note = {
+					libraryID: note.libraryID,
+					key: note.key,
+					parentKey: note.parentKey || undefined,
+					title: note.getNoteTitle(),
+					link: getSelectLink(note),
+				};
+			}
+		}
+		return Zotero.MCP.jsonResult(result);
+	};
+	
+	/**
 	 * Citations and bibliographies in a CSL style, or the items in an export format
 	 */
 	this.generateCitation = async function ({
@@ -865,6 +919,77 @@ Zotero.MCP.Tools = new function () {
 	 */
 	function getTitle(attachment) {
 		return attachment.parentItem?.getDisplayTitle() || attachment.getField('title');
+	}
+	
+	/**
+	 * The file open in a reader tab, the page the user is on, and what they've selected
+	 */
+	function describeReader(reader, attachment) {
+		let { pageIndex, pageLabel, selection, selectedAnnotationKeys } = getReaderState(reader);
+		let page;
+		// For an EPUB, the reader's page is a location number unless the book has page numbers,
+		// and links can't open one, so only a selection's page label is given
+		if (attachment.isPDFAttachment()) {
+			pageIndex ??= attachment.getAttachmentLastPageIndex() ?? undefined;
+			page = Number.isInteger(pageIndex) ? pageIndex + 1 : undefined;
+		}
+		else {
+			pageLabel = undefined;
+		}
+		let description = {
+			libraryID: attachment.libraryID,
+			key: attachment.key,
+			parentKey: attachment.parentKey || undefined,
+			title: getTitle(attachment),
+			contentType: attachment.attachmentContentType,
+			type: reader.type,
+			page,
+			pageLabel: knownPageLabel(pageLabel),
+			link: getOpenLink(attachment, { page }),
+			selectedAnnotations: selectedAnnotationKeys
+				.map(key => Zotero.Items.getByLibraryAndKey(attachment.libraryID, key))
+				.filter(annotation => annotation?.isAnnotation())
+				.map(describeAnnotation),
+		};
+		if (selection?.text) {
+			let selectionPageIndex = selection.position?.pageIndex;
+			description.selection = {
+				text: selection.text,
+				page: Number.isInteger(selectionPageIndex) ? selectionPageIndex + 1 : undefined,
+				pageLabel: knownPageLabel(selection.pageLabel),
+			};
+		}
+		return description;
+	}
+	
+	/**
+	 * The page the user is on and what they've selected, from the reader's private state,
+	 * which can change without notice, so anything missing is left out.
+	 *
+	 * TODO: Use _internalReader.getSelection(), .selectedAnnotationIDs, .pageIndex and
+	 * .pageLabel once the reader has them (https://github.com/zotero/reader/pull/276)
+	 */
+	function getReaderState(reader) {
+		try {
+			let internalReader = reader._internalReader;
+			let state = internalReader._state;
+			// The view the user last used, as the reader's getSelectionPosition() decides
+			let view = internalReader._lastViewPrimary === false ? 'secondaryView' : 'primaryView';
+			// Copied out of the reader's window, so they can be passed on
+			let copy = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
+			let stats = copy(state[`${view}Stats`]) || {};
+			let selectedAnnotationKeys = copy(state.selectedAnnotationIDs);
+			return {
+				pageIndex: Number.isInteger(stats.pageIndex) ? stats.pageIndex : undefined,
+				pageLabel: typeof stats.pageLabel == 'string' ? stats.pageLabel : undefined,
+				selection: copy(state[`${view}SelectionPopup`]?.annotation),
+				selectedAnnotationKeys: Array.isArray(selectedAnnotationKeys) ? selectedAnnotationKeys : [],
+			};
+		}
+		catch (e) {
+			Zotero.logError(e);
+			return { selectedAnnotationKeys: [] };
+		}
 	}
 	
 	/**

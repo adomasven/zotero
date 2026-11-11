@@ -447,6 +447,85 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("zotero_get_context", function () {
+		let win;
+		
+		before(async function () {
+			win = await loadZoteroPane();
+		});
+		
+		after(function () {
+			win.Zotero_Tabs.closeAll();
+			win.close();
+		});
+		
+		it("should return the selected collection and items", async function () {
+			let collection = await createDataObject('collection');
+			let items = [];
+			for (let i = 0; i < 3; i++) {
+				items.push(await createArticle({ collections: [collection.id] }));
+			}
+			await win.ZoteroPane.collectionsView.selectCollection(collection.id);
+			await win.ZoteroPane.selectItems([items[0].id, items[2].id]);
+			
+			let context = await call('zotero_get_context', {});
+			assert.equal(context.tab, 'library');
+			assert.equal(context.libraryID, Zotero.Libraries.userLibraryID);
+			assert.deepEqual(context.collections, [{ key: collection.key, name: collection.name }]);
+			assert.equal(context.selectedItemCount, 2);
+			assert.sameMembers(context.selectedItems.map(item => item.key), [items[0].key, items[2].key]);
+			assert.notProperty(context, 'reader');
+		});
+		
+		it("should return the open file, its page, and the selected text and annotations", async function () {
+			let item = await createArticle();
+			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
+			let annotation = await createAnnotation('highlight', attachment);
+			let reader = await Zotero.Reader.open(attachment.id);
+			await reader._initPromise;
+			let internalReader = reader._internalReader;
+			await waitForCallback(() => internalReader._state.primaryViewStats.pageLabel !== undefined);
+			let readerWindow = reader._iframeWindow;
+			internalReader.setSelectedAnnotations(Cu.cloneInto([annotation.key], readerWindow));
+			// As the reader's state has it while text is selected (see getReaderState() in tools.js)
+			internalReader._state.primaryViewSelectionPopup = Cu.cloneInto({
+				annotation: {
+					text: 'Selected words',
+					pageLabel: '1',
+					position: { pageIndex: 0, rects: [[1, 1, 2, 2]] },
+				},
+			}, readerWindow);
+			
+			let context = await call('zotero_get_context', {});
+			assert.equal(context.tab, 'reader');
+			let { selectedAnnotations, ...rest } = context.reader;
+			assert.deepEqual(rest, {
+				libraryID: attachment.libraryID,
+				key: attachment.key,
+				parentKey: item.key,
+				title: item.getField('title'),
+				contentType: 'application/pdf',
+				type: 'pdf',
+				page: 1,
+				pageLabel: '1',
+				link: `zotero://open/library/items/${attachment.key}?page=1`,
+				selection: { text: 'Selected words', page: 1, pageLabel: '1' },
+			});
+			assert.deepEqual(selectedAnnotations.map(annotation => annotation.key), [annotation.key]);
+			
+			// "-" is the reader's label for a page whose label it couldn't determine
+			internalReader._state.primaryViewSelectionPopup.annotation.pageLabel = '-';
+			context = await call('zotero_get_context', {});
+			assert.deepEqual(context.reader.selection, { text: 'Selected words', page: 1 });
+			internalReader._state.primaryViewSelectionPopup = null;
+		});
+		
+		it("should say when the main window isn't open", async function () {
+			sinon.stub(Zotero, 'getMainWindow').returns(null);
+			assert.deepEqual(await call('zotero_get_context', {}), { window: false });
+		});
+	});
+	
 	describe("zotero_generate_citation", function () {
 		const STYLE_ID = 'http://www.zotero.org/styles/zotero-mcp-test';
 		let item;

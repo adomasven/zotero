@@ -448,6 +448,125 @@
 			}
 		},
 		{
+			"name": "zotero_get_context",
+			"title": "Get what the user is looking at in Zotero",
+			"description": "Get what the user has open and selected in Zotero's main window, so requests like \"summarize this paper\", \"the page I'm on\", \"the passage I selected\" or \"the papers I selected\" can be answered. Returns the selected library, collections and items in the library tab, and which tab is active. If it's a PDF, EPUB or web page snapshot in Zotero's reader, it also returns the file, the page the user is on, the text they've selected and the annotations they've selected; if it's a note, the note. Returns window: false when Zotero's main window isn't open.",
+			"inputSchema": {
+				"type": "object",
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"window": { "type": "boolean", "description": "Whether Zotero's main window is open" },
+					"tab": { "type": "string", "description": "The active tab: library, reader, note or another kind" },
+					"libraryID": { "type": "integer", "description": "The library selected in the library tab" },
+					"libraryName": { "type": "string" },
+					"collections": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": { "key": { "type": "string" }, "name": { "type": "string" } },
+							"required": ["key", "name"]
+						}
+					},
+					"savedSearches": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": { "key": { "type": "string" }, "name": { "type": "string" } },
+							"required": ["key", "name"]
+						}
+					},
+					"selectedItemCount": { "type": "integer" },
+					"selectedItems": {
+						"type": "array",
+						"description": "Items selected in the library tab, at most 50",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"itemType": { "type": "string" },
+								"parentKey": { "type": "string" },
+								"title": { "type": "string" },
+								"creators": { "type": "string" },
+								"date": { "type": "string" },
+								"citationKey": { "type": "string" },
+								"file": {
+									"type": "object",
+									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
+									"required": ["key"]
+								},
+								"link": { "type": "string" }
+							},
+							"required": ["key", "itemType", "title", "link"]
+						}
+					},
+					"reader": {
+						"type": "object",
+						"description": "The file open in the active reader tab",
+						"properties": {
+							"libraryID": { "type": "integer" },
+							"key": { "type": "string", "description": "The attachment's key, for zotero_read_text" },
+							"parentKey": { "type": "string" },
+							"title": { "type": "string" },
+							"contentType": { "type": "string" },
+							"type": { "enum": ["pdf", "epub", "snapshot"] },
+							"page": { "type": "integer", "description": "PDF page the user is on, from 1" },
+							"pageLabel": { "type": "string", "description": "The page number printed on that page, for citing" },
+							"link": { "type": "string", "description": "zotero:// link that opens the file, at the page for a PDF" },
+							"selection": {
+								"type": "object",
+								"description": "Text the user has selected",
+								"properties": {
+									"text": { "type": "string" },
+									"page": { "type": "integer" },
+									"pageLabel": { "type": "string" }
+								},
+								"required": ["text"]
+							},
+							"selectedAnnotations": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"key": { "type": "string" },
+										"attachmentKey": { "type": "string" },
+										"type": { "enum": ["highlight", "underline", "note", "text", "image", "ink"] },
+										"text": { "type": "string" },
+										"comment": { "type": "string" },
+										"color": { "type": "string" },
+										"page": { "type": "integer" },
+										"pageLabel": { "type": "string" },
+										"tags": { "type": "array", "items": { "type": "string" } },
+										"link": { "type": "string" }
+									},
+									"required": ["key", "attachmentKey", "type", "tags", "link"]
+								}
+							}
+						},
+						"required": ["libraryID", "key", "title", "type", "link", "selectedAnnotations"]
+					},
+					"note": {
+						"type": "object",
+						"description": "The note open in the active note tab",
+						"properties": {
+							"libraryID": { "type": "integer" },
+							"key": { "type": "string" },
+							"parentKey": { "type": "string" },
+							"title": { "type": "string" },
+							"link": { "type": "string" }
+						},
+						"required": ["libraryID", "key", "title", "link"]
+					}
+				},
+				"required": ["window"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
 			"name": "zotero_generate_citation",
 			"title": "Generate Zotero citations",
 			"description": "Format items as one citation (with page or other locators) or a bibliography in a citation style, or export them as BibTeX, BibLaTeX, RIS or CSL-JSON. Defaults to the style the user copies citations with. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",
