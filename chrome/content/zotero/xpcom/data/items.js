@@ -1047,6 +1047,9 @@ Zotero.Items = function () {
 
 		var libraryIDs = new Set();
 		ids = Zotero.flattenArguments(ids);
+		if (!ids.length) {
+			return;
+		}
 		var items = [];
 		var undoableCount = 0;
 		for (let id of ids) {

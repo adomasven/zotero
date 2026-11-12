@@ -219,6 +219,10 @@ describe("Zotero.Items", function () {
 	
 	
 	describe("#trash()", function () {
+		it("should do nothing without items", async function () {
+			await Zotero.Items.trashTx([]);
+		});
+		
 		it("should send items to the trash", async function () {
 			var items = [];
 			items.push(
