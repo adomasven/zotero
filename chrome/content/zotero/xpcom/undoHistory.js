@@ -27,8 +27,8 @@
  * In-memory undo/redo stack for DataObject field changes.
  *
  * Hooks into DB transaction lifecycle to batch all saves within a single
- * executeTransaction() into one undo step. Only tracks modifications to
- * existing objects.
+ * executeTransaction() into one undo step. Tracks modifications to existing
+ * objects, and the creation of new ones, which undo moves to the trash.
  *
  * Capture is opt-in via a two-call staging protocol within a transaction:
  *   - stageChange(record) -- append a change record to the pending entry
@@ -36,7 +36,7 @@
  * Both must be called within the same transaction for the entry to land on
  * the undo stack. A transaction that stages changes without an action (or
  * vice versa, with no staged changes) is silently discarded at commit.
- * DataObject.save() calls stageChange unconditionally for non-isNew saves;
+ * DataObject.save() calls stageChange unconditionally;
  * stageAction is opt-in via save({ undoAction, undoActionArgs }) or by an
  * outer caller invoking Zotero.UndoHistory.stageAction() directly inside
  * the transaction.
@@ -386,6 +386,27 @@ Zotero.UndoHistory = {
 		else {
 			this._pendingEntry.changes.push(changeRecord);
 		}
+	},
+
+	/**
+	 * Stage the creation of an object, which undo moves to the trash, so the
+	 * user can still get it back, and redo restores. Must be called inside a
+	 * transaction, like stageChange(). DataObject.save() calls it for new
+	 * objects; call it directly for objects saved in earlier transactions,
+	 * such as by a translator, to make their creation one undo step.
+	 *
+	 * @param {Zotero.DataObject} object -- In a library with a trash, and not an annotation
+	 */
+	stageCreation(object) {
+		this.stageChange({
+			objectType: object.objectType,
+			id: object.id,
+			libraryID: object.libraryID,
+			key: object.key,
+			fields: {
+				deleted: { old: true, new: false }
+			}
+		});
 	},
 
 	/**

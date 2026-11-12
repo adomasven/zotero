@@ -62,6 +62,47 @@ describe("Zotero.UndoHistory", function () {
 		});
 	});
 
+	describe("creating objects", function () {
+		it("should trash new objects on undo and restore them on redo", async function () {
+			let collection = new Zotero.Collection({ name: 'New' });
+			let item = createUnsavedDataObject('item', { title: 'New' });
+			await Zotero.DB.executeTransaction(async () => {
+				await collection.save();
+				item.addToCollection(collection.id);
+				await item.save();
+				Zotero.UndoHistory.stageAction('undo-action-add-to-collection', { count: 1 });
+			});
+
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(collection.deleted);
+			assert.isTrue(item.deleted);
+			// Still there for the user to get back
+			assert.isTrue(collection.hasItem(item.id));
+
+			assert.isTrue(await Zotero.UndoHistory.redo());
+			assert.isFalse(collection.deleted);
+			assert.isFalse(item.deleted);
+		});
+
+		it("shouldn't record a new object without an action", async function () {
+			await createDataObject('item');
+			assert.isFalse(Zotero.UndoHistory.canUndo());
+		});
+
+		it("should record objects saved in earlier transactions with stageCreation()", async function () {
+			let item = await createDataObject('item');
+			await Zotero.DB.executeTransaction(async () => {
+				Zotero.UndoHistory.stageCreation(item);
+				Zotero.UndoHistory.stageAction('undo-action-merge-items', { count: 1 });
+			});
+
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(item.deleted);
+			assert.isTrue(await Zotero.UndoHistory.redo());
+			assert.isFalse(item.deleted);
+		});
+	});
+
 	describe("trashing items via Items.trashTx", function () {
 		it("should undo and redo trashing an item", async function () {
 			let item = await createDataObject('item', { title: 'Trash Me' });

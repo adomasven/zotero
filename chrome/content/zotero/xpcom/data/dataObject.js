@@ -934,6 +934,22 @@ Zotero.DataObject.prototype._getUndoData = function () {
 
 
 /**
+ * Whether undoing this new object's creation can move it to the trash. Called
+ * during save() before _saveData() clears change tracking.
+ *
+ * Annotations are erased rather than trashed, and feeds have no trash, so
+ * their creation isn't undoable.
+ *
+ * @return {Boolean}
+ */
+Zotero.DataObject.prototype._canUndoCreation = function () {
+	return !this._changedData.deleted
+		&& Zotero.Libraries.get(this.libraryID).hasTrash
+		&& !(this._objectType == 'item' && this.isAnnotation());
+};
+
+
+/**
  * Whether the object still holds the values captured in an undo snapshot for
  * the given side -- the read-and-compare counterpart of _getUndoData(). Used by
  * Zotero.UndoHistory to avoid replaying a snapshot over an external change.
@@ -1067,14 +1083,16 @@ Zotero.DataObject.prototype.save = async function (options = {}) {
 		}
 
 		// Capture undo data before _saveData clears change tracking.
-		// Capture is unconditional for non-isNew saves; whether it lands on the
-		// undo stack depends on a stageAction() call within the same transaction.
+		// Capture is unconditional; whether it lands on the undo stack depends
+		// on a stageAction() call within the same transaction.
 		if (Zotero.UndoHistory && !env.isNew) {
 			env.undoData = this._getUndoData();
 			if (env.undoData) {
 				env.undoData.skipDateModified = !!env.options.skipDateModifiedUpdate;
 			}
 		}
+		// A new object is recorded after it's saved, once it has an ID
+		var undoCreation = Zotero.UndoHistory && env.isNew && this._canUndoCreation();
 
 		// Create transaction
 		let result
@@ -1083,11 +1101,14 @@ Zotero.DataObject.prototype.save = async function (options = {}) {
 				Zotero.DataObject.prototype._saveData.call(this, env);
 				await this._saveData(env);
 				await Zotero.DataObject.prototype._finalizeSave.call(this, env);
-				if (env.undoData) {
+				if (undoCreation) {
+					Zotero.UndoHistory.stageCreation(this);
+				}
+				else if (env.undoData) {
 					Zotero.UndoHistory.stageChange(env.undoData);
-					if (env.options.undoAction) {
-						Zotero.UndoHistory.stageAction(env.options.undoAction, env.options.undoActionArgs);
-					}
+				}
+				if ((undoCreation || env.undoData) && env.options.undoAction) {
+					Zotero.UndoHistory.stageAction(env.options.undoAction, env.options.undoActionArgs);
 				}
 				return this._finalizeSave(env);
 			}.bind(this), env.transactionOptions);
@@ -1099,11 +1120,14 @@ Zotero.DataObject.prototype.save = async function (options = {}) {
 			await this._saveData(env);
 			await Zotero.DataObject.prototype._finalizeSave.call(this, env);
 			result = this._finalizeSave(env);
-			if (env.undoData) {
+			if (undoCreation) {
+				Zotero.UndoHistory.stageCreation(this);
+			}
+			else if (env.undoData) {
 				Zotero.UndoHistory.stageChange(env.undoData);
-				if (env.options.undoAction) {
-					Zotero.UndoHistory.stageAction(env.options.undoAction, env.options.undoActionArgs);
-				}
+			}
+			if ((undoCreation || env.undoData) && env.options.undoAction) {
+				Zotero.UndoHistory.stageAction(env.options.undoAction, env.options.undoActionArgs);
 			}
 		}
 		this._postSave(env);
