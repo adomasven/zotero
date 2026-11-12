@@ -860,4 +860,199 @@ describe("MCP tools", function () {
 			assert.isFalse(item.deleted);
 		});
 	});
+	
+	describe("zotero_add_items", function () {
+		let lookups;
+		
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+			// Lookups need the network, so they make an item from the identifier instead
+			lookups = [];
+			sinon.stub(Zotero.Translate.Search.prototype, 'setIdentifier').callsFake(function (identifier) {
+				this._testIdentifier = identifier;
+			});
+			sinon.stub(Zotero.Translate.Search.prototype, 'getTranslators').resolves([]);
+			sinon.stub(Zotero.Translate.Search.prototype, 'translate').callsFake(async function ({ libraryID, collections }) {
+				let identifier = this._testIdentifier;
+				lookups.push(identifier);
+				if (identifier.DOI?.startsWith('10.9999/')) {
+					throw new Error('Not found');
+				}
+				let item = createUnsavedDataObject('item', { itemType: 'journalArticle', libraryID, collections: collections || [] });
+				item.setField('title', 'Looked Up');
+				if (identifier.DOI) {
+					item.setField('DOI', identifier.DOI);
+				}
+				await item.saveTx();
+				return [item];
+			});
+		});
+		
+		it("should add items by identifier, in one undo step", async function () {
+			let collection = await createDataObject('collection');
+			let doi = '10.1234/' + Zotero.Utilities.randomString();
+			let existing = await createArticle();
+			existing.setField('DOI', doi);
+			await existing.saveTx();
+			let newDOI = '10.1234/' + Zotero.Utilities.randomString();
+			
+			let { results } = await call('zotero_add_items', {
+				identifiers: [`https://doi.org/${newDOI}`, doi, '10.9999/missing', 'https://example.com/page'],
+				collectionKey: collection.key,
+				findFiles: false,
+			});
+			assert.deepEqual(results.map(result => result.status), ['added', 'added', 'failed', 'failed']);
+			assert.match(results[2].error, /couldn't find DOI 10\.9999\/missing/);
+			assert.match(results[3].error, /Zotero Connector/);
+			// An item already in the library is added again, as when the user adds it
+			assert.deepEqual(lookups, [{ DOI: newDOI }, { DOI: doi }, { DOI: '10.9999/missing' }]);
+			assert.notEqual(results[1].key, existing.key);
+			
+			let added = results.slice(0, 2).map(result => Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.key));
+			assert.deepEqual(added.map(item => item.getField('DOI')), [newDOI, doi]);
+			assert.isTrue(added.every(item => collection.hasItem(item.id)));
+			assert.isFalse(collection.hasItem(existing.id));
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(added.every(item => item.deleted));
+			assert.isFalse(existing.deleted);
+		});
+		
+		it("should add items from BibTeX and item JSON", async function () {
+			let title = Zotero.Utilities.randomString();
+			let { results } = await call('zotero_add_items', {
+				text: `@book{lee2020, title = {${title} Book}, author = {Lee, Ann}, year = {2020}}`,
+				items: [{
+					itemType: 'report',
+					title: `${title} Report`,
+					creators: [{ creatorType: 'author', name: 'Org' }],
+					institution: 'Inst',
+					key: 'ABCD2345',
+					dateAdded: '2020-01-01T00:00:00Z',
+				}],
+				findFiles: false,
+			});
+			assert.deepEqual(results.map(result => [result.input, result.status, result.itemType, result.title]), [
+				['text', 'added', 'book', `${title} Book`],
+				['items[0]', 'added', 'report', `${title} Report`],
+			]);
+			let report = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, results[1].key);
+			assert.notEqual(report.key, 'ABCD2345');
+			assert.equal(report.getField('institution'), 'Inst');
+		});
+		
+		it("should add nothing if item JSON is invalid", async function () {
+			let error = await callForError('zotero_add_items', {
+				identifiers: ['10.1234/abc'],
+				items: [{ itemType: 'book', title: 'A' }, { itemType: 'book', publicationTitle: 'Journal' }],
+			});
+			assert.match(error, /^items\[1\]: Invalid field 'publicationTitle' for type book/);
+			assert.lengthOf(lookups, 0);
+		});
+		
+		it("should say when Zotero found no file, or is still looking", async function () {
+			let search = sinon.stub(Zotero.Attachments, 'addAvailableFiles').resolves();
+			let item = { itemType: 'webpage', title: 'Page', url: 'https://example.com/' + Zotero.Utilities.randomString() };
+			let result = await call('zotero_add_items', { items: [item], findFiles: true });
+			assert.equal(search.firstCall.args[0][0].key, result.results[0].key);
+			assert.equal(result.results[0].fileSearch, 'notFound');
+			assert.match(result.notice, /zotero_add_attachment/);
+			
+			let wait = Zotero.MCP.Tools._fileWait;
+			Zotero.MCP.Tools._fileWait = 50;
+			search.returns(new Promise(() => {}));
+			try {
+				item.url += '2';
+				result = await call('zotero_add_items', { items: [item], findFiles: true });
+			}
+			finally {
+				Zotero.MCP.Tools._fileWait = wait;
+			}
+			assert.equal(result.results[0].fileSearch, 'searching');
+			assert.match(result.notice, /still looking/);
+		});
+	});
+	
+	describe("zotero_add_attachment", function () {
+		let parent;
+		
+		beforeEach(async function () {
+			Zotero.UndoHistory.clear();
+			parent = await createArticle();
+		});
+		
+		it("should attach a PDF from a URL", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			let { httpd, baseURL } = await startHTTPServer();
+			let prefix = Zotero.Utilities.randomString();
+			let file = getTestDataDirectory();
+			file.append('test.pdf');
+			httpd.registerFile(`/${prefix}/paper.pdf`, file);
+			try {
+				let result = await call('zotero_add_attachment', {
+					parentKey: parent.key,
+					url: `${baseURL}${prefix}/paper.pdf`,
+					title: 'Preprint',
+				});
+				assert.equal(result.status, 'attached');
+				assert.equal(result.contentType, 'application/pdf');
+				assert.equal(result.title, 'Preprint');
+				let attachment = Zotero.Items.getByLibraryAndKey(parent.libraryID, result.key);
+				assert.equal(attachment.parentID, parent.id);
+				assert.isTrue(await attachment.fileExists());
+				
+				assert.isTrue(await Zotero.UndoHistory.undo());
+				assert.isTrue(attachment.deleted);
+			}
+			finally {
+				await new Promise(resolve => httpd.stop(resolve));
+			}
+		});
+		
+		it("should title a download that outlasts the call, and make it an undo step", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			let download = Zotero.Promise.defer();
+			sinon.stub(Zotero.Attachments, 'addFileFromURLs').returns(download.promise);
+			let wait = Zotero.MCP.Tools._fileWait;
+			Zotero.MCP.Tools._fileWait = 200;
+			let result;
+			try {
+				result = await call('zotero_add_attachment', {
+					parentKey: parent.key,
+					url: 'https://example.com/paper.pdf',
+					title: 'Preprint',
+				});
+			}
+			finally {
+				Zotero.MCP.Tools._fileWait = wait;
+			}
+			assert.equal(result.status, 'downloading');
+			
+			let file = getTestDataDirectory();
+			file.append('test.pdf');
+			let attachment = await Zotero.Attachments.importFromFile({ file, parentItemID: parent.id });
+			download.resolve(attachment);
+			await waitForCallback(() => Zotero.UndoHistory.canUndo());
+			assert.equal(attachment.getField('title'), 'Preprint');
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(attachment.deleted);
+		});
+		
+		it("should attach a file from this computer", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			let file = getTestDataDirectory();
+			file.append('test.pdf');
+			let result = await call('zotero_add_attachment', { parentKey: parent.key, path: file.path });
+			let attachment = Zotero.Items.getByLibraryAndKey(parent.libraryID, result.key);
+			assert.equal(attachment.parentID, parent.id);
+			assert.isTrue(await attachment.fileExists());
+			
+			let error = await callForError('zotero_add_attachment', { parentKey: parent.key, path: 'test.pdf' });
+			assert.match(error, /isn't an absolute path/);
+			let missing = PathUtils.join(PathUtils.parent(file.path), 'missing.pdf');
+			error = await callForError('zotero_add_attachment', { parentKey: parent.key, path: missing });
+			assert.match(error, /There's no file at/);
+		});
+	});
 });

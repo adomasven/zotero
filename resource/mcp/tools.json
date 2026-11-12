@@ -814,6 +814,129 @@
 				"destructiveHint": true,
 				"idempotentHint": true
 			}
+		},
+		{
+			"name": "zotero_add_items",
+			"title": "Add items to Zotero",
+			"description": "Add items to a Zotero library, with their metadata looked up, and look for their PDFs. Ways to add, best first:\n- identifiers: DOIs, ISBNs, arXiv IDs or PubMed IDs, or URLs that contain one (doi.org, a publisher's article page with the DOI in its URL, arxiv.org, pubmed.ncbi.nlm.nih.gov). Zotero doesn't add other web pages: the user saves those with the Zotero Connector in their browser.\n- text in an import format, such as BibTeX, RIS or CSL JSON.\n- items: item JSON, for something without an identifier whose metadata you found yourself.\nBy default Zotero then looks for each new item's PDF or EPUB as its Find Available PDF does, from the user's computer, so access through their institution works. If it finds none, find a copy elsewhere and attach it with zotero_add_attachment; as a last resort, ask the user to save it with the Zotero Connector. The user can undo the call in Zotero with Edit → Undo, which moves the new items to the trash. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"identifiers": {
+						"type": "array",
+						"items": { "type": "string" },
+						"maxItems": 10,
+						"description": "e.g. [\"10.1038/nature12373\", \"978-0-262-03384-8\", \"arXiv:1706.03762\", \"PMID: 23903748\"]"
+					},
+					"text": { "type": "string", "description": "BibTeX, RIS or another format Zotero imports, with up to 50 items." },
+					"items": {
+						"type": "array",
+						"maxItems": 50,
+						"description": "Item JSON in the Zotero web API format, as zotero_get_items returns, e.g. {\"itemType\": \"report\", \"title\": \"…\", \"creators\": [{\"creatorType\": \"author\", \"firstName\": \"Ann\", \"lastName\": \"Lee\"}], \"date\": \"2024\", \"institution\": \"…\", \"url\": \"…\"}. Only fields of the item type are accepted.",
+						"items": {
+							"type": "object",
+							"properties": {
+								"itemType": { "type": "string" }
+							},
+							"required": ["itemType"]
+						}
+					},
+					"collectionKey": { "type": "string", "description": "A collection to add the items to" },
+					"findFiles": { "type": "boolean", "description": "Look for PDFs and EPUBs. Defaults to the user's setting for attaching them when saving items." },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"results": {
+						"type": "array",
+						"description": "One per item, in the order given. An identifier or text can give several.",
+						"items": {
+							"type": "object",
+							"properties": {
+								"input": { "type": "string", "description": "The identifier given, \"text\", or \"items[i]\"" },
+								"status": { "enum": ["added", "failed"] },
+								"error": { "type": "string", "description": "Why it failed" },
+								"key": { "type": "string" },
+								"itemType": { "type": "string" },
+								"title": { "type": "string" },
+								"creators": { "type": "string" },
+								"date": { "type": "string" },
+								"citationKey": { "type": "string" },
+								"file": {
+									"type": "object",
+									"description": "The item's PDF, EPUB or snapshot",
+									"properties": {
+										"key": { "type": "string" },
+										"contentType": { "type": "string" }
+									},
+									"required": ["key"]
+								},
+								"fileSearch": { "enum": ["searching", "notFound"], "description": "For a new item without a file: whether Zotero is still looking for one" },
+								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
+							},
+							"required": ["input", "status"]
+						}
+					},
+					"notice": { "type": "string", "description": "What to do about files Zotero didn't find" }
+				},
+				"required": ["libraryID", "results"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": true,
+				"openWorldHint": true
+			}
+		},
+		{
+			"name": "zotero_add_attachment",
+			"title": "Attach a file in Zotero",
+			"description": "Attach a PDF, EPUB or other file to an item: from a URL, which Zotero downloads, or from a file on this computer, e.g. one you downloaded or one in the user's Downloads folder. Use it when zotero_add_items finds no PDF and you've found a copy elsewhere, such as on arXiv, PubMed Central or the author's site. A URL can be a link to a PDF or EPUB, or a page that links to one; it's downloaded from the user's computer, so access through their institution works. If Zotero can't get the file, as a last resort ask the user to save it with the Zotero Connector from a browser where they're signed in. The user can undo it in Zotero with Edit → Undo, which moves the attachment to the trash. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"parentKey": { "type": "string", "description": "The regular item (e.g. a journal article) to attach the file to" },
+					"url": { "type": "string", "description": "http or https. Only PDFs and EPUBs are attached from URLs." },
+					"path": { "type": "string", "description": "The absolute path of a file on this computer" },
+					"title": { "type": "string", "description": "The attachment's title. By default Zotero names it, e.g. \"Full Text PDF\"." },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["parentKey"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"parentKey": { "type": "string" },
+					"status": { "enum": ["attached", "downloading"], "description": "downloading: Zotero is still downloading the file" },
+					"key": { "type": "string" },
+					"title": { "type": "string" },
+					"contentType": { "type": "string" },
+					"linkMode": { "type": "string" },
+					"fileExists": { "type": "boolean" },
+					"annotationCount": { "type": "integer" },
+					"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" },
+					"notice": { "type": "string" }
+				},
+				"required": ["libraryID", "parentKey", "status"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false,
+				"openWorldHint": true
+			}
 		}
 	]
 }

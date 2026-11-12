@@ -58,6 +58,31 @@ Zotero.MCP.Tools = new function () {
 	// Most selected items zotero_get_context lists
 	const MAX_CONTEXT_ITEMS = 50;
 	
+	// Most items zotero_add_items adds from text and item JSON
+	const MAX_NEW_ITEMS = 50;
+	const LAST_RESORT = 'As a last resort, ask the user to save it with the Zotero Connector from a '
+		+ "browser where they're signed in to the site.";
+	const FILES_NOT_FOUND = "Zotero found no PDF or EPUB for items with fileSearch notFound. Find "
+		+ "one elsewhere (e.g. arXiv, PubMed Central or the author's site) and attach it with "
+		+ 'zotero_add_attachment. ' + LAST_RESORT;
+	const FILES_PENDING = 'Zotero is still looking for files for items with fileSearch searching. '
+		+ 'Call zotero_get_items later to see what it found.';
+	// Properties of item JSON from Zotero (e.g. zotero_get_items) that a new item doesn't take
+	const EXISTING_ITEM_PROPERTIES = new Set([
+		'key',
+		'version',
+		'parentItem',
+		'collections',
+		'relations',
+		'deleted',
+		'inPublications',
+		'dateAdded',
+		'dateModified',
+		'link',
+		'attachments',
+		'notes',
+	]);
+	
 	// Zotero.Translate.Export translators for zotero_generate_citation's export formats
 	const EXPORT_FORMATS = {
 		bibtex: '9cb70025-a888-4a29-a210-93ec52da40d4',
@@ -68,6 +93,10 @@ Zotero.MCP.Tools = new function () {
 	
 	// How long a call waits for structured document text (see getStructure())
 	this._structureWait = 30 * 1000;
+	// How long zotero_add_items and zotero_add_attachment wait for files, which keep
+	// downloading after that, as an MCP call can't take long (zotero-mcp-stdio gives up after
+	// 50 seconds)
+	this._fileWait = 30 * 1000;
 	
 	/**
 	 * Zotero's version, the libraries, and the permissions the app has been granted
@@ -881,6 +910,295 @@ Zotero.MCP.Tools = new function () {
 			collections: collections.map(collection => collection.key),
 		});
 	};
+	
+	/**
+	 * Add items by identifier, from text in an import format, or from item JSON, and look for
+	 * their files
+	 *
+	 * Translators save in their own transactions, which can't be nested, so their items are
+	 * made one undo step afterwards, with any JSON items.
+	 */
+	this.addItems = async function ({
+		identifiers = [], text = '', items: json = [], collectionKey,
+		findFiles = Zotero.Prefs.get('downloadAssociatedFiles'), libraryID,
+	}, { clientID }) {
+		let deadline = Date.now() + Zotero.MCP.Tools._fileWait;
+		libraryID = getLibraryID(libraryID);
+		if (!identifiers.length && !text.trim() && !json.length) {
+			throw new Zotero.MCP.ToolError('Give identifiers, text or items');
+		}
+		let collections = collectionKey ? [getCollection(libraryID, collectionKey).id] : false;
+		
+		// Check what can be checked without the network before adding anything
+		let jsonItems = json.map((data, i) => itemFromJSON(libraryID, data, `items[${i}]`));
+		if (text.trim()) {
+			let count = (await importText(text, { libraryID: false })).length;
+			if (!count) {
+				throw new Zotero.MCP.ToolError('No items found in text');
+			}
+			if (count + jsonItems.length > MAX_NEW_ITEMS) {
+				throw new Zotero.MCP.ToolError(
+					`text and items have ${count + jsonItems.length} items. Add at most `
+						+ `${MAX_NEW_ITEMS} per call.`
+				);
+			}
+		}
+		
+		// { input, status, item, error }
+		let results = [];
+		// Saved by translators
+		let translated = [];
+		for (let input of identifiers) {
+			let found = extractIdentifiers(input);
+			if (!found.length) {
+				results.push({
+					input,
+					status: 'failed',
+					error: 'No DOI, ISBN, arXiv ID or PubMed ID found. Zotero only adds web pages '
+						+ 'through the Zotero Connector. Find an identifier, or give the metadata '
+						+ 'as items.',
+				});
+				continue;
+			}
+			for (let identifier of found) {
+				try {
+					let translate = new Zotero.Translate.Search();
+					translate.setIdentifier(identifier);
+					translate.setTranslator(await translate.getTranslators());
+					// Files are found below instead, so the call doesn't wait for downloads
+					let items = await translate.translate({ libraryID, collections, saveAttachments: false });
+					if (!items.length) {
+						throw new Error('No items');
+					}
+					translated.push(...items);
+					results.push(...items.map(item => ({ input, status: 'added', item })));
+				}
+				catch (e) {
+					Zotero.debug(e, 2);
+					results.push({
+						input,
+						status: 'failed',
+						error: `Zotero couldn't find ${Object.keys(identifier)[0]} `
+							+ `${Object.values(identifier)[0]}. Check it, or give the metadata as items.`,
+					});
+				}
+			}
+		}
+		if (text.trim()) {
+			let items = await importText(text, { libraryID, collections, saveAttachments: false });
+			translated.push(...items);
+			results.push(...items.map(item => ({ input: 'text', status: 'added', item })));
+		}
+		for (let [i, item] of jsonItems.entries()) {
+			results.push({ input: `items[${i}]`, status: 'added', item });
+		}
+		
+		await edit(clientID, async () => {
+			for (let item of translated) {
+				Zotero.UndoHistory.stageCreation(item);
+			}
+			for (let item of jsonItems) {
+				if (collections) {
+					item.setCollections(collections);
+				}
+				await item.save({ skipSelect: true });
+			}
+		});
+		
+		// Like Find Available PDF, for new items that can have one
+		let searched = new Set();
+		let searching = false;
+		if (findFiles) {
+			let items = [...translated, ...jsonItems].filter(item => Zotero.Attachments.canFindFileForItem(item));
+			items.forEach(item => searched.add(item));
+			if (items.length) {
+				let search = Zotero.Attachments.addAvailableFiles(items);
+				search.catch(e => Zotero.logError(e));
+				searching = await Promise.race([
+					search.then(() => false, () => false),
+					Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => true),
+				]);
+			}
+		}
+		
+		let notices = new Set();
+		let output = [];
+		for (let { input, status, item, error } of results) {
+			if (!item) {
+				output.push({ input, status, error });
+				continue;
+			}
+			let summary = await summarize(item);
+			if (searched.has(item) && !summary.file) {
+				summary.fileSearch = searching ? 'searching' : 'notFound';
+				notices.add(searching ? FILES_PENDING : FILES_NOT_FOUND);
+			}
+			output.push({ input, status, ...summary });
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			results: output,
+			notice: notices.size ? [...notices].join(' ') : undefined,
+		});
+	};
+	
+	/**
+	 * Attach a file to an item from a URL or this computer
+	 */
+	this.addAttachment = async function ({ parentKey, url, path, title, libraryID }, { clientID }) {
+		let deadline = Date.now() + Zotero.MCP.Tools._fileWait;
+		libraryID = getLibraryID(libraryID);
+		let library = Zotero.Libraries.get(libraryID);
+		if (!library.editable || !library.filesEditable) {
+			throw new Zotero.MCP.ToolError(`Files can't be added to ${library.name}`);
+		}
+		if (!url == !path) {
+			throw new Zotero.MCP.ToolError('Give url or path');
+		}
+		let parent = await getItem(libraryID, parentKey);
+		if (!parent.isRegularItem()) {
+			throw new Zotero.MCP.ToolError(
+				`${parent.key} is ${parent.isNote() ? 'a note' : 'an ' + parent.itemType}. Files can only `
+					+ 'be attached to regular items, such as a journal article.'
+			);
+		}
+		// Makes the new attachment an undo step
+		let finish = async (attachment) => {
+			await edit(clientID, async () => {
+				Zotero.UndoHistory.stageCreation(attachment);
+				// The title of a downloaded file comes from where it was found, e.g. "Full Text PDF"
+				if (title) {
+					attachment.setField('title', title);
+					await attachment.save();
+				}
+			});
+			return attachment;
+		};
+		let attachment;
+		if (url) {
+			if (!/^https?:\/\//i.test(url)) {
+				throw new Zotero.MCP.ToolError('Only http and https URLs can be attached');
+			}
+			// A link to the file, or a page that links to it, as Find Available PDF follows
+			let download = Zotero.Attachments.addFileFromURLs(parent, [{ pageURL: url }])
+				.catch((e) => {
+					Zotero.debug(e, 2);
+					return false;
+				})
+				// Finished also when the download outlasts the call
+				.then(attachment => attachment && finish(attachment));
+			download.catch(e => Zotero.logError(e));
+			attachment = await Promise.race([
+				download,
+				Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => null),
+			]);
+			if (attachment === null) {
+				return Zotero.MCP.jsonResult({
+					libraryID,
+					parentKey: parent.key,
+					status: 'downloading',
+					notice: 'Zotero is still downloading the file. Call zotero_get_items on the '
+						+ 'parent item later to see whether it was attached.',
+				});
+			}
+			if (!attachment) {
+				throw new Zotero.MCP.ToolError(
+					`Zotero couldn't get a PDF or EPUB from ${url}: it isn't a link to one, the `
+						+ "page doesn't link to one Zotero recognizes, or the site requires signing in "
+						+ 'or blocks automated downloads. Try a direct link to the file. ' + LAST_RESORT
+				);
+			}
+		}
+		else {
+			if (!PathUtils.isAbsolute(path)) {
+				throw new Zotero.MCP.ToolError(`${path} isn't an absolute path. Give the file's full path.`);
+			}
+			let info;
+			try {
+				info = await IOUtils.stat(path);
+			}
+			// Missing or unreadable
+			catch {}
+			if (info?.type != 'regular') {
+				throw new Zotero.MCP.ToolError(`There's no file at ${path} on this computer.`);
+			}
+			// Renamed as when the user adds the item's first file (ZoteroPane.addAttachmentFromDialog())
+			let fileBaseName;
+			if (Zotero.Attachments.shouldAutoRenameFile(false, libraryID) && !parent.numNonHTMLFileAttachments()) {
+				fileBaseName = await Zotero.Attachments.getRenamedFileBaseNameIfAllowedType(parent, path);
+			}
+			attachment = await finish(await Zotero.Attachments.importFromFile({
+				file: path,
+				parentItemID: parent.id,
+				fileBaseName,
+				saveOptions: { skipSelect: true },
+			}));
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			parentKey: parent.key,
+			status: 'attached',
+			...await describeAttachment(attachment),
+			link: getOpenLink(attachment),
+		});
+	};
+	
+	/**
+	 * A new item from item JSON, checked but not saved
+	 *
+	 * @param {String} input - Where the JSON is in the arguments, for errors
+	 */
+	function itemFromJSON(libraryID, data, input) {
+		let json = { ...data };
+		for (let property of EXISTING_ITEM_PROPERTIES) {
+			delete json[property];
+		}
+		if (['note', 'attachment', 'annotation'].includes(json.itemType)) {
+			throw new Zotero.MCP.ToolError(
+				`${input}: ${json.itemType}s can't be added as items. Use zotero_add_note or `
+					+ 'zotero_add_attachment.'
+			);
+		}
+		let item = new Zotero.Item();
+		item.libraryID = libraryID;
+		try {
+			item.fromJSON(json, { strict: true });
+		}
+		catch (e) {
+			throw new Zotero.MCP.ToolError(`${input}: ${e.message}`);
+		}
+		return item;
+	}
+	
+	/**
+	 * Import text in a format Zotero can import, such as BibTeX or RIS
+	 *
+	 * @param {Object} options - For Zotero.Translate#translate(): with libraryID false, items
+	 *     are returned as translator JSON and not saved
+	 */
+	async function importText(text, options) {
+		let translation = new Zotero.Translate.Import();
+		translation.setString(text);
+		let translators = await translation.getTranslators();
+		if (!translators.length) {
+			throw new Zotero.MCP.ToolError(
+				"text isn't in a format Zotero can import, such as BibTeX, RIS or CSL JSON"
+			);
+		}
+		translation.setTranslator(translators[0]);
+		return translation.translate(options);
+	}
+	
+	/**
+	 * Identifiers in a string, as in Add Item by Identifier, also from PubMed URLs, whose
+	 * IDs extractIdentifiers() doesn't take after a slash
+	 *
+	 * @return {Object[]} e.g. [{ DOI: '10.1000/xyz' }]
+	 */
+	function extractIdentifiers(text) {
+		text = text.replace(/^https?:\/\/(?:pubmed\.ncbi\.nlm\.nih\.gov|www\.ncbi\.nlm\.nih\.gov\/pubmed)\/(\d+)\/?$/i, '$1');
+		return Zotero.Utilities.extractIdentifiers(text);
+	}
 	
 	/**
 	 * An installed style, or one installed from the Zotero Style Repository with the user's
