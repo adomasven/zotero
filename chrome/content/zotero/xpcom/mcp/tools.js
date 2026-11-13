@@ -73,6 +73,12 @@ Zotero.MCP.Tools = new function () {
 		+ 'zotero_add_attachment. ' + LAST_RESORT;
 	const FILES_PENDING = 'Zotero is still looking for files for items with fileSearch searching. '
 		+ 'Call zotero_get_items later to see what it found.';
+	const LOOKUPS_PENDING = 'Zotero is still looking up the identifiers with status inProgress. It '
+		+ 'adds each item when its lookup finishes, and looks for its file if asked to. To get their '
+		+ 'keys, search for them later with zotero_search in fields mode, by the identifier. If one '
+		+ "doesn't turn up, Zotero couldn't find it: give its metadata as items.";
+	// Identifiers zotero_add_items looks up at a time
+	const LOOKUP_CONCURRENCY = 3;
 	// Properties of item JSON from Zotero (e.g. zotero_get_items) that a new item doesn't take
 	const EXISTING_ITEM_PROPERTIES = new Set([
 		'key',
@@ -951,6 +957,10 @@ Zotero.MCP.Tools = new function () {
 	 *
 	 * Translators save in their own transactions, which can't be nested, so their items are
 	 * made one undo step afterwards, with any JSON items.
+	 *
+	 * Identifiers are looked up a few at a time. Lookups still running at the call's deadline
+	 * can't be stopped, as each saves its items when it finishes, so they're reported as
+	 * inProgress and go on in the background, where their items become a later undo step.
 	 */
 	this.addItems = async function ({
 		identifiers = [], text = '', items: json = [], collectionKey,
@@ -977,10 +987,9 @@ Zotero.MCP.Tools = new function () {
 			}
 		}
 		
-		// { input, status, item, error }
+		// { input, status, item, error }, or { lookup } in place of a lookup's results
 		let results = [];
-		// Saved by translators
-		let translated = [];
+		let lookups = [];
 		for (let input of identifiers) {
 			let found = extractIdentifiers(input);
 			if (!found.length) {
@@ -994,29 +1003,28 @@ Zotero.MCP.Tools = new function () {
 				continue;
 			}
 			for (let identifier of found) {
-				try {
-					let translate = new Zotero.Translate.Search();
-					translate.setIdentifier(identifier);
-					translate.setTranslator(await translate.getTranslators());
-					// Files are found below instead, so the call doesn't wait for downloads
-					let items = await translate.translate({ libraryID, collections, saveAttachments: false });
-					if (!items.length) {
-						throw new Error('No items');
-					}
-					translated.push(...items);
-					results.push(...items.map(item => ({ input, status: 'added', item })));
-				}
-				catch (e) {
-					Zotero.debug(e, 2);
-					results.push({
-						input,
-						status: 'failed',
-						error: `Zotero couldn't find ${Object.keys(identifier)[0]} `
-							+ `${Object.values(identifier)[0]}. Check it, or give the metadata as items.`,
-					});
-				}
+				let lookup = { input, identifier, results: null };
+				lookups.push(lookup);
+				results.push({ lookup });
 			}
 		}
+		let queue = [...lookups];
+		let lookUpNext = async () => {
+			for (let lookup = queue.shift(); lookup; lookup = queue.shift()) {
+				lookup.results = await lookUp(lookup, libraryID, collections);
+			}
+		};
+		let lookedUp = Promise.all(Array.from({ length: LOOKUP_CONCURRENCY }, lookUpNext));
+		await Promise.race([lookedUp, Zotero.Promise.delay(Math.max(0, deadline - Date.now()))]);
+		let pending = lookups.filter(lookup => !lookup.results);
+		results = results.flatMap(({ lookup, ...result }) => {
+			if (!lookup) {
+				return [result];
+			}
+			return lookup.results ?? [{ input: lookup.input, status: 'inProgress' }];
+		});
+		// Saved by translators
+		let translated = results.filter(result => result.status == 'added').map(result => result.item);
 		if (text.trim()) {
 			let items = await importText(text, { libraryID, collections, saveAttachments: false });
 			translated.push(...items);
@@ -1037,6 +1045,9 @@ Zotero.MCP.Tools = new function () {
 				await item.save({ skipSelect: true });
 			}
 		});
+		if (pending.length) {
+			lookedUp.then(() => addLookedUpLate(pending, clientID, findFiles)).catch(e => Zotero.logError(e));
+		}
 		
 		// Like Find Available PDF, for new items that can have one
 		let searched = new Set();
@@ -1055,6 +1066,9 @@ Zotero.MCP.Tools = new function () {
 		}
 		
 		let notices = new Set();
+		if (pending.length) {
+			notices.add(LOOKUPS_PENDING);
+		}
 		let output = [];
 		for (let { input, status, item, error } of results) {
 			if (!item) {
@@ -1074,6 +1088,56 @@ Zotero.MCP.Tools = new function () {
 			notice: notices.size ? [...notices].join(' ') : undefined,
 		});
 	};
+	
+	/**
+	 * Look up an identifier for zotero_add_items, saving the items found
+	 *
+	 * @return {Promise<Object[]>} Its results, { input, status, item, error }
+	 */
+	async function lookUp({ input, identifier }, libraryID, collections) {
+		try {
+			let translate = new Zotero.Translate.Search();
+			translate.setIdentifier(identifier);
+			translate.setTranslator(await translate.getTranslators());
+			// Files are found afterwards instead, so the call doesn't wait for downloads
+			let items = await translate.translate({ libraryID, collections, saveAttachments: false });
+			if (!items.length) {
+				throw new Error('No items');
+			}
+			return items.map(item => ({ input, status: 'added', item }));
+		}
+		catch (e) {
+			Zotero.debug(e, 2);
+			return [{
+				input,
+				status: 'failed',
+				error: `Zotero couldn't find ${Object.keys(identifier)[0]} `
+					+ `${Object.values(identifier)[0]}. Check it, or give the metadata as items.`,
+			}];
+		}
+	}
+	
+	/**
+	 * Make the items of lookups that finished after zotero_add_items returned one undo step of
+	 * their own, and look for their files
+	 */
+	async function addLookedUpLate(lookups, clientID, findFiles) {
+		let items = lookups.flatMap(lookup => lookup.results)
+			.filter(result => result.status == 'added')
+			.map(result => result.item);
+		if (!items.length) {
+			return;
+		}
+		await edit(clientID, async () => {
+			for (let item of items) {
+				Zotero.UndoHistory.stageCreation(item);
+			}
+		});
+		let findable = findFiles ? items.filter(item => Zotero.Attachments.canFindFileForItem(item)) : [];
+		if (findable.length) {
+			await Zotero.Attachments.addAvailableFiles(findable);
+		}
+	}
 	
 	/**
 	 * Attach a file to an item from a URL or this computer

@@ -936,8 +936,11 @@ describe("MCP tools", function () {
 	
 	describe("zotero_add_items", function () {
 		let lookups;
+		// Lookups of 10.8888/ DOIs wait for it
+		let slowLookups;
 		
 		beforeEach(function () {
+			slowLookups = Promise.withResolvers();
 			sinon.stub(Permissions, '_ask').resolves('allow');
 			Zotero.UndoHistory.clear();
 			// Lookups need the network, so they make an item from the identifier instead
@@ -951,6 +954,9 @@ describe("MCP tools", function () {
 				lookups.push(identifier);
 				if (identifier.DOI?.startsWith('10.9999/')) {
 					throw new Error('Not found');
+				}
+				if (identifier.DOI?.startsWith('10.8888/')) {
+					await slowLookups.promise;
 				}
 				let item = createUnsavedDataObject('item', { itemType: 'journalArticle', libraryID, collections: collections || [] });
 				item.setField('title', 'Looked Up');
@@ -990,6 +996,44 @@ describe("MCP tools", function () {
 			assert.isTrue(await Zotero.UndoHistory.undo());
 			assert.isTrue(added.every(item => item.deleted));
 			assert.isFalse(existing.deleted);
+		});
+		
+		it("should return lookups still running as inProgress, and add their items later as another undo step", async function () {
+			let collection = await createDataObject('collection');
+			let slowDOI = '10.8888/' + Zotero.Utilities.randomString();
+			let fastDOI = '10.1234/' + Zotero.Utilities.randomString();
+			let budget = Zotero.MCP.CALL_BUDGET;
+			Zotero.MCP.CALL_BUDGET = 500;
+			let result;
+			try {
+				result = await call('zotero_add_items', {
+					identifiers: [slowDOI, fastDOI],
+					collectionKey: collection.key,
+					findFiles: false,
+				});
+			}
+			finally {
+				Zotero.MCP.CALL_BUDGET = budget;
+			}
+			// The slow lookup didn't hold up the one after it
+			assert.deepEqual(result.results.map(result => [result.input, result.status]), [
+				[slowDOI, 'inProgress'],
+				[fastDOI, 'added'],
+			]);
+			assert.match(result.notice, /still looking up/);
+			let fast = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.results[1].key);
+			
+			slowLookups.resolve();
+			await waitForCallback(() => Zotero.UndoHistory._undoStack.length == 2);
+			let slow = (await Zotero.Items.getAll(Zotero.Libraries.userLibraryID))
+				.find(item => item.getField('DOI') == slowDOI);
+			assert.isTrue(collection.hasItem(slow.id));
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(slow.deleted);
+			assert.isFalse(fast.deleted);
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(fast.deleted);
 		});
 		
 		it("should add items from BibTeX and item JSON", async function () {
