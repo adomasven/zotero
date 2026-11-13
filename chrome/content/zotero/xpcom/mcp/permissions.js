@@ -45,8 +45,8 @@ their ID, so all the names an app gives share its grants; other apps under their
 
 A permission with no grant is asked for: a dialog offers Allow (this time only), Always Allow
 (Allow for 1 Hour for DELETE) and Deny. The dialog closes, as no answer, when MCP is turned
-off, or after DIALOG_TIMEOUT if nobody answers -- a little less than zotero-mcp-stdio waits for a
-call, so an answer doesn't come after the AI app has given up.
+off, or at the call's deadline (see Zotero.MCP.CALL_BUDGET) if nobody answers, so an answer
+doesn't come after the AI app has given up.
 
 */
 
@@ -61,11 +61,6 @@ Zotero.MCP.Permissions = new function () {
 	// How long DELETE is allowed for at a time
 	this.TEMPORARY_GRANT = 60 * 60 * 1000;
 	
-	// Shorter than zotero-mcp-stdio's default call timeout (50 s), so Zotero's answer that
-	// nothing was changed reaches the AI app before the bridge gives up on the call.
-	// Overridden in tests.
-	this.DIALOG_TIMEOUT = 45 * 1000;
-	
 	// Open dialogs, keyed by grant, so parallel calls needing the same grant share one
 	let _pending = new Map();
 	
@@ -75,19 +70,23 @@ Zotero.MCP.Permissions = new function () {
 	 * @param {String} clientID - The AI app's name
 	 * @param {String} permission - One of the permissions above
 	 * @param {Integer} [libraryID] - Required for EDIT_LIBRARY and DELETE
-	 * @param {AbortSignal} [signal] - Aborted when MCP is turned off, which closes the dialog
+	 * @param {Object} call - The tool call's context
+	 * @param {AbortSignal} call.signal - Aborted when MCP is turned off, which closes the dialog
+	 * @param {Number} call.deadline - Date.now() time at which the dialog closes, as no answer
 	 * @throws {Zotero.MCP.ToolError} If the user denies it or doesn't answer, or MCP is turned
 	 *     off
 	 */
-	this.require = async function (clientID, permission, libraryID = null, signal = null) {
+	this.require = async function (clientID, permission, libraryID, { signal, deadline }) {
 		let target = getTarget(permission, libraryID);
 		if (this.isGranted(clientID, permission, libraryID)) {
 			return;
 		}
 		let key = JSON.stringify([getOwner(clientID), target]);
+		// A call that joins an open dialog gets its answer, so the dialog closes at the deadline
+		// of the call that opened it
 		let answer = _pending.get(key);
 		if (!answer) {
-			answer = this._ask(clientID, permission, libraryID, signal);
+			answer = this._ask(clientID, permission, libraryID, { signal, deadline });
 			_pending.set(key, answer);
 			answer.finally(() => _pending.delete(key));
 		}
@@ -210,11 +209,13 @@ Zotero.MCP.Permissions = new function () {
 	/**
 	 * Show the consent dialog
 	 *
-	 * @param {AbortSignal} [signal] - Closes the dialog, as no answer
+	 * @param {Object} options
+	 * @param {AbortSignal} [options.signal] - Closes the dialog, as no answer
+	 * @param {Number} options.deadline - Date.now() time at which the dialog closes, as no answer
 	 * @return {Promise<String|null>} 'allow', 'extra' (Always Allow, or Allow for 1 Hour for
 	 *     DELETE), 'deny', or null if nobody answered in time or the signal was aborted
 	 */
-	this._ask = function (clientID, permission, libraryID, signal = null) {
+	this._ask = function (clientID, permission, libraryID, { signal, deadline }) {
 		let { promise, resolve } = Promise.withResolvers();
 		let app = Zotero.MCP.Apps.getForClient(clientID);
 		let { PromptUtils } = ChromeUtils.importESModule('resource://gre/modules/PromptUtils.sys.mjs');
@@ -260,7 +261,7 @@ Zotero.MCP.Permissions = new function () {
 			resolve(null);
 			win.close();
 		};
-		let timer = setTimeout(close, this.DIALOG_TIMEOUT);
+		let timer = setTimeout(close, Math.max(0, deadline - Date.now()));
 		signal?.addEventListener('abort', close);
 		promise.finally(() => {
 			clearTimeout(timer);

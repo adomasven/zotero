@@ -51,6 +51,13 @@ Zotero.MCP = new function () {
 	// Tools without one only read or act on the UI, and need none.
 	this.PERMISSION_META = 'org.zotero/permission';
 	this.BINARY_NAME = Zotero.isWin ? 'zotero-mcp-stdio.exe' : 'zotero-mcp-stdio';
+	// How long one tool call may take in Zotero, from when it arrives: the permission dialog
+	// and the handler's waits share it. Shorter than zotero-mcp-stdio's default call timeout
+	// (50 s), which starts earlier, so the result reaches the AI app before the bridge gives up
+	// on the call. Overridden in tests.
+	// TODO: Return a task (the MCP Tasks extension) for calls that need longer, for AI apps
+	// that support it
+	this.CALL_BUDGET = 45 * 1000;
 	
 	// tools.json: { instructions, tools }
 	let _toolsFile = null;
@@ -221,8 +228,8 @@ Zotero.MCP = new function () {
 			throw new Error(`No handler for tool ${name}`);
 		}
 		let permission = tool._meta?.[this.PERMISSION_META];
-		// For permissions a handler asks for itself
-		context = { ...context, signal: _enabled.signal };
+		// For permissions a handler asks for itself, and its waits
+		context = { ...context, signal: _enabled.signal, deadline: Date.now() + this.CALL_BUDGET };
 		try {
 			checkArguments(tool, args);
 			if (permission) {
@@ -236,7 +243,7 @@ Zotero.MCP = new function () {
 						throw new this.ToolError(`${Zotero.Libraries.get(libraryID).name} is read-only`);
 					}
 				}
-				await Zotero.MCP.Permissions.require(context.clientID, permission, libraryID, context.signal);
+				await Zotero.MCP.Permissions.require(context.clientID, permission, libraryID, context);
 			}
 			return await handler(args, context);
 		}

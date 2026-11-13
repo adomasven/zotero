@@ -28,12 +28,14 @@
 Handlers for the MCP tools defined in resource://zotero/mcp/tools.json, keyed by tool name in
 camelCase without "zotero_", e.g. getItems for zotero_get_items.
 
-Each takes the tool's arguments, already checked against its inputSchema, and a context
-({ clientID, signal }), and returns an MCP CallToolResult. Tools with an outputSchema return
-Zotero.MCP.jsonResult() of a value matching it. Permissions declared in tools.json are checked
-before the handler runs (see mcp.js); a handler that needs one only sometimes asks for it with
-Zotero.MCP.Permissions.require(). Throw Zotero.MCP.ToolError for errors the model should see,
-such as a key that doesn't exist; other errors are logged and reported to the model by message.
+Each takes the tool's arguments, already checked against its inputSchema, and the call's
+context ({ clientID, signal, deadline }), and returns an MCP CallToolResult by the deadline (see
+Zotero.MCP.CALL_BUDGET): waits for slow work end then, and the work can go on in the
+background. Tools with an outputSchema return Zotero.MCP.jsonResult() of a value matching it.
+Permissions declared in tools.json are checked before the handler runs (see mcp.js); a handler
+that needs one only sometimes asks for it with Zotero.MCP.Permissions.require(). Throw
+Zotero.MCP.ToolError for errors the model should see, such as a key that doesn't exist; other
+errors are logged and reported to the model by message.
 
 Items are referred to by key, in the library given by the libraryID argument, by default My
 Library, as in the Zotero web and local APIs.
@@ -46,6 +48,10 @@ Zotero.MCP.Tools = new function () {
 	
 	// Pages zotero_read_text extracts at a time beyond those Zotero indexed
 	const EXTRACT_PAGES = 10;
+	// What untilDeadline() gives when the deadline comes first
+	const TIMED_OUT = Symbol('timedOut');
+	const TEXT_PENDING = "Zotero is still getting the text from the file, so it isn't all here. "
+		+ 'Call zotero_read_text again shortly, from nextPage for a PDF.';
 	const LABELS_PENDING = "Page labels (the page numbers printed on the pages) and the outline "
 		+ "aren't available yet for some files. Zotero is preparing them, so a later call may "
 		+ 'include them.';
@@ -91,12 +97,9 @@ Zotero.MCP.Tools = new function () {
 		csljson: 'bc03b4fe-436d-4a1f-ba59-de4d2d7a63f7',
 	};
 	
-	// How long a call waits for structured document text (see getStructure())
-	this._structureWait = 30 * 1000;
-	// How long zotero_add_items and zotero_add_attachment wait for files, which keep
-	// downloading after that, as an MCP call can't take long (zotero-mcp-stdio gives up after
-	// 50 seconds)
-	this._fileWait = 30 * 1000;
+	// Longest a call waits for structured document text (see getStructure()), within its
+	// deadline
+	this._structureWait = 15 * 1000;
 	
 	/**
 	 * Zotero's version, the libraries, and the permissions the app has been granted
@@ -279,9 +282,10 @@ Zotero.MCP.Tools = new function () {
 	 */
 	this.searchFulltext = async function ({
 		query, keys, collectionKey, libraryID, limit = 10, offset = 0, passagesPerFile = 3,
-	}) {
-		let deadline = Date.now() + Zotero.MCP.Tools._structureWait;
+	}, { deadline }) {
+		let structureDeadline = Math.min(deadline, Date.now() + Zotero.MCP.Tools._structureWait);
 		let labelsPending = false;
+		let textPending = false;
 		libraryID = getLibraryID(libraryID);
 		let terms = Zotero.SearchConditions.parseSearchString(query)
 			.map(part => part.text.trim())
@@ -312,11 +316,23 @@ Zotero.MCP.Tools = new function () {
 		let regExps = terms.map(getTermRegExp).filter(Boolean);
 		let results = [];
 		for (let attachment of attachments.slice(offset, offset + limit)) {
-			let text = await getIndexedText(attachment) ?? '';
+			let text = await getIndexedText(attachment, deadline);
+			let summary = {
+				key: attachment.key,
+				parentKey: attachment.parentKey || undefined,
+				title: getTitle(attachment),
+				contentType: attachment.attachmentContentType,
+			};
+			if (text === TIMED_OUT) {
+				textPending = true;
+				results.push({ ...summary, textPending: true, passages: [] });
+				continue;
+			}
+			text ??= '';
 			let passages = [];
 			let matchCount = 0;
 			if (attachment.isPDFAttachment()) {
-				let structure = await getStructure(attachment, deadline);
+				let structure = await getStructure(attachment, structureDeadline);
 				labelsPending ||= !!structure?.pending;
 				let labels = structure?.labels;
 				// The PDF worker separates pages with form feeds
@@ -345,10 +361,7 @@ Zotero.MCP.Tools = new function () {
 			// Passages with more of the terms first, then in document order
 			passages.sort((a, b) => b.termCount - a.termCount);
 			results.push({
-				key: attachment.key,
-				parentKey: attachment.parentKey || undefined,
-				title: getTitle(attachment),
-				contentType: attachment.attachmentContentType,
+				...summary,
 				matchCount,
 				passages: passages.slice(0, passagesPerFile).map(({ termCount: _termCount, ...passage }) => passage),
 			});
@@ -358,23 +371,24 @@ Zotero.MCP.Tools = new function () {
 			total: attachments.length,
 			results,
 			nextOffset: offset + limit < attachments.length ? offset + limit : undefined,
-			notice: labelsPending ? LABELS_PENDING : undefined,
+			notice: [
+				textPending && 'Zotero is still getting the text of the files with textPending, so their '
+					+ 'passages are missing. Search again shortly.',
+				labelsPending && LABELS_PENDING,
+			].filter(Boolean).join(' ') || undefined,
 		});
 	};
 	
 	/**
 	 * An attachment's text: a PDF by page, other files by character offset
 	 */
-	this.readText = async function ({ key, libraryID, startPage, endPage, offset, maxChars = 20000 }) {
+	this.readText = async function ({
+		key, libraryID, startPage, endPage, offset, maxChars = 20000,
+	}, { deadline }) {
 		libraryID = getLibraryID(libraryID);
 		let attachment = await getTextAttachment(libraryID, key);
-		let text = await getIndexedText(attachment);
+		let text = await getIndexedText(attachment, deadline);
 		let fileExists = await attachment.fileExists();
-		if (text === null && !(fileExists && attachment.isPDFAttachment())) {
-			throw new Zotero.MCP.ToolError(fileExists
-				? `Zotero couldn't get any text from the file of ${attachment.key}`
-				: `The file of ${attachment.key} isn't on this computer, and Zotero has no text for it`);
-		}
 		let result = {
 			key: attachment.key,
 			parentKey: attachment.parentKey || undefined,
@@ -382,6 +396,15 @@ Zotero.MCP.Tools = new function () {
 			contentType: attachment.attachmentContentType,
 			link: getOpenLink(attachment),
 		};
+		// A PDF's pages can still be read from the file
+		if (text === TIMED_OUT && !attachment.isPDFAttachment()) {
+			return Zotero.MCP.jsonResult({ ...result, notice: TEXT_PENDING });
+		}
+		if (text === null && !(fileExists && attachment.isPDFAttachment())) {
+			throw new Zotero.MCP.ToolError(fileExists
+				? `Zotero couldn't get any text from the file of ${attachment.key}`
+				: `The file of ${attachment.key} isn't on this computer, and Zotero has no text for it`);
+		}
 		
 		if (!attachment.isPDFAttachment()) {
 			if (startPage || endPage) {
@@ -420,10 +443,13 @@ Zotero.MCP.Tools = new function () {
 		}
 		// The PDF worker separates pages with form feeds. Pages Zotero didn't index are
 		// extracted from the file.
-		let pages = text === null ? [] : text.split('\f');
+		let pages = typeof text == 'string' ? text.split('\f') : [];
 		let totalPages = (await Zotero.FullText.getPages(attachment.id))?.total;
 		if (!totalPages) {
-			let extracted = await extractPages(attachment, [0]);
+			let extracted = await extractPages(attachment, [0], deadline);
+			if (extracted === TIMED_OUT) {
+				return Zotero.MCP.jsonResult({ ...result, notice: TEXT_PENDING });
+			}
 			totalPages = extracted.totalPages;
 			pages[0] = extracted.texts[0];
 		}
@@ -435,10 +461,14 @@ Zotero.MCP.Tools = new function () {
 		if (endPage < startPage) {
 			throw new Zotero.MCP.ToolError('endPage is before startPage');
 		}
-		let structure = await getStructure(attachment, Date.now() + Zotero.MCP.Tools._structureWait);
+		let structure = await getStructure(
+			attachment,
+			Math.min(deadline, Date.now() + Zotero.MCP.Tools._structureWait)
+		);
 		let pageResults = [];
 		let chars = 0;
 		let page = startPage;
+		let textPending = false;
 		for (; page <= endPage && (!pageResults.length || chars < maxChars); page++) {
 			// Such as pages past the index limit (the fulltext.pdfMaxPages pref), a batch at a time
 			if (pages[page - 1] === undefined) {
@@ -446,9 +476,13 @@ Zotero.MCP.Tools = new function () {
 				for (let i = page - 1; i < Math.min(endPage, page - 1 + EXTRACT_PAGES); i++) {
 					pageIndexes.push(i);
 				}
-				let { texts } = await extractPages(attachment, pageIndexes);
+				let extracted = await extractPages(attachment, pageIndexes, deadline);
+				if (extracted === TIMED_OUT) {
+					textPending = true;
+					break;
+				}
 				pageIndexes.forEach((pageIndex, i) => {
-					pages[pageIndex] = texts[i] ?? '';
+					pages[pageIndex] = extracted.texts[i] ?? '';
 				});
 			}
 			let pageText = (pages[page - 1] ?? '').trim();
@@ -456,7 +490,10 @@ Zotero.MCP.Tools = new function () {
 			pageResults.push({ page, label: structure?.labels?.[page - 1], text: pageText });
 		}
 		let notice;
-		if (pageResults.every(({ text }) => !text)) {
+		if (textPending) {
+			notice = TEXT_PENDING;
+		}
+		else if (pageResults.every(({ text }) => !text)) {
 			notice = 'These pages have no text. If the PDF is scanned, it may need OCR.';
 		}
 		else if (structure?.pending) {
@@ -587,7 +624,7 @@ Zotero.MCP.Tools = new function () {
 	 */
 	this.generateCitation = async function ({
 		items: refs, format, style, locale, html = false, libraryID,
-	}, { clientID, signal }) {
+	}, call) {
 		libraryID = getLibraryID(libraryID);
 		let items = [];
 		let missing = [];
@@ -621,8 +658,7 @@ Zotero.MCP.Tools = new function () {
 		style = await getStyle(
 			style
 				?? (quickCopy.mode == 'bibliography' ? quickCopy.id : Zotero.Prefs.get('export.lastStyle')),
-			clientID,
-			signal
+			call
 		);
 		locale = locale
 			|| (quickCopy.mode == 'bibliography' && quickCopy.locale)
@@ -832,9 +868,7 @@ Zotero.MCP.Tools = new function () {
 	 * Trashing needs DELETE, but restoring only EDIT_LIBRARY, so this asks for the permission
 	 * itself instead of declaring one in tools.json.
 	 */
-	this.trash = async function ({
-		keys = [], collectionKeys = [], restore = false, libraryID,
-	}, { clientID, signal }) {
+	this.trash = async function ({ keys = [], collectionKeys = [], restore = false, libraryID }, call) {
 		libraryID = getLibraryID(libraryID);
 		let library = Zotero.Libraries.get(libraryID);
 		if (!library.editable || !library.hasTrash) {
@@ -873,8 +907,8 @@ Zotero.MCP.Tools = new function () {
 		));
 		
 		let { EDIT_LIBRARY, DELETE } = Zotero.MCP.Permissions;
-		await Zotero.MCP.Permissions.require(clientID, restore ? EDIT_LIBRARY : DELETE, libraryID, signal);
-		await edit(clientID, async () => {
+		await Zotero.MCP.Permissions.require(call.clientID, restore ? EDIT_LIBRARY : DELETE, libraryID, call);
+		await edit(call.clientID, async () => {
 			if (!restore) {
 				await Zotero.Items.trash(items.map(item => item.id));
 				for (let collection of collections) {
@@ -921,8 +955,7 @@ Zotero.MCP.Tools = new function () {
 	this.addItems = async function ({
 		identifiers = [], text = '', items: json = [], collectionKey,
 		findFiles = Zotero.Prefs.get('downloadAssociatedFiles'), libraryID,
-	}, { clientID }) {
-		let deadline = Date.now() + Zotero.MCP.Tools._fileWait;
+	}, { clientID, deadline }) {
 		libraryID = getLibraryID(libraryID);
 		if (!identifiers.length && !text.trim() && !json.length) {
 			throw new Zotero.MCP.ToolError('Give identifiers, text or items');
@@ -1045,8 +1078,7 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * Attach a file to an item from a URL or this computer
 	 */
-	this.addAttachment = async function ({ parentKey, url, path, title, libraryID }, { clientID }) {
-		let deadline = Date.now() + Zotero.MCP.Tools._fileWait;
+	this.addAttachment = async function ({ parentKey, url, path, title, libraryID }, { clientID, deadline }) {
 		libraryID = getLibraryID(libraryID);
 		let library = Zotero.Libraries.get(libraryID);
 		if (!library.editable || !library.filesEditable) {
@@ -1205,8 +1237,10 @@ Zotero.MCP.Tools = new function () {
 	 * permission
 	 *
 	 * @param {String} id - A style ID, a short name (e.g. "apa") or a repository URL
+	 * @param {Object} call - The tool call's context, to ask for permission with and for its
+	 *     deadline
 	 */
-	async function getStyle(id, clientID, signal) {
+	async function getStyle(id, call) {
 		if (!Zotero.Styles.initialized()) {
 			await Zotero.Styles.init();
 		}
@@ -1227,9 +1261,17 @@ Zotero.MCP.Tools = new function () {
 		let url = STYLE_REPOSITORY + shortName;
 		let xml;
 		try {
-			xml = (await Zotero.HTTP.request('GET', url, { responseType: 'text' })).response;
+			xml = (await Zotero.HTTP.request('GET', url, {
+				responseType: 'text',
+				timeout: Math.max(1, call.deadline - Date.now()),
+				// Not retried after an error, which can take minutes
+				errorDelayMax: 0,
+			})).response;
 		}
 		catch (e) {
+			if (e instanceof Zotero.HTTP.TimeoutException) {
+				throw new Zotero.MCP.ToolError("The Zotero Style Repository didn't respond in time. Try again later.");
+			}
 			if (e instanceof Zotero.HTTP.UnexpectedStatusException && e.status == 404) {
 				throw new Zotero.MCP.ToolError(
 					`No style "${shortName}" in the Zotero Style Repository. Find style names at `
@@ -1238,9 +1280,13 @@ Zotero.MCP.Tools = new function () {
 			}
 			throw e;
 		}
-		await Zotero.MCP.Permissions.require(clientID, Zotero.MCP.Permissions.INSTALL_STYLES, null, signal);
-		let { styleID } = await Zotero.Styles.install({ string: xml }, url, true);
-		return Zotero.Styles.get(styleID);
+		await Zotero.MCP.Permissions.require(call.clientID, Zotero.MCP.Permissions.INSTALL_STYLES, null, call);
+		// Fetches the parent of a dependent style
+		let installed = await untilDeadline(Zotero.Styles.install({ string: xml }, url, true), call.deadline);
+		if (installed === TIMED_OUT) {
+			throw new Zotero.MCP.ToolError('Zotero is still installing the style. Try again shortly.');
+		}
+		return Zotero.Styles.get(installed.styleID);
 	}
 	
 	function exportItems(items, translatorID) {
@@ -1326,16 +1372,19 @@ Zotero.MCP.Tools = new function () {
 	 * The text Zotero extracted from an attachment for its full-text index (indexing it now if
 	 * it hasn't been), or a text file's contents
 	 *
-	 * @return {Promise<String|null>} Null if there's no text, or the file is missing
+	 * @param {Number} deadline - Date.now() time to stop waiting for indexing at
+	 * @return {Promise<String|null|Symbol>} Null if there's no text, or the file is missing;
+	 *     TIMED_OUT if indexing didn't finish by the deadline
 	 */
-	async function getIndexedText(attachment) {
+	async function getIndexedText(attachment, deadline) {
 		if (!Zotero.FullText.isCachedMIMEType(attachment.attachmentContentType)) {
 			let path = await attachment.getFilePathAsync();
 			return path ? Zotero.File.getContentsAsync(path, attachment.attachmentCharset) : null;
 		}
 		let path = Zotero.FullText.getItemCacheFile(attachment).path;
-		if (!await IOUtils.exists(path) && await attachment.fileExists()) {
-			await Zotero.FullText.indexItems([attachment.id]);
+		if (!await IOUtils.exists(path) && await attachment.fileExists()
+				&& await untilDeadline(Zotero.FullText.indexItems([attachment.id]), deadline) === TIMED_OUT) {
+			return TIMED_OUT;
 		}
 		return await IOUtils.exists(path) ? Zotero.File.getContentsAsync(path) : null;
 	}
@@ -1344,11 +1393,37 @@ Zotero.MCP.Tools = new function () {
 	 * Text of PDF pages, from the file
 	 *
 	 * @param {Integer[]} pageIndexes - Consecutive
-	 * @return {Promise<Object>} { texts, totalPages }, with texts in the order of pageIndexes
+	 * @param {Number} deadline - Date.now() time to stop waiting at
+	 * @return {Promise<Object|Symbol>} { texts, totalPages }, with texts in the order of
+	 *     pageIndexes, or TIMED_OUT
 	 */
-	async function extractPages(attachment, pageIndexes) {
-		let { text, totalPages } = await Zotero.PDFWorker.getFullText(attachment.id, pageIndexes, true);
-		return { texts: text.split('\f'), totalPages };
+	async function extractPages(attachment, pageIndexes, deadline) {
+		let result = await untilDeadline(Zotero.PDFWorker.getFullText(attachment.id, pageIndexes, true), deadline);
+		if (result === TIMED_OUT) {
+			return result;
+		}
+		return { texts: result.text.split('\f'), totalPages: result.totalPages };
+	}
+	
+	/**
+	 * The promise's value, or TIMED_OUT if the deadline comes first. The work goes on, and an
+	 * error after the deadline is logged.
+	 *
+	 * @param {Number} deadline - Date.now() time to stop waiting at
+	 */
+	async function untilDeadline(promise, deadline) {
+		let timedOut = false;
+		promise.catch((e) => {
+			if (timedOut) {
+				Zotero.logError(e);
+			}
+		});
+		let result = await Promise.race([
+			promise,
+			Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => TIMED_OUT),
+		]);
+		timedOut = result === TIMED_OUT;
+		return result;
 	}
 	
 	/**
@@ -1359,8 +1434,8 @@ Zotero.MCP.Tools = new function () {
 	 * from another computer is here; structured document text is only for what the index
 	 * doesn't have. Like Read Aloud, it's generated if it isn't cached, at the front of the PDF
 	 * worker's queue. That takes about 25 ms a page, but the worker runs one job at a time,
-	 * and an MCP call can't take long (zotero-mcp-stdio gives up after 50 seconds), so it's
-	 * waited for only until the deadline. Generation goes on after that, so a later call has it.
+	 * and the call has to finish by its deadline, so it's waited for only until the deadline.
+	 * Generation goes on after that, so a later call has it.
 	 *
 	 * @param {Number} deadline - Date.now() time to stop waiting at
 	 * @return {Promise<Object|null>} { labels, outline }, { pending: true } if it wasn't ready

@@ -203,6 +203,20 @@ describe("MCP tools", function () {
 		assert.isTrue(await Zotero.FullText.indexSyncedContent(attachment.id));
 	}
 	
+	/**
+	 * Make tool calls with a shorter time budget
+	 */
+	async function withBudget(budget, fn) {
+		let saved = Zotero.MCP.CALL_BUDGET;
+		Zotero.MCP.CALL_BUDGET = budget;
+		try {
+			return await fn();
+		}
+		finally {
+			Zotero.MCP.CALL_BUDGET = saved;
+		}
+	}
+	
 	function stubStructure(catalog) {
 		return sinon.stub(Zotero.SDT, 'getReader').resolves({ getCatalog: async () => catalog });
 	}
@@ -283,6 +297,23 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("zotero_search_fulltext when indexing is slow", function () {
+		it("should list files whose text isn't ready by the deadline", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			await setText(attachment, ['Some text']);
+			// In the index, but its text has to be extracted again
+			sinon.stub(Zotero.FullText, 'findItemsWithContent').resolves([attachment.id]);
+			await IOUtils.remove(Zotero.FullText.getItemCacheFile(attachment).path);
+			let indexing = Zotero.Promise.defer();
+			sinon.stub(Zotero.FullText, 'indexItems').returns(indexing.promise);
+			
+			let result = await withBudget(300, () => call('zotero_search_fulltext', { query: 'text' }));
+			assert.deepEqual(result.results.map(file => [file.key, file.textPending]), [[attachment.key, true]]);
+			assert.match(result.notice, /still getting the text of the files with textPending/);
+			indexing.resolve();
+		});
+	});
+	
 	describe("zotero_read_text", function () {
 		beforeEach(function () {
 			// No structured document text, as for a password-protected PDF
@@ -290,7 +321,7 @@ describe("MCP tools", function () {
 		});
 		
 		afterEach(function () {
-			Zotero.MCP.Tools._structureWait = 30 * 1000;
+			Zotero.MCP.Tools._structureWait = 15 * 1000;
 		});
 		
 		it("should read a PDF by page, up to about maxChars, with labels and the outline", async function () {
@@ -366,6 +397,35 @@ describe("MCP tools", function () {
 			finally {
 				Zotero.Prefs.clear('fulltext.pdfMaxPages');
 			}
+		});
+		
+		it("should return the pages it has by the deadline, and say more are coming", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			await setText(attachment, ['One', 'Two'], { totalPages: 4 });
+			let extracted = Zotero.Promise.defer();
+			sinon.stub(Zotero.PDFWorker, 'getFullText').returns(extracted.promise);
+			
+			let result = await withBudget(300, () => call('zotero_read_text', { key: attachment.key }));
+			assert.deepEqual(result.pages, [{ page: 1, text: 'One' }, { page: 2, text: 'Two' }]);
+			assert.equal(result.nextPage, 3);
+			assert.match(result.notice, /still getting the text/);
+			
+			extracted.resolve({ text: 'Three\fFour', totalPages: 4 });
+			result = await call('zotero_read_text', { key: attachment.key, startPage: 3 });
+			assert.deepEqual(result.pages, [{ page: 3, text: 'Three' }, { page: 4, text: 'Four' }]);
+			assert.notProperty(result, 'notice');
+		});
+		
+		it("should say when a file's text isn't ready by the deadline", async function () {
+			let attachment = await importFileAttachment('stub.epub');
+			await IOUtils.remove(Zotero.FullText.getItemCacheFile(attachment).path, { ignoreAbsent: true });
+			let indexing = Zotero.Promise.defer();
+			sinon.stub(Zotero.FullText, 'indexItems').returns(indexing.promise);
+			
+			let result = await withBudget(300, () => call('zotero_read_text', { key: attachment.key }));
+			assert.notProperty(result, 'text');
+			assert.match(result.notice, /still getting the text/);
+			indexing.resolve();
 		});
 		
 		it("should read other files in chunks that end between words", async function () {
@@ -534,7 +594,7 @@ describe("MCP tools", function () {
 			item = await createArticle({ title: 'A study of things', lastName: 'Quuxly', date: '2020' });
 		});
 		
-		after(async function () {
+		afterEach(async function () {
 			let style = Zotero.Styles.get(STYLE_ID);
 			if (style) {
 				await style.remove();
@@ -617,6 +677,19 @@ describe("MCP tools", function () {
 					'https://www.zotero.org/styles/zotero-mcp-test',
 					'https://www.zotero.org/styles/zotero-mcp-test',
 				]);
+			});
+			
+			it("should say when installing the style outlasts the call", async function () {
+				sinon.stub(Permissions, '_ask').resolves('allow');
+				let installing = Zotero.Promise.defer();
+				sinon.stub(Zotero.Styles, 'install').returns(installing.promise);
+				let error = await withBudget(300, () => callForError('zotero_generate_citation', {
+					items: [{ key: item.key }],
+					format: 'citation',
+					style: 'zotero-mcp-test',
+				}));
+				assert.match(error, /still installing the style/);
+				installing.resolve({ styleID: STYLE_ID });
 			});
 			
 			it("should only install styles from the repository", async function () {
@@ -959,16 +1032,21 @@ describe("MCP tools", function () {
 			assert.equal(result.results[0].fileSearch, 'notFound');
 			assert.match(result.notice, /zotero_add_attachment/);
 			
-			let wait = Zotero.MCP.Tools._fileWait;
-			Zotero.MCP.Tools._fileWait = 50;
+			// The time the user takes to answer the permission dialog comes out of the call's
+			// budget, so the file search is waited for only for what's left of it
+			let budget = Zotero.MCP.CALL_BUDGET;
+			Zotero.MCP.CALL_BUDGET = 1000;
+			Permissions._ask.callsFake(() => Zotero.Promise.delay(800).then(() => 'allow'));
 			search.returns(new Promise(() => {}));
+			let start = Date.now();
 			try {
 				item.url += '2';
 				result = await call('zotero_add_items', { items: [item], findFiles: true });
 			}
 			finally {
-				Zotero.MCP.Tools._fileWait = wait;
+				Zotero.MCP.CALL_BUDGET = budget;
 			}
+			assert.isBelow(Date.now() - start, 1500);
 			assert.equal(result.results[0].fileSearch, 'searching');
 			assert.match(result.notice, /still looking/);
 		});
@@ -1014,8 +1092,8 @@ describe("MCP tools", function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');
 			let download = Zotero.Promise.defer();
 			sinon.stub(Zotero.Attachments, 'addFileFromURLs').returns(download.promise);
-			let wait = Zotero.MCP.Tools._fileWait;
-			Zotero.MCP.Tools._fileWait = 200;
+			let budget = Zotero.MCP.CALL_BUDGET;
+			Zotero.MCP.CALL_BUDGET = 200;
 			let result;
 			try {
 				result = await call('zotero_add_attachment', {
@@ -1025,7 +1103,7 @@ describe("MCP tools", function () {
 				});
 			}
 			finally {
-				Zotero.MCP.Tools._fileWait = wait;
+				Zotero.MCP.CALL_BUDGET = budget;
 			}
 			assert.equal(result.status, 'downloading');
 			

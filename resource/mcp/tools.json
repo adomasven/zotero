@@ -289,6 +289,7 @@
 								"title": { "type": "string" },
 								"contentType": { "type": "string" },
 								"matchCount": { "type": "integer" },
+								"textPending": { "type": "boolean", "description": "Zotero is still getting the file's text, so its passages are missing" },
 								"passages": {
 									"type": "array",
 									"description": "Passages with the most query terms first",
@@ -305,7 +306,7 @@
 									}
 								}
 							},
-							"required": ["key", "title", "matchCount", "passages"]
+							"required": ["key", "title", "passages"]
 						}
 					},
 					"nextOffset": { "type": "integer", "description": "Present when there are more files" },

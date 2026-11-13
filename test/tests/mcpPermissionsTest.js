@@ -83,7 +83,7 @@ describe("Zotero.MCP.Permissions", function () {
 	
 	it("should grant delete for an hour instead of always", async function () {
 		sinon.stub(Permissions, '_ask').resolves('extra');
-		await Permissions.require('test-client', Permissions.DELETE, item.libraryID);
+		await Permissions.require('test-client', Permissions.DELETE, item.libraryID, {});
 		let [grant] = Permissions.getGrants('test-client');
 		assert.equal(grant.permission, Permissions.DELETE);
 		let expiresIn = new Date(grant.until) - Date.now();
@@ -155,18 +155,14 @@ describe("Zotero.MCP.Permissions", function () {
 	});
 	
 	describe("dialog", function () {
-		let timeout;
+		let options;
 		
-		before(function () {
-			timeout = Permissions.DIALOG_TIMEOUT;
-		});
-		
-		afterEach(function () {
-			Permissions.DIALOG_TIMEOUT = timeout;
+		beforeEach(function () {
+			options = { deadline: Date.now() + 60 * 1000 };
 		});
 		
 		it("should name the app and action, and offer Always Allow for edits", async function () {
-			let answer = Permissions._ask('claude-code', Permissions.EDIT_LIBRARY, item.libraryID);
+			let answer = Permissions._ask('claude-code', Permissions.EDIT_LIBRARY, item.libraryID, options);
 			let win = await getDialog();
 			let dialog = win.document.getElementById('commonDialog');
 			let text = win.document.getElementById('infoBody').textContent;
@@ -181,7 +177,7 @@ describe("Zotero.MCP.Permissions", function () {
 		});
 		
 		it("should deny on Escape", async function () {
-			let answer = Permissions._ask('test-client', Permissions.EDIT_LIBRARY, item.libraryID);
+			let answer = Permissions._ask('test-client', Permissions.EDIT_LIBRARY, item.libraryID, options);
 			let win = await getDialog();
 			win.document.getElementById('commonDialog')
 				.dispatchEvent(new win.KeyboardEvent('keypress', { key: 'Escape', keyCode: 27, bubbles: true }));
@@ -189,7 +185,7 @@ describe("Zotero.MCP.Permissions", function () {
 		});
 		
 		it("should offer Allow for 1 Hour for delete, and count closing as Deny", async function () {
-			let answer = Permissions._ask('test-client', Permissions.DELETE, item.libraryID);
+			let answer = Permissions._ask('test-client', Permissions.DELETE, item.libraryID, options);
 			let win = await getDialog();
 			let dialog = win.document.getElementById('commonDialog');
 			assert.equal(dialog.getButton('extra1').label, Zotero.ftl.formatValueSync('mcp-consent-allow-hour'));
@@ -197,9 +193,8 @@ describe("Zotero.MCP.Permissions", function () {
 			assert.equal(await answer, 'deny');
 		});
 		
-		it("should close an unanswered dialog as no answer", async function () {
-			Permissions.DIALOG_TIMEOUT = 300;
-			let answer = Permissions._ask('test-client', Permissions.EDIT_SETTINGS);
+		it("should close an unanswered dialog at the call's deadline, as no answer", async function () {
+			let answer = Permissions._ask('test-client', Permissions.EDIT_SETTINGS, null, { deadline: Date.now() + 300 });
 			let win = await getDialog();
 			assert.isNull(await answer);
 			await Zotero.Promise.delay(100);
