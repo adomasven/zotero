@@ -950,6 +950,45 @@
 			}
 		},
 		{
+			"name": "zotero_manage_tags",
+			"title": "Manage Zotero tags",
+			"description": "Change tags across a whole library: rename a tag, merge several into one by renaming them all to the same name (which may be an existing tag), delete tags from every item that has them, or set or remove a tag's color. Tag names match exactly, including case, as zotero_list_tags lists them. To change the tags of particular items, use zotero_update_items. The user can undo renaming and deleting in Zotero with Edit → Undo, though not color changes. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"action": { "enum": ["rename", "delete", "setColor"] },
+					"tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100, "description": "For setColor, one tag" },
+					"newName": { "type": "string", "description": "For rename" },
+					"color": { "type": ["string", "null"], "description": "For setColor: #rrggbb, or null to remove the color. Colored tags show first in the tag selector and as colored dots on items; at most 9 tags can have colors." },
+					"position": { "type": "integer", "minimum": 1, "maximum": 9, "description": "For setColor: the number key that toggles the tag on selected items. Defaults to its current one, or the next free one." },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["action", "tags"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"action": { "type": "string" },
+					"itemCount": { "type": "integer", "description": "For rename and delete, the items changed" },
+					"tag": { "type": "string" },
+					"color": { "type": "string", "description": "For setColor; absent if removed" },
+					"position": { "type": "integer" }
+				},
+				"required": ["libraryID"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": false,
+				"openWorldHint": false
+			}
+		},
+		{
 			"name": "zotero_edit_note",
 			"title": "Edit a Zotero note",
 			"description": "Add Markdown to the end of a note, or replace its content, with the same Markdown as zotero_add_note. Give the note's dateModified from zotero_get_notes: if the note changed since, e.g. because the user edited it, nothing is changed and you get it again first. Replacing works only on notes without highlights, citations or images, which Markdown can't hold; append to the others. The user can undo it in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",

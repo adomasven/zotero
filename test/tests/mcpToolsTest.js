@@ -960,6 +960,55 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("zotero_manage_tags", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should merge tags into one, keeping a color, and undo", async function () {
+			let [a, b, c] = ['ML', 'machine-learning', 'Machine Learning'].map(() => Zotero.Utilities.randomString());
+			let one = await createDataObject('item', { tags: [{ tag: a }] });
+			let two = await createDataObject('item', { tags: [{ tag: b }, { tag: c }] });
+			let libraryID = Zotero.Libraries.userLibraryID;
+			await Zotero.Tags.setColor(libraryID, a, '#ff6666', 0);
+			try {
+				let result = await call('zotero_manage_tags', { action: 'rename', tags: [a, b], newName: c });
+				assert.equal(result.itemCount, 2);
+				assert.deepEqual(one.getTags(), [{ tag: c }]);
+				assert.deepEqual(two.getTags(), [{ tag: c }]);
+				assert.equal(Zotero.Tags.getColor(libraryID, c).color, '#ff6666');
+				assert.isFalse(Zotero.Tags.getColor(libraryID, a));
+				
+				assert.isTrue(await Zotero.UndoHistory.undo());
+				assert.deepEqual(one.getTags(), [{ tag: a }]);
+				assert.sameDeepMembers(two.getTags(), [{ tag: b }, { tag: c }]);
+				
+				assert.match(
+					await callForError('zotero_manage_tags', { action: 'rename', tags: ['no such tag'], newName: c }),
+					/No items in .* have the tags "no such tag"/
+				);
+			}
+			finally {
+				await Zotero.Tags.setColor(libraryID, a, false);
+				await Zotero.Tags.setColor(libraryID, c, false);
+			}
+		});
+		
+		it("should delete tags and set colors", async function () {
+			let tag = Zotero.Utilities.randomString();
+			let item = await createDataObject('item', { tags: [{ tag }, { tag: 'kept' }] });
+			let libraryID = Zotero.Libraries.userLibraryID;
+			let result = await call('zotero_manage_tags', { action: 'setColor', tags: [tag], color: '#5fb236' });
+			assert.equal(result.color, '#5fb236');
+			assert.isAbove(result.position, 0);
+			
+			await call('zotero_manage_tags', { action: 'delete', tags: [tag] });
+			assert.deepEqual(item.getTags(), [{ tag: 'kept' }]);
+			assert.isFalse(Zotero.Tags.getColor(libraryID, tag));
+		});
+	});
+	
 	describe("zotero_edit_note", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');

@@ -1127,6 +1127,111 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * Rename, merge or delete tags across a library, or set a tag's color
+	 *
+	 * Renaming and deleting change each item that has the tag, as one undo step, rather than
+	 * through Zotero.Tags.rename() and removeFromLibrary(), which write to the database
+	 * directly and so can't be undone. Colors are a synced setting, outside the undo history.
+	 */
+	this.manageTags = async function ({ action, tags, newName, color, position, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		let library = Zotero.Libraries.get(libraryID);
+		if (!library.editable) {
+			throw new Zotero.MCP.ToolError(`${library.name} can't be edited`);
+		}
+		tags = [...new Set(tags.map(tag => tag.trim()))];
+		newName = newName?.trim();
+		if (tags.some(tag => !tag) || action == 'rename' && !newName) {
+			throw new Zotero.MCP.ToolError('Tags must not be empty');
+		}
+		if ((action == 'rename') != (newName !== undefined)) {
+			throw new Zotero.MCP.ToolError('Give newName to rename, and only then');
+		}
+		let colors = Zotero.Tags.getColors(libraryID);
+		
+		if (action == 'setColor') {
+			let [tag] = tags;
+			if (tags.length != 1) {
+				throw new Zotero.MCP.ToolError('Give one tag to color');
+			}
+			if (color && !/^#[0-9a-f]{6}$/i.test(color)) {
+				throw new Zotero.MCP.ToolError('Give color as #rrggbb, or null to remove it');
+			}
+			if (color && !colors.has(tag) && colors.size >= Zotero.Tags.MAX_COLORED_TAGS) {
+				throw new Zotero.MCP.ToolError(
+					`Only ${Zotero.Tags.MAX_COLORED_TAGS} tags can have colors, one per number key. `
+						+ 'Remove the color of another tag first.'
+				);
+			}
+			await Zotero.Tags.setColor(libraryID, tag, color || false, position && position - 1);
+			let set = Zotero.Tags.getColor(libraryID, tag);
+			return Zotero.MCP.jsonResult({
+				libraryID,
+				tag,
+				color: set ? set.color : undefined,
+				position: set ? set.position + 1 : undefined,
+			});
+		}
+		
+		if (action == 'rename') {
+			tags = tags.filter(tag => tag != newName);
+			if (!tags.length) {
+				throw new Zotero.MCP.ToolError(`The tag is already named ${JSON.stringify(newName)}`);
+			}
+		}
+		let itemIDs = new Set();
+		let missing = [];
+		for (let tag of tags) {
+			let tagID = Zotero.Tags.getID(tag);
+			let ids = tagID ? await Zotero.Tags.getTagItems(libraryID, tagID) : [];
+			if (!ids.length) {
+				missing.push(tag);
+			}
+			ids.forEach(id => itemIDs.add(id));
+		}
+		if (missing.length) {
+			throw new Zotero.MCP.ToolError(
+				`No items in ${library.name} have the tags ${missing.map(tag => JSON.stringify(tag)).join(', ')}. `
+					+ 'Tags match exactly, including case: see zotero_list_tags.'
+			);
+		}
+		let items = await Zotero.Items.getAsync([...itemIDs]);
+		await Zotero.Items.loadDataTypes(items);
+		// A renamed tag keeps its color, as when the user renames it, unless the new name has one
+		let keptColor = action == 'rename' && !colors.has(newName)
+			? tags.map(tag => colors.get(tag)).find(Boolean)
+			: null;
+		await edit(clientID, async () => {
+			for (let item of items) {
+				for (let tag of tags) {
+					if (action == 'rename' && !item.hasTag(newName)) {
+						item.replaceTag(tag, newName);
+					}
+					else {
+						item.removeTag(tag);
+					}
+				}
+				await item.save({ skipSelect: true });
+			}
+			for (let tag of tags) {
+				if (colors.has(tag)) {
+					await Zotero.Tags.setColor(libraryID, tag, false);
+				}
+			}
+			if (keptColor) {
+				await Zotero.Tags.setColor(libraryID, newName, keptColor.color, keptColor.position);
+			}
+		});
+		// Removes the tags no item has anymore
+		Zotero.Prefs.set('purge.tags', true);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			action,
+			itemCount: items.length,
+		});
+	};
+	
+	/**
 	 * Add Markdown to the end of a note, or replace its content
 	 *
 	 * Refuses if the note changed since the model read it, so an edit the user made in the
