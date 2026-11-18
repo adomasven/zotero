@@ -178,7 +178,7 @@
 		{
 			"name": "zotero_list_collections",
 			"title": "List Zotero collections",
-			"description": "List a library's collections, or a collection's subcollections at any depth.",
+			"description": "List a library's collections, or a collection's subcollections at any depth, with how many items each has. The count is of the items directly in the collection, not in its subcollections; zotero_search with the collectionKey lists them.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -199,7 +199,7 @@
 								"key": { "type": "string" },
 								"name": { "type": "string" },
 								"parentKey": { "type": "string" },
-								"itemCount": { "type": "integer" }
+								"itemCount": { "type": "integer", "description": "Items directly in the collection, not in its subcollections" }
 							},
 							"required": ["key", "name", "itemCount"]
 						}
@@ -451,7 +451,7 @@
 		{
 			"name": "zotero_get_context",
 			"title": "Get what the user is looking at in Zotero",
-			"description": "Get what the user has open and selected in Zotero's main window, so requests like \"summarize this paper\", \"the page I'm on\", \"the passage I selected\" or \"the papers I selected\" can be answered. Returns the selected library, collections and items in the library tab, and which tab is active. If it's a PDF, EPUB or web page snapshot in Zotero's reader, it also returns the file, the page the user is on, the text they've selected and the annotations they've selected; if it's a note, the note. Returns window: false when Zotero's main window isn't open.",
+			"description": "Get what the user has open and selected in Zotero's main window, so requests like \"summarize this paper\", \"the page I'm on\", \"the passage I selected\" or \"the papers I selected\" can be answered. Returns the selected library, collections and items in the library tab, and which tab is active. If it's a PDF, EPUB or web page snapshot in Zotero's reader, it also returns the file, the page the user is on, the text they've selected and the annotations they've selected; if it's a note, the note. It also lists the tabs of all of Zotero's windows, with the IDs zotero_select, zotero_open and zotero_close take. Returns window: false when no Zotero window is open.",
 			"inputSchema": {
 				"type": "object",
 				"additionalProperties": false
@@ -459,8 +459,11 @@
 			"outputSchema": {
 				"type": "object",
 				"properties": {
-					"window": { "type": "boolean", "description": "Whether Zotero's main window is open" },
-					"tab": { "type": "string", "description": "The active tab: library, reader, note or another kind" },
+					"window": { "type": "boolean", "description": "Whether a Zotero window is open. The rest describes the one the user used last." },
+					"windowID": { "type": "string" },
+					"tabID": { "type": "string", "description": "The active tab" },
+					"tab": { "type": "string", "description": "The active tab's kind: library, reader, note or another kind" },
+					"libraryTabID": { "type": "string", "description": "The library tab the selection below is from: the active one, or the one used last" },
 					"libraryID": { "type": "integer", "description": "The library selected in the library tab" },
 					"libraryName": { "type": "string" },
 					"collections": {
@@ -559,12 +562,146 @@
 							"link": { "type": "string" }
 						},
 						"required": ["libraryID", "key", "title", "link"]
+					},
+					"windows": {
+						"type": "array",
+						"description": "Zotero's windows",
+						"items": {
+							"type": "object",
+							"properties": {
+								"windowID": { "type": "string" },
+								"current": { "type": "boolean", "description": "The window the user used last" },
+								"tabs": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"properties": {
+											"tabID": { "type": "string" },
+											"type": { "type": "string", "description": "library, reader, note or another kind" },
+											"title": { "type": "string" },
+											"selected": { "type": "boolean" },
+											"libraryID": { "type": "integer" },
+											"key": { "type": "string", "description": "The file or note a reader or note tab shows" },
+											"page": { "type": "integer", "description": "PDF page a reader tab is on, from 1" },
+											"collectionKey": { "type": "string", "description": "The collection a library tab shows" },
+											"savedSearchKey": { "type": "string", "description": "The saved search a library tab shows" }
+										},
+										"required": ["tabID", "type"]
+									}
+								}
+							},
+							"required": ["windowID", "tabs"]
+						}
 					}
 				},
-				"required": ["window"]
+				"required": ["window", "windows"]
 			},
 			"annotations": {
 				"readOnlyHint": true
+			}
+		},
+		{
+			"name": "zotero_select",
+			"title": "Show items in Zotero",
+			"description": "Show a library, collection or saved search in a Zotero library tab, with the given items, or all of its items, selected, so the user can see them. Replaces what the tab shows, including any search or tag filter. Opens Zotero's window if none is open. Changes only what Zotero shows, not the library.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"collectionKey": { "type": "string", "description": "Defaults to the whole library" },
+					"savedSearchKey": { "type": "string" },
+					"keys": { "type": "array", "items": { "type": "string" }, "maxItems": 500, "description": "Items to select. Only items in the collection or saved search can be selected." },
+					"allItems": { "type": "boolean", "default": false, "description": "Select every item shown" },
+					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
+					"tabID": { "type": "string", "description": "A library tab from zotero_get_context. Defaults to the window's library tab used last." },
+					"newTab": { "type": "boolean", "default": false, "description": "Show them in a new library tab" },
+					"newWindow": { "type": "boolean", "default": false, "description": "Show them in a new window" },
+					"focus": { "type": "boolean", "default": false, "description": "Bring Zotero to the front. By default it stays behind the app the user is in." },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"windowID": { "type": "string" },
+					"tabID": { "type": "string" },
+					"libraryID": { "type": "integer" },
+					"selectedCount": { "type": "integer" },
+					"notShown": { "type": "array", "items": { "type": "string" }, "description": "Items that aren't in the collection or saved search, so weren't selected" },
+					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys of items that don't exist" }
+				},
+				"required": ["windowID", "tabID", "libraryID", "selectedCount", "notShown"]
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_open",
+			"title": "Open a file or note in Zotero",
+			"description": "Open a PDF, EPUB or web page snapshot in Zotero's reader, or a note, for the user to see, and scroll the reader to a page or an annotation. Give an item's key to open its best file. If it's already open, its tab is selected and scrolled instead, unless newTab is given. Changes only what Zotero shows, not the library.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"key": { "type": "string", "description": "An attachment, a note, or a regular item to open its PDF, EPUB or snapshot" },
+					"page": { "type": "integer", "minimum": 1, "description": "PDF page to scroll to, from 1, as zotero_read_text and zotero_search_fulltext give" },
+					"pageLabel": { "type": "string", "description": "The page number printed on the page, for a PDF or an EPUB with page numbers" },
+					"annotationKey": { "type": "string", "description": "An annotation of the file to scroll to and select" },
+					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
+					"newTab": { "type": "boolean", "default": false, "description": "Open another tab even if it's already open" },
+					"newWindow": { "type": "boolean", "default": false, "description": "Open it in a new window" },
+					"focus": { "type": "boolean", "default": false, "description": "Bring Zotero to the front. By default it stays behind the app the user is in." },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["key"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string", "description": "The file or note opened" },
+					"title": { "type": "string" },
+					"windowID": { "type": "string" },
+					"tabID": { "type": "string" }
+				},
+				"required": ["libraryID", "key"]
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_close",
+			"title": "Close Zotero tabs or windows",
+			"description": "Close tabs and windows by their IDs from zotero_get_context. The user can reopen them with Zotero's Reopen Closed Tab. Pinned tabs, and Zotero's last tab outside macOS, can't be closed.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"tabIDs": { "type": "array", "items": { "type": "string" } },
+					"windowIDs": { "type": "array", "items": { "type": "string" } }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"closedTabs": { "type": "array", "items": { "type": "string" } },
+					"closedWindows": { "type": "array", "items": { "type": "string" } }
+				},
+				"required": ["closedTabs", "closedWindows"]
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": true,
+				"openWorldHint": false
 			}
 		},
 		{

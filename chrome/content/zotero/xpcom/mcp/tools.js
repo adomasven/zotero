@@ -575,33 +575,41 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
-	 * What the user is looking at in the main window: the library tab's selection, and the
-	 * open reader or note
+	 * What the user is looking at in the most recently used main window: the selection of its
+	 * library tab, and the open reader or note, and the tabs of every main window
 	 */
 	this.getContext = async function () {
 		let win = Zotero.getMainWindow();
-		if (!win?.ZoteroPane?.collectionsView) {
-			return Zotero.MCP.jsonResult({ window: false });
+		if (!win?.Zotero_Tabs) {
+			return Zotero.MCP.jsonResult({ window: false, windows: [] });
 		}
 		let { ZoteroPane, Zotero_Tabs } = win;
-		let libraryID = ZoteroPane.getSelectedLibraryIDs()[0];
-		let items = ZoteroPane.getSelectedItems(false, { libraryTabOnly: true });
 		let result = {
 			window: true,
+			windowID: Zotero_Tabs.windowID,
+			tabID: Zotero_Tabs.selectedID,
 			tab: Zotero_Tabs.selectedType,
-			libraryID,
-			libraryName: libraryID ? Zotero.Libraries.get(libraryID).name : undefined,
-			collections: ZoteroPane.getSelectedCollections().map(collection => ({
-				key: collection.key,
-				name: collection.name,
-			})),
-			savedSearches: ZoteroPane.getSelectedSavedSearches().map(search => ({
-				key: search.key,
-				name: search.name,
-			})),
-			selectedItemCount: items.length,
-			selectedItems: await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(summarize)),
 		};
+		// A window can have only reader and note tabs
+		if (ZoteroPane.libraryView?.loaded) {
+			let libraryID = ZoteroPane.getSelectedLibraryIDs()[0];
+			let items = ZoteroPane.getSelectedItems(false, { libraryTabOnly: true });
+			Object.assign(result, {
+				libraryTabID: ZoteroPane.libraryView.tabID,
+				libraryID,
+				libraryName: libraryID ? Zotero.Libraries.get(libraryID).name : undefined,
+				collections: ZoteroPane.getSelectedCollections().map(collection => ({
+					key: collection.key,
+					name: collection.name,
+				})),
+				savedSearches: ZoteroPane.getSelectedSavedSearches().map(search => ({
+					key: search.key,
+					name: search.name,
+				})),
+				selectedItemCount: items.length,
+				selectedItems: await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(summarize)),
+			});
+		}
 		
 		if (Zotero_Tabs.selectedType == 'reader') {
 			let reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
@@ -622,11 +630,255 @@ Zotero.MCP.Tools = new function () {
 				};
 			}
 		}
+		result.windows = Zotero.getMainWindows()
+			.filter(mainWindow => mainWindow.Zotero_Tabs)
+			.map(mainWindow => ({
+				windowID: mainWindow.Zotero_Tabs.windowID,
+				current: mainWindow == win || undefined,
+				tabs: getTabIDs(mainWindow).map(tabID => describeTab(mainWindow, tabID)),
+			}));
 		return Zotero.MCP.jsonResult(result);
 	};
 	
 	/**
-	 * Citations and bibliographies in a CSL style, or the items in an export format
+	 * Show a library, collection or saved search in a library tab, with some or all of its
+	 * items selected
+	 *
+	 * This replaces what the tab shows, including any search and tag filter, so the items show.
+	 * The window stays behind other apps' windows unless focus is given.
+	 */
+	this.select = async function ({
+		libraryID, collectionKey, savedSearchKey, keys = [], allItems = false, windowID, tabID,
+		newWindow = false, newTab = false, focus = false,
+	}, { deadline }) {
+		libraryID = getLibraryID(libraryID);
+		if (collectionKey && savedSearchKey) {
+			throw new Zotero.MCP.ToolError('Give collectionKey or savedSearchKey, not both');
+		}
+		if (keys.length && allItems) {
+			throw new Zotero.MCP.ToolError('Give keys or allItems, not both');
+		}
+		checkWhere({ windowID, tabID, newWindow, newTab });
+		let rowID = 'L' + libraryID;
+		if (collectionKey) {
+			rowID = 'C' + getCollection(libraryID, collectionKey).id;
+		}
+		else if (savedSearchKey) {
+			let search = Zotero.Searches.getByLibraryAndKey(libraryID, savedSearchKey);
+			if (!search || search.deleted) {
+				throw new Zotero.MCP.ToolError(`No saved search ${savedSearchKey} in library ${libraryID}`);
+			}
+			rowID = 'S' + search.id;
+		}
+		let items = [];
+		let missing = [];
+		for (let key of new Set(keys)) {
+			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
+			if (!item || item.deleted) {
+				missing.push(key);
+			}
+			else {
+				items.push(item);
+			}
+		}
+		// As a library tab saves what it shows (see LibraryView#captureLibraryTabState())
+		let state = { collections: [rowID], focusedCollection: rowID, items: items.map(item => item.id) };
+		
+		// By default, the most recently used window, or a new one if there's none
+		let win = newWindow ? null : getMainWindow(windowID, tabID) ?? Zotero.getMainWindow();
+		let view;
+		if (!win) {
+			win = Zotero.openMainWindow({ libraryTabState: state });
+			view = await waitForLibraryView(win, null, deadline);
+		}
+		else {
+			let { Zotero_Tabs, ZoteroPane } = win;
+			if (tabID && !Zotero_Tabs.isLibraryTab(tabID)) {
+				throw new Zotero.MCP.ToolError(`${tabID} isn't a library tab`);
+			}
+			let viewTabID = tabID ?? ZoteroPane.libraryView?.tabID;
+			if (newTab || !viewTabID) {
+				Zotero_Tabs.addLibraryTab({ state, select: true });
+				view = await waitForLibraryView(win, Zotero_Tabs.selectedID, deadline);
+			}
+			else {
+				Zotero_Tabs.select(viewTabID);
+				view = await waitForLibraryView(win, viewTabID, deadline);
+				await view.restoreLibraryTabState(state);
+			}
+		}
+		if (allItems) {
+			view.itemsView.selection.selectAll();
+		}
+		if (focus) {
+			Zotero.Utilities.Internal.activate(win);
+		}
+		let selected = view.itemsView.getSelectedObjects();
+		return Zotero.MCP.jsonResult({
+			windowID: win.Zotero_Tabs.windowID,
+			tabID: view.tabID,
+			libraryID,
+			selectedCount: selected.length,
+			// Items that aren't in the collection or saved search
+			notShown: items.filter(item => !selected.includes(item)).map(item => item.key),
+			missing: missing.length ? missing : undefined,
+		});
+	};
+	
+	/**
+	 * Open a file in Zotero's reader, or a note, in a tab or a window of its own, and scroll the
+	 * reader to a page or an annotation. If the file or note is already open, its tab is
+	 * selected instead, unless newTab is given.
+	 */
+	this.open = async function ({
+		key, page, pageLabel, annotationKey, windowID, newWindow = false, newTab = false,
+		focus = false, libraryID,
+	}, { deadline }) {
+		libraryID = getLibraryID(libraryID);
+		checkWhere({ windowID, newWindow, newTab });
+		if ([page, pageLabel, annotationKey].filter(x => x !== undefined).length > 1) {
+			throw new Zotero.MCP.ToolError('Give page, pageLabel or annotationKey, not more than one');
+		}
+		let item = await getItem(libraryID, key);
+		if (item.isRegularItem()) {
+			item = await item.getBestAttachment();
+			if (!item) {
+				throw new Zotero.MCP.ToolError(`${key} has no PDF, EPUB or snapshot to open`);
+			}
+		}
+		let location;
+		if (annotationKey) {
+			let annotation = await getItem(libraryID, annotationKey);
+			if (!annotation.isAnnotation() || annotation.parentItemID != item.id) {
+				throw new Zotero.MCP.ToolError(`${annotationKey} isn't an annotation of ${item.key}`);
+			}
+			location = { annotationID: annotation.key };
+		}
+		else if (page !== undefined) {
+			if (!item.isPDFAttachment()) {
+				throw new Zotero.MCP.ToolError(`${item.key} isn't a PDF. Give pageLabel for an EPUB.`);
+			}
+			location = { pageIndex: page - 1 };
+		}
+		else if (pageLabel !== undefined) {
+			if (item.isPDFAttachment()) {
+				location = { pageLabel };
+			}
+			else if (item.isEPUBAttachment()) {
+				location = { pageNumber: pageLabel };
+			}
+			else {
+				throw new Zotero.MCP.ToolError(`${item.key} has no pages. Give annotationKey to scroll to.`);
+			}
+		}
+		
+		let options = {
+			// Zotero can be running without a window, on macOS
+			openInWindow: newWindow || !Zotero.getMainWindow(),
+			allowDuplicate: newTab,
+			// By default, where the file or note is already open, or else the most recent window
+			window: getMainWindow(windowID)
+				?? (newTab ? null : Zotero.getMainWindows().find(win => getTabIDs(win, item).length))
+				?? Zotero.getMainWindow(),
+		};
+		if (item.isNote()) {
+			if (location) {
+				throw new Zotero.MCP.ToolError(`${item.key} is a note, which has no pages or annotations`);
+			}
+			await Zotero.Notes.open(item.id, null, options);
+		}
+		else if (item.isAttachment() && item.attachmentReaderType) {
+			if (!await item.fileExists()) {
+				throw new Zotero.MCP.ToolError(`The file of ${item.key} isn't on this computer`);
+			}
+			await Zotero.Reader.open(item.id, location, options);
+		}
+		else {
+			throw new Zotero.MCP.ToolError(
+				`${item.key} can't be opened in Zotero: only PDFs, EPUBs, web page snapshots and notes can`
+			);
+		}
+		// A new window adds its tab as it loads
+		while (!Zotero.getMainWindows().some(win => win.Zotero_Tabs && getTabIDs(win, item).length)
+				&& Date.now() < deadline) {
+			await Zotero.Promise.delay(20);
+		}
+		// The tab that's showing it: the selected one in its window, or else the newest
+		let win, tabID;
+		for (let mainWindow of Zotero.getMainWindows().filter(win => win.Zotero_Tabs)) {
+			let tabIDs = getTabIDs(mainWindow, item);
+			if (!tabIDs.length) {
+				continue;
+			}
+			let selected = tabIDs.find(id => id == mainWindow.Zotero_Tabs.selectedID);
+			if (selected || !win || mainWindow == options.window) {
+				win = mainWindow;
+				tabID = selected ?? tabIDs.at(-1);
+			}
+			if (selected && mainWindow == options.window) {
+				break;
+			}
+		}
+		if (focus && win) {
+			Zotero.Utilities.Internal.activate(win);
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			key: item.key,
+			title: item.isNote() ? item.getNoteTitle() : getTitle(item),
+			windowID: win?.Zotero_Tabs.windowID,
+			tabID,
+		});
+	};
+	
+	/**
+	 * Close tabs and main windows. Zotero's last main window, or its last tab, stays open except
+	 * on macOS, since closing it quits Zotero.
+	 */
+	this.close = async function ({ tabIDs = [], windowIDs = [] }) {
+		if (!tabIDs.length && !windowIDs.length) {
+			throw new Zotero.MCP.ToolError('Give tabIDs or windowIDs');
+		}
+		let windows = new Set(windowIDs.map(id => getMainWindow(id)));
+		// Tabs to close, by window
+		let tabs = new Map();
+		for (let tabID of new Set(tabIDs)) {
+			let win = getMainWindow(null, tabID);
+			if (windows.has(win)) {
+				continue;
+			}
+			let { tab } = win.Zotero_Tabs._getTab(tabID);
+			if (tab.pinned) {
+				throw new Zotero.MCP.ToolError(`${tabID} is pinned. The user can unpin it.`);
+			}
+			if (!tab.closable) {
+				throw new Zotero.MCP.ToolError(`${tabID} can't be closed`);
+			}
+			tabs.set(win, [...tabs.get(win) ?? [], tabID]);
+		}
+		let remaining = Zotero.getMainWindows().filter(
+			win => !windows.has(win) && getTabIDs(win).length > (tabs.get(win)?.length ?? 0)
+		);
+		if (!remaining.length && !Zotero.isMac) {
+			throw new Zotero.MCP.ToolError(
+				"That would close Zotero's last window, which quits Zotero. Leave a tab open."
+			);
+		}
+		let closedWindows = [...windows].map(win => win.Zotero_Tabs.windowID);
+		for (let [win, ids] of tabs) {
+			win.Zotero_Tabs.close(ids);
+		}
+		for (let win of windows) {
+			win.close();
+		}
+		return Zotero.MCP.jsonResult({
+			closedTabs: [...tabs.values()].flat(),
+			closedWindows,
+		});
+	};
+	
+	/**
+	 * Citations and bibliographies in a CSL style
 	 */
 	this.generateCitation = async function ({
 		items: refs, format, style, locale, html = false, libraryID,
@@ -1729,6 +1981,109 @@ Zotero.MCP.Tools = new function () {
 			tags: annotation.getTags().map(tag => tag.tag),
 			link: getOpenLink(attachment, { annotation: annotation.key }),
 		};
+	}
+	
+	/**
+	 * A main window by its ID, or the one with a tab
+	 *
+	 * @param {String} [windowID]
+	 * @param {String} [tabID]
+	 * @return {ChromeWindow|null} Null if neither is given
+	 */
+	function getMainWindow(windowID, tabID) {
+		let windows = Zotero.getMainWindows().filter(win => win.Zotero_Tabs);
+		if (windowID) {
+			let win = windows.find(win => win.Zotero_Tabs.windowID == windowID);
+			if (!win) {
+				throw new Zotero.MCP.ToolError(
+					`No window ${windowID}. zotero_get_context lists Zotero's windows.`
+				);
+			}
+			if (tabID && !getTabIDs(win).includes(tabID)) {
+				throw new Zotero.MCP.ToolError(`${tabID} isn't a tab of window ${windowID}`);
+			}
+			return win;
+		}
+		if (tabID) {
+			let win = windows.find(win => getTabIDs(win).includes(tabID));
+			if (!win) {
+				throw new Zotero.MCP.ToolError(`No tab ${tabID}. zotero_get_context lists Zotero's tabs.`);
+			}
+			return win;
+		}
+		return null;
+	}
+	
+	/**
+	 * @throws {Zotero.MCP.ToolError} If arguments for where to show something conflict
+	 */
+	function checkWhere({ windowID, tabID, newWindow, newTab }) {
+		if (newWindow && (windowID || tabID || newTab)) {
+			throw new Zotero.MCP.ToolError(
+				'newWindow opens a window of its own. Leave out windowID, tabID and newTab.'
+			);
+		}
+		if (newTab && tabID) {
+			throw new Zotero.MCP.ToolError('Give tabID or newTab, not both');
+		}
+	}
+	
+	/**
+	 * The IDs of a main window's tabs, in order, or only of those showing an item
+	 */
+	function getTabIDs(win, item) {
+		return win.Zotero_Tabs._tabs
+			.filter(tab => !item || tab.data?.itemID === item.id)
+			.map(tab => tab.id);
+	}
+	
+	function describeTab(win, tabID) {
+		let { Zotero_Tabs, ZoteroPane } = win;
+		let info = Zotero_Tabs.getTabInfo(tabID);
+		let tab = {
+			tabID,
+			type: Zotero_Tabs.parseTabType(info.type).tabContentType,
+			title: info.title,
+			selected: tabID == Zotero_Tabs.selectedID || undefined,
+		};
+		let item = info.data?.itemID && Zotero.Items.get(info.data.itemID);
+		if (item) {
+			Object.assign(tab, { libraryID: item.libraryID, key: item.key });
+			let reader = Zotero.Reader.getByTabID(tabID);
+			if (reader && item.isPDFAttachment()) {
+				let { pageIndex } = getReaderState(reader);
+				tab.page = Number.isInteger(pageIndex) ? pageIndex + 1 : undefined;
+			}
+		}
+		let view = ZoteroPane.getLibraryView(tabID);
+		if (view?.loaded) {
+			let rows = view.getCollectionTreeRows();
+			let row = rows.length == 1 ? rows[0] : null;
+			Object.assign(tab, {
+				libraryID: row?.ref.libraryID,
+				collectionKey: row?.isCollection() ? row.ref.key : undefined,
+				savedSearchKey: row?.isSearch() ? row.ref.key : undefined,
+			});
+		}
+		return tab;
+	}
+	
+	/**
+	 * A library tab's view once it shows what it was opened with
+	 *
+	 * @param {String|null} tabID - Null for the library tab of a new window
+	 * @param {Number} deadline - Date.now() time to stop waiting at
+	 */
+	async function waitForLibraryView(win, tabID, deadline) {
+		let view;
+		while (!(view = tabID ? win.ZoteroPane?.getLibraryView(tabID) : win.ZoteroPane?.libraryView)?.loaded) {
+			if (win.closed || Date.now() > deadline) {
+				throw new Error("Zotero's library tab didn't open in time");
+			}
+			await Zotero.Promise.delay(20);
+		}
+		await view.waitForLibraryTabState();
+		return view;
 	}
 	
 	function getLibraryID(libraryID = Zotero.Libraries.userLibraryID) {

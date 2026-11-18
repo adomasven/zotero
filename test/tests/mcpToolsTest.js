@@ -535,6 +535,16 @@ describe("MCP tools", function () {
 			assert.equal(context.selectedItemCount, 2);
 			assert.sameMembers(context.selectedItems.map(item => item.key), [items[0].key, items[2].key]);
 			assert.notProperty(context, 'reader');
+			let current = context.windows.find(window => window.current);
+			assert.equal(current.windowID, win.Zotero_Tabs.windowID);
+			assert.deepInclude(current.tabs, {
+				tabID: context.tabID,
+				type: 'library',
+				title: collection.name,
+				selected: true,
+				libraryID: Zotero.Libraries.userLibraryID,
+				collectionKey: collection.key,
+			});
 		});
 		
 		it("should return the open file, its page, and the selected text and annotations", async function () {
@@ -582,7 +592,96 @@ describe("MCP tools", function () {
 		
 		it("should say when the main window isn't open", async function () {
 			sinon.stub(Zotero, 'getMainWindow').returns(null);
-			assert.deepEqual(await call('zotero_get_context', {}), { window: false });
+			assert.deepEqual(await call('zotero_get_context', {}), { window: false, windows: [] });
+		});
+	});
+	
+	describe("zotero_select, zotero_open and zotero_close", function () {
+		let win;
+		
+		before(async function () {
+			win = await loadZoteroPane();
+		});
+		
+		after(function () {
+			for (let other of Zotero.getMainWindows()) {
+				if (other != win) {
+					other.close();
+				}
+			}
+			win.Zotero_Tabs.closeAll();
+			win.close();
+		});
+		
+		it("should select some or all of a collection's items, in this window or a new one", async function () {
+			let collection = await createDataObject('collection');
+			let items = [];
+			for (let i = 0; i < 3; i++) {
+				items.push(await createArticle({ collections: [collection.id] }));
+			}
+			let elsewhere = await createArticle();
+			let selectedKeys = view => view.itemsView.getSelectedObjects().map(item => item.key);
+			
+			let result = await call('zotero_select', {
+				collectionKey: collection.key,
+				keys: [items[0].key, items[2].key, elsewhere.key],
+			});
+			assert.equal(result.windowID, win.Zotero_Tabs.windowID);
+			assert.equal(result.selectedCount, 2);
+			assert.deepEqual(result.notShown, [elsewhere.key]);
+			let view = win.ZoteroPane.getLibraryView(result.tabID);
+			assert.sameMembers(selectedKeys(view), [items[0].key, items[2].key]);
+			
+			result = await call('zotero_select', { collectionKey: collection.key, allItems: true });
+			assert.equal(result.selectedCount, 3);
+			
+			result = await call('zotero_select', { collectionKey: collection.key, keys: [items[1].key], newWindow: true });
+			assert.notEqual(result.windowID, win.Zotero_Tabs.windowID);
+			let newWin = Zotero.getMainWindows().find(other => other.Zotero_Tabs?.windowID == result.windowID);
+			assert.deepEqual(selectedKeys(newWin.ZoteroPane.getLibraryView(result.tabID)), [items[1].key]);
+			// The original window keeps its selection
+			assert.lengthOf(selectedKeys(view), 3);
+			
+			await call('zotero_close', { windowIDs: [result.windowID] });
+			await waitForCallback(() => newWin.closed);
+		});
+		
+		it("should open a PDF at a page, scroll an open one, and close its tabs", async function () {
+			let item = await createArticle();
+			let attachment = await importFileAttachment('wonderland_short.pdf', { parentID: item.id });
+			let pageIndex = (tabID) => {
+				let stats = Zotero.Reader.getByTabID(tabID)?._internalReader?._state.primaryViewStats;
+				return stats?.pageIndex;
+			};
+			
+			// By its parent item's key
+			let opened = await call('zotero_open', { key: item.key, page: 5 });
+			assert.equal(opened.key, attachment.key);
+			assert.equal(opened.windowID, win.Zotero_Tabs.windowID);
+			await waitForCallback(() => pageIndex(opened.tabID) === 4, 50, 20);
+			
+			// Already open, so its tab scrolls
+			let again = await call('zotero_open', { key: attachment.key, page: 2 });
+			assert.equal(again.tabID, opened.tabID);
+			await waitForCallback(() => pageIndex(opened.tabID) === 1, 50, 20);
+			
+			let second = await call('zotero_open', { key: attachment.key, newTab: true });
+			assert.notEqual(second.tabID, opened.tabID);
+			
+			let context = await call('zotero_get_context', {});
+			let tabs = context.windows.find(window => window.current).tabs
+				.filter(tab => tab.key == attachment.key);
+			assert.sameMembers(tabs.map(tab => tab.tabID), [opened.tabID, second.tabID]);
+			
+			let closed = await call('zotero_close', { tabIDs: [opened.tabID, second.tabID] });
+			assert.sameMembers(closed.closedTabs, [opened.tabID, second.tabID]);
+			assert.lengthOf(win.Zotero_Tabs.getTabIDsByItemID(attachment.id), 0);
+		});
+		
+		it("should not open what Zotero can't show, or close an unknown tab", async function () {
+			let item = await createArticle();
+			assert.match(await callForError('zotero_open', { key: item.key }), /has no PDF, EPUB or snapshot/);
+			assert.match(await callForError('zotero_close', { tabIDs: ['nope'] }), /No tab nope/);
 		});
 	});
 	
