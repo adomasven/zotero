@@ -1,5 +1,5 @@
 {
-	"instructions": "Zotero is the user's reference manager: their library of papers, books and other sources, with PDFs and other files, annotations, notes, collections and tags. Use these tools to find and read the user's sources, cite them in a citation style, and add or organize items in their library. They work on the Zotero app on the user's computer, which is started if it isn't running.",
+	"instructions": "Zotero is the user's reference manager: their library of papers, books and other sources, with PDFs and other files, annotations, notes, collections and tags. Use these tools to find and read the user's sources, cite them in a citation style, add or organize items in their library, import and export them, and show them to the user in Zotero's windows. They work on the Zotero app on the user's computer, which is started if it isn't running.",
 	"tools": [
 		{
 			"name": "zotero_status",
@@ -707,7 +707,7 @@
 		{
 			"name": "zotero_generate_citation",
 			"title": "Generate Zotero citations",
-			"description": "Format items as one citation (with page or other locators) or a bibliography in a citation style, or export them as BibTeX, BibLaTeX, RIS or CSL-JSON. Defaults to the style the user copies citations with. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",
+			"description": "Format items as one citation (with page or other locators) or a bibliography in a citation style. For BibTeX, RIS and other export formats, use zotero_export. Defaults to the style the user copies citations with. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -730,7 +730,7 @@
 						"minItems": 1,
 						"maxItems": 100
 					},
-					"format": { "enum": ["citation", "bibliography", "bibtex", "biblatex", "ris", "csljson"] },
+					"format": { "enum": ["citation", "bibliography"] },
 					"style": { "type": "string", "description": "A style's short name, e.g. \"apa\", or its ID" },
 					"locale": { "type": "string", "description": "e.g. \"en-GB\"" },
 					"html": { "type": "boolean", "default": false, "description": "HTML instead of plain text" },
@@ -956,7 +956,7 @@
 		{
 			"name": "zotero_add_items",
 			"title": "Add items to Zotero",
-			"description": "Add items to a Zotero library, with their metadata looked up, and look for their PDFs. Ways to add, best first:\n- identifiers: DOIs, ISBNs, arXiv IDs or PubMed IDs, or URLs that contain one (doi.org, a publisher's article page with the DOI in its URL, arxiv.org, pubmed.ncbi.nlm.nih.gov). Zotero doesn't add other web pages: the user saves those with the Zotero Connector in their browser.\n- text in an import format, such as BibTeX, RIS or CSL JSON.\n- items: item JSON, for something without an identifier whose metadata you found yourself.\nIf looking up identifiers takes too long, the call returns before they're all done: those still being looked up say inProgress, and Zotero adds them when their lookup finishes. By default Zotero then looks for each new item's PDF or EPUB as its Find Available PDF does, from the user's computer, so access through their institution works. If it finds none, find a copy elsewhere and attach it with zotero_add_attachment; as a last resort, ask the user to save it with the Zotero Connector. The user can undo the call in Zotero with Edit → Undo, which moves the new items to the trash. Zotero asks the user for permission unless it was already granted.",
+			"description": "Add items to a Zotero library, with their metadata looked up, and look for their PDFs. For BibTeX, RIS or another import format, use zotero_import. Ways to add, best first:\n- identifiers: DOIs, ISBNs, arXiv IDs or PubMed IDs, or URLs that contain one (doi.org, a publisher's article page with the DOI in its URL, arxiv.org, pubmed.ncbi.nlm.nih.gov). Zotero doesn't add other web pages: the user saves those with the Zotero Connector in their browser.\n- items: item JSON, for something without an identifier whose metadata you found yourself.\nIf looking up identifiers takes too long, the call returns before they're all done: those still being looked up say inProgress, and Zotero adds them when their lookup finishes. By default Zotero then looks for each new item's PDF or EPUB as its Find Available PDF does, from the user's computer, so access through their institution works. If it finds none, find a copy elsewhere and attach it with zotero_add_attachment; as a last resort, ask the user to save it with the Zotero Connector. The user can undo the call in Zotero with Edit → Undo, which moves the new items to the trash. Zotero asks the user for permission unless it was already granted.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -966,7 +966,6 @@
 						"maxItems": 10,
 						"description": "e.g. [\"10.1038/nature12373\", \"978-0-262-03384-8\", \"arXiv:1706.03762\", \"PMID: 23903748\"]"
 					},
-					"text": { "type": "string", "description": "BibTeX, RIS or another format Zotero imports, with up to 50 items." },
 					"items": {
 						"type": "array",
 						"maxItems": 50,
@@ -995,7 +994,7 @@
 						"items": {
 							"type": "object",
 							"properties": {
-								"input": { "type": "string", "description": "The identifier given, \"text\", or \"items[i]\"" },
+								"input": { "type": "string", "description": "The identifier given, or \"items[i]\"" },
 								"status": { "enum": ["added", "failed", "inProgress"], "description": "inProgress: Zotero is still looking up the identifier, and adds its item when it finds it." },
 								"error": { "type": "string", "description": "Why it failed" },
 								"key": { "type": "string" },
@@ -1074,6 +1073,94 @@
 				"destructiveHint": false,
 				"idempotentHint": false,
 				"openWorldHint": true
+			}
+		},
+		{
+			"name": "zotero_import",
+			"title": "Import into Zotero",
+			"description": "Import a file on this computer, or text, in a format Zotero imports: BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, MODS, EndNote XML and others. Like File → Import, the PDFs and other files a file refers to are imported too, and a file's items go into a new collection named after it unless collectionKey is given. If importing takes too long, the call returns inProgress and Zotero finishes in the background. Zotero doesn't check whether the items are already in the library. The user can undo the import in Zotero with Edit → Undo, which moves the new items and collections to the trash. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"path": { "type": "string", "description": "The file's absolute path" },
+					"text": { "type": "string" },
+					"collectionKey": { "type": "string", "description": "A collection to add the items to" },
+					"newCollection": { "type": "boolean", "description": "Put the items in a new collection. Defaults to true for a file and false for text." },
+					"linkFiles": { "type": "boolean", "default": false, "description": "Link to the files a file refers to where they are, instead of copying them into Zotero" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"status": { "enum": ["imported", "inProgress"] },
+					"collectionKey": { "type": "string", "description": "The collection the items went into" },
+					"itemCount": { "type": "integer" },
+					"items": {
+						"type": "array",
+						"description": "The new items, at most 50",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"itemType": { "type": "string" },
+								"title": { "type": "string" },
+								"creators": { "type": "string" },
+								"date": { "type": "string" },
+								"link": { "type": "string" }
+							},
+							"required": ["key", "itemType", "title", "link"]
+						}
+					},
+					"notice": { "type": "string" }
+				},
+				"required": ["libraryID", "status"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_export",
+			"title": "Export from Zotero",
+			"description": "Export items, a collection with its subcollections, or a whole library, in an export format, as text or to a new file on this computer. Formats include BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, CSV, MODS, EndNote XML and Markdown or HTML for notes; an unknown format gives the full list. Large exports must be written to a file. Zotero doesn't replace existing files.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"format": { "type": "string", "description": "An export format's name, e.g. \"BibTeX\" or \"CSL JSON\"" },
+					"keys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Items to export. Defaults to the whole library." },
+					"collectionKey": { "type": "string" },
+					"path": { "type": "string", "description": "An absolute path to write to, where nothing exists yet. Without it, the export is returned as text." },
+					"includeFiles": { "type": "boolean", "default": false, "description": "Also copy the items' files, with their annotations. path is then a new folder, with the export file inside it." },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["format"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"format": { "type": "string" },
+					"output": { "type": "string", "description": "The export, when no path was given" },
+					"path": { "type": "string", "description": "The file written" },
+					"folder": { "type": "string", "description": "The folder with the file and the items' files, for includeFiles" },
+					"status": { "enum": ["written", "writing"], "description": "writing: Zotero is still writing the file" }
+				},
+				"required": ["format"]
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false,
+				"openWorldHint": false
 			}
 		}
 	]

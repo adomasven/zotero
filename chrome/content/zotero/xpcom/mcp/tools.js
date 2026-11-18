@@ -64,8 +64,10 @@ Zotero.MCP.Tools = new function () {
 	// Most selected items zotero_get_context lists
 	const MAX_CONTEXT_ITEMS = 50;
 	
-	// Most items zotero_add_items adds from text and item JSON
-	const MAX_NEW_ITEMS = 50;
+	// Most new items zotero_import lists
+	const MAX_LISTED_ITEMS = 50;
+	// Longest export zotero_export returns as text, in characters
+	const MAX_EXPORT_CHARS = 200000;
 	const LAST_RESORT = 'As a last resort, ask the user to save it with the Zotero Connector from a '
 		+ "browser where they're signed in to the site.";
 	const FILES_NOT_FOUND = "Zotero found no PDF or EPUB for items with fileSearch notFound. Find "
@@ -94,14 +96,6 @@ Zotero.MCP.Tools = new function () {
 		'attachments',
 		'notes',
 	]);
-	
-	// Zotero.Translate.Export translators for zotero_generate_citation's export formats
-	const EXPORT_FORMATS = {
-		bibtex: '9cb70025-a888-4a29-a210-93ec52da40d4',
-		biblatex: 'b6e39b57-8942-4d11-8259-342c46ce395f',
-		ris: '32d59d2d-b65a-4da4-b0a3-bdd3cfb979e7',
-		csljson: 'bc03b4fe-436d-4a1f-ba59-de4d2d7a63f7',
-	};
 	
 	// Longest a call waits for structured document text (see getStructure()), within its
 	// deadline
@@ -897,14 +891,6 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError(`No items ${missing.join(', ')} in library ${libraryID}`);
 		}
 		
-		if (EXPORT_FORMATS[format]) {
-			let output = await exportItems(
-				items.filter(item => !item.isAnnotation()),
-				EXPORT_FORMATS[format]
-			);
-			return Zotero.MCP.jsonResult({ format, output: output.trim() });
-		}
-		
 		let notCitable = items.filter(item => !item.isRegularItem());
 		if (notCitable.length) {
 			throw new Zotero.MCP.ToolError(
@@ -1204,8 +1190,7 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
-	 * Add items by identifier, from text in an import format, or from item JSON, and look for
-	 * their files
+	 * Add items by identifier or from item JSON, and look for their files
 	 *
 	 * Translators save in their own transactions, which can't be nested, so their items are
 	 * made one undo step afterwards, with any JSON items.
@@ -1215,29 +1200,17 @@ Zotero.MCP.Tools = new function () {
 	 * inProgress and go on in the background, where their items become a later undo step.
 	 */
 	this.addItems = async function ({
-		identifiers = [], text = '', items: json = [], collectionKey,
+		identifiers = [], items: json = [], collectionKey,
 		findFiles = Zotero.Prefs.get('downloadAssociatedFiles'), libraryID,
 	}, { clientID, deadline }) {
 		libraryID = getLibraryID(libraryID);
-		if (!identifiers.length && !text.trim() && !json.length) {
-			throw new Zotero.MCP.ToolError('Give identifiers, text or items');
+		if (!identifiers.length && !json.length) {
+			throw new Zotero.MCP.ToolError('Give identifiers or items');
 		}
 		let collections = collectionKey ? [getCollection(libraryID, collectionKey).id] : false;
 		
-		// Check what can be checked without the network before adding anything
+		// Checked before anything is added
 		let jsonItems = json.map((data, i) => itemFromJSON(libraryID, data, `items[${i}]`));
-		if (text.trim()) {
-			let count = (await importText(text, { libraryID: false })).length;
-			if (!count) {
-				throw new Zotero.MCP.ToolError('No items found in text');
-			}
-			if (count + jsonItems.length > MAX_NEW_ITEMS) {
-				throw new Zotero.MCP.ToolError(
-					`text and items have ${count + jsonItems.length} items. Add at most `
-						+ `${MAX_NEW_ITEMS} per call.`
-				);
-			}
-		}
 		
 		// { input, status, item, error }, or { lookup } in place of a lookup's results
 		let results = [];
@@ -1277,11 +1250,6 @@ Zotero.MCP.Tools = new function () {
 		});
 		// Saved by translators
 		let translated = results.filter(result => result.status == 'added').map(result => result.item);
-		if (text.trim()) {
-			let items = await importText(text, { libraryID, collections, saveAttachments: false });
-			translated.push(...items);
-			results.push(...items.map(item => ({ input: 'text', status: 'added', item })));
-		}
 		for (let [i, item] of jsonItems.entries()) {
 			results.push({ input: `items[${i}]`, status: 'added', item });
 		}
@@ -1458,15 +1426,7 @@ Zotero.MCP.Tools = new function () {
 			}
 		}
 		else {
-			if (!PathUtils.isAbsolute(path)) {
-				throw new Zotero.MCP.ToolError(`${path} isn't an absolute path. Give the file's full path.`);
-			}
-			let info;
-			try {
-				info = await IOUtils.stat(path);
-			}
-			// Missing or unreadable
-			catch {}
+			let info = await statPath(path);
 			if (info?.type != 'regular') {
 				throw new Zotero.MCP.ToolError(`There's no file at ${path} on this computer.`);
 			}
@@ -1490,6 +1450,232 @@ Zotero.MCP.Tools = new function () {
 			link: getOpenLink(attachment),
 		});
 	};
+	
+	/**
+	 * Import a file, or text, in a format Zotero imports, such as BibTeX, RIS or Zotero RDF,
+	 * with the files a file refers to
+	 *
+	 * Translators save in their own transactions, so the new collections and items are made one
+	 * undo step afterwards. An import still running at the call's deadline goes on in the
+	 * background and becomes an undo step when it finishes.
+	 */
+	this.import = async function ({
+		path, text, collectionKey, newCollection, linkFiles = false, libraryID,
+	}, { clientID, deadline }) {
+		libraryID = getLibraryID(libraryID);
+		if (!path == !text?.trim()) {
+			throw new Zotero.MCP.ToolError('Give path or text');
+		}
+		if (collectionKey && newCollection) {
+			throw new Zotero.MCP.ToolError('Give collectionKey or newCollection, not both');
+		}
+		// Like File → Import, a file goes into a collection of its own
+		newCollection ??= !!path && !collectionKey;
+		let collections = collectionKey ? [getCollection(libraryID, collectionKey).id] : [];
+		
+		let translation = new Zotero.Translate.Import();
+		let name;
+		if (path) {
+			let info = await statPath(path);
+			if (info?.type != 'regular') {
+				throw new Zotero.MCP.ToolError(`There's no file at ${path} on this computer.`);
+			}
+			translation.setLocation(Zotero.File.pathToFile(path));
+			name = PathUtils.filename(path).replace(/\.[^.]*$/, '') || PathUtils.filename(path);
+		}
+		else {
+			translation.setString(text);
+			name = Zotero.getString('fileInterface.imported') + ' ' + new Date().toLocaleString();
+		}
+		let translators = await translation.getTranslators();
+		if (!translators.length) {
+			throw new Zotero.MCP.ToolError(
+				`${path ? path + " isn't" : "text isn't"} in a format Zotero can import, such as `
+					+ 'BibTeX, RIS, Zotero RDF or CSL JSON'
+			);
+		}
+		translation.setTranslator(translators[0]);
+		
+		let created = null;
+		if (newCollection) {
+			if (Zotero.Collections.getByLibrary(libraryID).some(collection => collection.name == name)) {
+				name += ' ' + new Date().toLocaleString();
+			}
+			created = new Zotero.Collection({ libraryID, name });
+			await created.saveTx({ skipSelect: true });
+			collections = [created.id];
+		}
+		let importing = translation.translate({
+			libraryID,
+			collections: collections.length ? collections : null,
+			autoCreatedCollectionID: created?.id ?? null,
+			linkFiles,
+			// Text can't refer to files
+			saveAttachments: !!path,
+		}).then(async (items) => {
+			await edit(clientID, async () => {
+				for (let object of new Set([created, ...translation.newCollections ?? [], ...items])) {
+					if (object) {
+						Zotero.UndoHistory.stageCreation(object);
+					}
+				}
+			});
+			return items;
+		});
+		let items;
+		try {
+			items = await untilDeadline(importing, deadline);
+		}
+		catch (e) {
+			if (created && !created.getChildItems(true).length) {
+				await created.eraseTx();
+			}
+			throw new Zotero.MCP.ToolError(
+				`Zotero couldn't import ${path || 'text'}: ${e.message || e}`
+			);
+		}
+		if (items === TIMED_OUT) {
+			return Zotero.MCP.jsonResult({
+				libraryID,
+				status: 'inProgress',
+				collectionKey: created?.key ?? collectionKey,
+				notice: 'Zotero is still importing. Call zotero_search on the collection later to '
+					+ 'see the items.',
+			});
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			status: 'imported',
+			collectionKey: created?.key ?? collectionKey,
+			itemCount: items.length,
+			items: await Promise.all(items.slice(0, MAX_LISTED_ITEMS).map(summarize)),
+		});
+	};
+	
+	/**
+	 * Items, a collection or a library in an export format, as text or written to a file, with
+	 * the item's files beside it if asked
+	 */
+	this.export = async function ({
+		format, keys, collectionKey, path, includeFiles = false, libraryID,
+	}, { deadline }) {
+		libraryID = getLibraryID(libraryID);
+		if (keys && collectionKey) {
+			throw new Zotero.MCP.ToolError('Give keys or collectionKey, not both');
+		}
+		if (includeFiles && !path) {
+			throw new Zotero.MCP.ToolError('includeFiles needs a path to write the files to');
+		}
+		let translator = await getExportTranslator(format);
+		let translation = new Zotero.Translate.Export();
+		if (keys) {
+			let items = [];
+			for (let key of new Set(keys)) {
+				let item = await getItem(libraryID, key);
+				if (item.isAnnotation()) {
+					throw new Zotero.MCP.ToolError(
+						`${key} is an annotation, which is exported with its file, not on its own`
+					);
+				}
+				items.push(item);
+			}
+			translation.setItems(items);
+		}
+		else if (collectionKey) {
+			translation.setCollection(getCollection(libraryID, collectionKey));
+		}
+		else {
+			translation.setLibraryID(libraryID);
+		}
+		translation.setTranslator(translator);
+		
+		let file;
+		if (path) {
+			if (await statPath(path)) {
+				throw new Zotero.MCP.ToolError(
+					`${path} already exists. Zotero doesn't replace files: give another path.`
+				);
+			}
+			if ((await statPath(PathUtils.parent(path)))?.type != 'directory') {
+				throw new Zotero.MCP.ToolError(`There's no folder ${PathUtils.parent(path)} to write to.`);
+			}
+			translation.setLocation(Zotero.File.pathToFile(path));
+			// With its files, the export is a folder named by the path, as with File → Export
+			if (includeFiles) {
+				translation.setDisplayOptions({
+					...translator.displayOptions,
+					exportFileData: true,
+					includeAnnotations: true,
+				});
+				file = PathUtils.join(path, PathUtils.filename(path) + '.' + translator.target);
+			}
+			else {
+				file = path;
+			}
+		}
+		let exporting = new Promise((resolve, reject) => {
+			translation.setHandler('done', (_, worked) => (worked ? resolve() : reject(new Error('Export failed'))));
+			translation.setHandler('error', (_, error) => reject(error));
+			translation.translate();
+		});
+		let result;
+		try {
+			result = await untilDeadline(exporting, deadline);
+		}
+		catch (e) {
+			throw new Zotero.MCP.ToolError(`Zotero couldn't export: ${e.message || e}`);
+		}
+		if (path) {
+			return Zotero.MCP.jsonResult({
+				format: translator.label,
+				path: file,
+				folder: includeFiles ? path : undefined,
+				status: result === TIMED_OUT ? 'writing' : 'written',
+			});
+		}
+		if (result === TIMED_OUT || translation.string.length > MAX_EXPORT_CHARS) {
+			throw new Zotero.MCP.ToolError(
+				'The export is too large to return. Give a path to write it to a file.'
+			);
+		}
+		return Zotero.MCP.jsonResult({ format: translator.label, output: translation.string });
+	};
+	
+	/**
+	 * An export translator by its label, ignoring case, spaces and punctuation (e.g. "csljson"
+	 * for CSL JSON), or by its ID
+	 */
+	async function getExportTranslator(format) {
+		let normalize = label => label.toLowerCase().replace(/[^a-z0-9]/g, '');
+		let translators = await Zotero.Translators.getAllForType('export');
+		let translator = translators.find(
+			translator => translator.translatorID == format || normalize(translator.label) == normalize(format)
+		);
+		if (!translator) {
+			throw new Zotero.MCP.ToolError(
+				`Zotero has no export format ${format}. Its formats are `
+					+ translators.map(translator => translator.label).sort().join(', ') + '.'
+			);
+		}
+		return translator;
+	}
+	
+	/**
+	 * @return {Promise<Object|null>} IOUtils.stat() of an absolute path, or null if there's
+	 *     nothing there or it can't be read
+	 * @throws {Zotero.MCP.ToolError} If the path isn't absolute
+	 */
+	async function statPath(path) {
+		if (!PathUtils.isAbsolute(path)) {
+			throw new Zotero.MCP.ToolError(`${path} isn't an absolute path. Give the full path.`);
+		}
+		try {
+			return await IOUtils.stat(path);
+		}
+		catch {
+			return null;
+		}
+	}
 	
 	/**
 	 * A new item from item JSON, checked but not saved
@@ -1516,25 +1702,6 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError(`${input}: ${e.message}`);
 		}
 		return item;
-	}
-	
-	/**
-	 * Import text in a format Zotero can import, such as BibTeX or RIS
-	 *
-	 * @param {Object} options - For Zotero.Translate#translate(): with libraryID false, items
-	 *     are returned as translator JSON and not saved
-	 */
-	async function importText(text, options) {
-		let translation = new Zotero.Translate.Import();
-		translation.setString(text);
-		let translators = await translation.getTranslators();
-		if (!translators.length) {
-			throw new Zotero.MCP.ToolError(
-				"text isn't in a format Zotero can import, such as BibTeX, RIS or CSL JSON"
-			);
-		}
-		translation.setTranslator(translators[0]);
-		return translation.translate(options);
 	}
 	
 	/**

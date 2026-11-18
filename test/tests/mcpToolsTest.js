@@ -720,12 +720,6 @@ describe("MCP tools", function () {
 			assert.include(output, 'csl-entry');
 		});
 		
-		it("should export BibTeX", async function () {
-			let { output } = await call('zotero_generate_citation', { items: [{ key: item.key }], format: 'bibtex' });
-			assert.match(output, /^@article\{/);
-			assert.include(output, 'title = {A study of things}');
-		});
-		
 		it("should not cite notes", async function () {
 			let note = await createDataObject('item', { itemType: 'note' });
 			let error = await callForError('zotero_generate_citation', { items: [{ key: note.key }], format: 'citation' });
@@ -1135,10 +1129,9 @@ describe("MCP tools", function () {
 			assert.isTrue(fast.deleted);
 		});
 		
-		it("should add items from BibTeX and item JSON", async function () {
+		it("should add items from item JSON", async function () {
 			let title = Zotero.Utilities.randomString();
 			let { results } = await call('zotero_add_items', {
-				text: `@book{lee2020, title = {${title} Book}, author = {Lee, Ann}, year = {2020}}`,
 				items: [{
 					itemType: 'report',
 					title: `${title} Report`,
@@ -1150,10 +1143,9 @@ describe("MCP tools", function () {
 				findFiles: false,
 			});
 			assert.deepEqual(results.map(result => [result.input, result.status, result.itemType, result.title]), [
-				['text', 'added', 'book', `${title} Book`],
 				['items[0]', 'added', 'report', `${title} Report`],
 			]);
-			let report = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, results[1].key);
+			let report = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, results[0].key);
 			assert.notEqual(report.key, 'ABCD2345');
 			assert.equal(report.getField('institution'), 'Inst');
 		});
@@ -1192,6 +1184,89 @@ describe("MCP tools", function () {
 			assert.isBelow(Date.now() - start, 1500);
 			assert.equal(result.results[0].fileSearch, 'searching');
 			assert.match(result.notice, /still looking/);
+		});
+	});
+	
+	describe("zotero_import", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should import text into a collection as one undo step", async function () {
+			let collection = await createDataObject('collection');
+			let title = Zotero.Utilities.randomString();
+			let result = await call('zotero_import', {
+				text: `@book{lee2020, title = {${title}}, author = {Lee, Ann}, year = {2020}}`,
+				collectionKey: collection.key,
+			});
+			assert.equal(result.status, 'imported');
+			assert.equal(result.collectionKey, collection.key);
+			assert.deepEqual(result.items.map(item => [item.itemType, item.title]), [['book', title]]);
+			let item = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.items[0].key);
+			assert.isTrue(collection.hasItem(item.id));
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(item.deleted);
+		});
+		
+		it("should import a file into a new collection named after it", async function () {
+			let path = PathUtils.join(await getTempDirectory(), 'Reading list.ris');
+			await IOUtils.copy(getTestDataDirectory().path + '/book_and_child_note.ris', path);
+			let result = await call('zotero_import', { path });
+			let collection = Zotero.Collections.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.collectionKey);
+			assert.equal(collection.name, 'Reading list');
+			assert.deepEqual(result.items.map(item => item.title), ['Parent']);
+			let parent = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.items[0].key);
+			assert.lengthOf(parent.getNotes(), 1);
+		});
+		
+		it("should not import what isn't in an import format", async function () {
+			assert.match(await callForError('zotero_import', { text: 'just some words' }), /isn't in a format/);
+			assert.match(await callForError('zotero_import', { path: 'relative.bib' }), /isn't an absolute path/);
+		});
+	});
+	
+	describe("zotero_export", function () {
+		let item;
+		
+		before(async function () {
+			item = await createArticle({ title: 'A study of things', lastName: 'Quuxly', date: '2020' });
+		});
+		
+		it("should export items as text in a format given by name", async function () {
+			let { format, output } = await call('zotero_export', { format: 'bibtex', keys: [item.key] });
+			assert.equal(format, 'BibTeX');
+			assert.match(output, /^\s*@article\{/);
+			assert.include(output, 'title = {A study of things}');
+			
+			({ output } = await call('zotero_export', { format: 'CSL JSON', keys: [item.key] }));
+			assert.equal(JSON.parse(output)[0].title, 'A study of things');
+		});
+		
+		it("should write a new file, and not replace one", async function () {
+			let path = PathUtils.join(await getTempDirectory(), 'export.ris');
+			let result = await call('zotero_export', { format: 'RIS', keys: [item.key], path });
+			assert.deepEqual(result, { format: 'RIS', path, status: 'written' });
+			assert.include(await Zotero.File.getContentsAsync(path), 'TI  - A study of things');
+			
+			assert.match(await callForError('zotero_export', { format: 'RIS', keys: [item.key], path }), /already exists/);
+		});
+		
+		it("should write a folder with the items' files", async function () {
+			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
+			let path = PathUtils.join(await getTempDirectory(), 'With files');
+			let result = await call('zotero_export', { format: 'Zotero RDF', keys: [item.key], path, includeFiles: true });
+			assert.equal(result.folder, path);
+			assert.equal(result.path, PathUtils.join(path, 'With files.rdf'));
+			assert.isTrue(await IOUtils.exists(result.path));
+			assert.isTrue(await IOUtils.exists(PathUtils.join(path, 'files', String(attachment.id), 'test.pdf')));
+			await attachment.eraseTx();
+		});
+		
+		it("should list the formats when it doesn't know one", async function () {
+			let error = await callForError('zotero_export', { format: 'nope', keys: [item.key] });
+			assert.match(error, /Zotero has no export format nope\. Its formats are .*BibTeX/);
 		});
 	});
 	
