@@ -472,6 +472,9 @@ Zotero.UndoHistory = {
 		else if (field === 'note') {
 			obj.setNote(value);
 		}
+		else if (field === 'conditions') {
+			obj.fromJSON({ conditions: value });
+		}
 		else if (field === 'creators') {
 			// value is an object mapping orderIndex -> creator data (or empty object)
 			let maxIndex = -1;

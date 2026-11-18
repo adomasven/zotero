@@ -300,6 +300,7 @@ Zotero.Search.prototype._finalizeErase = async function (env) {
 
 Zotero.Search.prototype.addCondition = function (condition, operator, value, required) {
 	this._requireData('conditions');
+	this._snapshotConditions();
 	
 	if (required) {
 		throw new Error("The 'required' parameter is no longer supported; use a condition group");
@@ -453,6 +454,45 @@ Zotero.Search.prototype.setScope = function (searchObj, includeChildren) {
 
 
 /**
+ * Keep the conditions as they were before the first change since the last save, for
+ * Zotero.UndoHistory. _markFieldChange() can't, as it runs after a change and keeps the
+ * conditions object, which changes in place.
+ */
+Zotero.Search.prototype._snapshotConditions = function () {
+	if (this.id && this._previousData.conditions === undefined) {
+		this._previousData.conditions = this.toJSON().conditions;
+	}
+};
+
+
+Zotero.Search.prototype._getUndoData = function () {
+	var data = Zotero.Search._super.prototype._getUndoData.call(this);
+	if (this._changed.conditions && this._previousData.conditions) {
+		data = data || {
+			objectType: this._objectType,
+			id: this._id,
+			libraryID: this._libraryID,
+			key: this._key,
+			fields: {}
+		};
+		data.fields.conditions = {
+			old: this._previousData.conditions,
+			new: this.toJSON().conditions
+		};
+	}
+	return data;
+};
+
+
+Zotero.Search.prototype._undoFieldMatches = function (field, recorded) {
+	if (field === 'conditions') {
+		return JSON.stringify(this.toJSON().conditions) === JSON.stringify(recorded);
+	}
+	return Zotero.Search._super.prototype._undoFieldMatches.call(this, field, recorded);
+};
+
+
+/**
  * @param {Number} searchConditionID
  * @param {String} condition
  * @param {String} operator
@@ -461,6 +501,7 @@ Zotero.Search.prototype.setScope = function (searchObj, includeChildren) {
  */
 Zotero.Search.prototype.updateCondition = function (searchConditionID, condition, operator, value, required) {
 	this._requireData('conditions');
+	this._snapshotConditions();
 	
 	if (required) {
 		throw new Error("The 'required' parameter is no longer supported; use a condition group");
@@ -497,6 +538,7 @@ Zotero.Search.prototype.updateCondition = function (searchConditionID, condition
 
 Zotero.Search.prototype.removeCondition = function (searchConditionID) {
 	this._requireData('conditions');
+	this._snapshotConditions();
 	
 	if (typeof this._conditions[searchConditionID] == 'undefined'){
 		throw new Error('Invalid searchConditionID ' + searchConditionID + ' in removeCondition()');

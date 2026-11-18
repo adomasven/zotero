@@ -21,6 +21,26 @@ describe("Zotero.UndoHistory", function () {
 		});
 	});
 
+	describe("saved search conditions edit", function () {
+		it("should undo and redo a change to a saved search's conditions", async function () {
+			let search = await createDataObject('search');
+			let original = search.toJSON().conditions;
+			search.fromJSON({ conditions: [{ condition: 'title', operator: 'contains', value: 'Modified' }] });
+			await search.saveTx({ undoAction: 'undo-action-edit-metadata', undoActionArgs: { count: 1 } });
+			let modified = search.toJSON().conditions;
+			assert.notDeepEqual(modified, original);
+			
+			await Zotero.UndoHistory.undo();
+			assert.deepEqual(search.toJSON().conditions, original);
+			let reloaded = await Zotero.Searches.getAsync(search.id);
+			await reloaded.reload(null, true);
+			assert.deepEqual(reloaded.toJSON().conditions, original);
+			
+			await Zotero.UndoHistory.redo();
+			assert.deepEqual(search.toJSON().conditions, modified);
+		});
+	});
+	
 	describe("trashing a collection", function () {
 		it("should undo and redo trashing a collection", async function () {
 			let collection = await createDataObject('collection');
