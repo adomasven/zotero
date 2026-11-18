@@ -68,6 +68,10 @@ Zotero.MCP.Tools = new function () {
 	const MAX_LISTED_ITEMS = 50;
 	// Longest export zotero_export returns as text, in characters
 	const MAX_EXPORT_CHARS = 200000;
+	// Most items zotero_export gives the BibTeX citation keys of
+	const MAX_CITATION_KEYS = 500;
+	const BIBTEX_TRANSLATOR_ID = '9cb70025-a888-4a29-a210-93ec52da40d4';
+	const BIBLATEX_TRANSLATOR_ID = 'b6e39b57-8942-4d11-8259-342c46ce395f';
 	const LAST_RESORT = 'As a last resort, ask the user to save it with the Zotero Connector from a '
 		+ "browser where they're signed in to the site.";
 	const FILES_NOT_FOUND = "Zotero found no PDF or EPUB for items with fileSearch notFound. Find "
@@ -1990,7 +1994,7 @@ Zotero.MCP.Tools = new function () {
 	 * the item's files beside it if asked
 	 */
 	this.export = async function ({
-		format, keys, collectionKey, path, includeFiles = false, libraryID,
+		format, keys, collectionKey, path, includeFiles = false, overwrite = false, libraryID,
 	}, { deadline }) {
 		libraryID = getLibraryID(libraryID);
 		if (keys && collectionKey) {
@@ -2001,8 +2005,9 @@ Zotero.MCP.Tools = new function () {
 		}
 		let translator = await getExportTranslator(format);
 		let translation = new Zotero.Translate.Export();
+		let items;
 		if (keys) {
-			let items = [];
+			items = [];
 			for (let key of new Set(keys)) {
 				let item = await getItem(libraryID, key);
 				if (item.isAnnotation()) {
@@ -2015,18 +2020,27 @@ Zotero.MCP.Tools = new function () {
 			translation.setItems(items);
 		}
 		else if (collectionKey) {
-			translation.setCollection(getCollection(libraryID, collectionKey));
+			let collection = getCollection(libraryID, collectionKey);
+			translation.setCollection(collection);
+			// With its subcollections' items, as Zotero.Translate.ItemGetter.setCollections() gets them
+			items = [...new Set([collection, ...Zotero.Collections.getByParent(collection.id, true)]
+				.flatMap(each => each.getChildItems()))];
 		}
 		else {
 			translation.setLibraryID(libraryID);
+			items = await Zotero.Items.getAll(libraryID, true);
 		}
 		translation.setTranslator(translator);
 		
 		let file;
 		if (path) {
-			if (await statPath(path)) {
+			let existing = await statPath(path);
+			if (existing && (!overwrite || includeFiles || existing.type != 'regular')) {
 				throw new Zotero.MCP.ToolError(
-					`${path} already exists. Zotero doesn't replace files: give another path.`
+					!overwrite
+						? `${path} already exists. Give another path, or overwrite: true to replace the file.`
+						: `${path} already exists, and only a file can be overwritten, not a folder `
+							+ 'or an export with its files.'
 				);
 			}
 			if ((await statPath(PathUtils.parent(path)))?.type != 'directory') {
@@ -2064,6 +2078,9 @@ Zotero.MCP.Tools = new function () {
 				path: file,
 				folder: includeFiles ? path : undefined,
 				status: result === TIMED_OUT ? 'writing' : 'written',
+				citationKeys: result === TIMED_OUT
+					? undefined
+					: getCitationKeys(translator, items, await IOUtils.readUTF8(file)),
 			});
 		}
 		if (result === TIMED_OUT || translation.string.length > MAX_EXPORT_CHARS) {
@@ -2071,8 +2088,35 @@ Zotero.MCP.Tools = new function () {
 				'The export is too large to return. Give a path to write it to a file.'
 			);
 		}
-		return Zotero.MCP.jsonResult({ format: translator.label, output: translation.string });
+		return Zotero.MCP.jsonResult({
+			format: translator.label,
+			output: translation.string,
+			citationKeys: getCitationKeys(translator, items, translation.string),
+		});
 	};
+	
+	/**
+	 * The citation key each item got in a BibTeX or BibLaTeX export, which the translator
+	 * makes up for items without one of their own
+	 *
+	 * The translators write an entry for each regular item, in the order Zotero gives them
+	 * items in: by ID (Zotero.Translate.ItemGetter). Without as many entries as regular items,
+	 * the keys can't be matched to items, so there are none.
+	 *
+	 * @param {Zotero.Item[]} items - The items exported
+	 * @return {Object|undefined} Item keys to citation keys
+	 */
+	function getCitationKeys(translator, items, output) {
+		if (![BIBTEX_TRANSLATOR_ID, BIBLATEX_TRANSLATOR_ID].includes(translator.translatorID)) {
+			return undefined;
+		}
+		let regular = items.filter(item => item.isRegularItem()).sort((a, b) => a.id - b.id);
+		let citationKeys = [...output.matchAll(/^@\w+\{([^,\s]*),/gm)].map(match => match[1]);
+		if (regular.length > MAX_CITATION_KEYS || citationKeys.length != regular.length) {
+			return undefined;
+		}
+		return Object.fromEntries(regular.map((item, i) => [item.key, citationKeys[i]]));
+	}
 	
 	/**
 	 * An export translator by its label, ignoring case, spaces and punctuation (e.g. "csljson"

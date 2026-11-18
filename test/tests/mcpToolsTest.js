@@ -1466,6 +1466,46 @@ describe("MCP tools", function () {
 			assert.include(await Zotero.File.getContentsAsync(path), 'TI  - A study of things');
 			
 			assert.match(await callForError('zotero_export', { format: 'RIS', keys: [item.key], path }), /already exists/);
+			
+			result = await call('zotero_export', { format: 'CSL JSON', keys: [item.key], path, overwrite: true });
+			assert.equal(result.status, 'written');
+			assert.equal(JSON.parse(await Zotero.File.getContentsAsync(path))[0].title, 'A study of things');
+			assert.match(
+				await callForError('zotero_export', { format: 'RIS', keys: [item.key], path: PathUtils.parent(path), overwrite: true }),
+				/only a file can be overwritten/
+			);
+		});
+		
+		it("should give the citation key of each item in a BibTeX export", async function () {
+			let collection = await createDataObject('collection');
+			let subcollection = await createDataObject('collection', { parentID: collection.id });
+			let first = await createArticle({ title: 'Zeta', lastName: 'Ames', date: '2021' });
+			let second = await createArticle({ title: 'Alpha', lastName: 'Ames', date: '2021' });
+			let own = await createArticle({ title: 'Own', lastName: 'Bell', date: '2019' });
+			own.setField('citationKey', 'bell-own');
+			await own.saveTx();
+			await Zotero.DB.executeTransaction(async () => {
+				for (let each of [first, own]) {
+					each.addToCollection(collection.id);
+					await each.save();
+				}
+				second.addToCollection(subcollection.id);
+				await second.save();
+			});
+			await createDataObject('item', { itemType: 'note', collections: [collection.id] });
+			
+			let { output, citationKeys } = await call('zotero_export', { format: 'BibTeX', collectionKey: collection.key });
+			assert.sameMembers(Object.keys(citationKeys), [first.key, second.key, own.key]);
+			assert.equal(citationKeys[own.key], 'bell-own');
+			assert.notEqual(citationKeys[first.key], citationKeys[second.key]);
+			// Each key heads the entry of its own item
+			for (let [itemKey, citationKey] of Object.entries(citationKeys)) {
+				let title = Zotero.Items.getByLibraryAndKey(collection.libraryID, itemKey).getField('title');
+				assert.match(output, new RegExp(`@article\\{${citationKey},[^@]*title = \\{${title}\\}`));
+			}
+			
+			({ citationKeys } = await call('zotero_export', { format: 'RIS', collectionKey: collection.key }));
+			assert.isUndefined(citationKeys);
 		});
 		
 		it("should write a folder with the items' files", async function () {

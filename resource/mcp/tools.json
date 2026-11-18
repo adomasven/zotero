@@ -1419,7 +1419,7 @@
 		{
 			"name": "zotero_export",
 			"title": "Export from Zotero",
-			"description": "Export items, a collection with its subcollections, or a whole library, in an export format, as text or to a new file on this computer. Formats include BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, CSV, MODS, EndNote XML and Markdown or HTML for notes; an unknown format gives the full list. Large exports must be written to a file. Zotero doesn't replace existing files.",
+			"description": "Export items, a collection with its subcollections, or a whole library, in an export format, as text or to a new file on this computer. Formats include BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, CSV, MODS, EndNote XML and Markdown or HTML for notes; an unknown format gives the full list. Large exports must be written to a file. An existing file is replaced only with overwrite. BibTeX and BibLaTeX exports also give the citation key of each item, to cite them by in Markdown for Pandoc.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1428,6 +1428,7 @@
 					"collectionKey": { "type": "string" },
 					"path": { "type": "string", "description": "An absolute path to write to, where nothing exists yet. Without it, the export is returned as text." },
 					"includeFiles": { "type": "boolean", "default": false, "description": "Also copy the items' files, with their annotations. path is then a new folder, with the export file inside it." },
+					"overwrite": { "type": "boolean", "default": false, "description": "Replace a file already at path. A folder, or an export with includeFiles, is never replaced." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
 				"required": ["format"],
@@ -1440,7 +1441,8 @@
 					"output": { "type": "string", "description": "The export, when no path was given" },
 					"path": { "type": "string", "description": "The file written" },
 					"folder": { "type": "string", "description": "The folder with the file and the items' files, for includeFiles" },
-					"status": { "enum": ["written", "writing"], "description": "writing: Zotero is still writing the file" }
+					"status": { "enum": ["written", "writing"], "description": "writing: Zotero is still writing the file" },
+					"citationKeys": { "type": "object", "additionalProperties": { "type": "string" }, "description": "For BibTeX and BibLaTeX, of up to 500 items: the item keys of the regular items exported, each with its citation key in the export" }
 				},
 				"required": ["format"]
 			},
