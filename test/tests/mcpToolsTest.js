@@ -720,6 +720,41 @@ describe("MCP tools", function () {
 			assert.include(output, 'csl-entry');
 		});
 		
+		it("should format a document's citations together", async function () {
+			let other = await createArticle({ title: 'Another study', lastName: 'Quuxly', date: '2020' });
+			let third = await createArticle({ title: 'Third study', lastName: 'Zorbin', date: '2019' });
+			
+			let result = await call('zotero_generate_citation', {
+				citations: [[{ key: item.key }], [{ key: other.key, locator: '5' }], [{ key: item.key }, { key: third.key }]],
+				format: 'document',
+				style: 'apa',
+			});
+			assert.deepEqual(result.citations, ['(Quuxly, 2020a)', '(Quuxly, 2020b, p. 5)', '(Quuxly, 2020a; Zorbin, 2019)']);
+			assert.match(result.bibliography, /^Quuxly, A\. \(2020a\)\. A study of things\.\nQuuxly, A\. \(2020b\)\. Another study\.\nZorbin/);
+			assert.isFalse(result.noteStyle);
+			
+			result = await call('zotero_generate_citation', {
+				citations: [[{ key: third.key }], [{ key: item.key }], [{ key: third.key }]],
+				format: 'document',
+				style: 'ieee',
+			});
+			assert.deepEqual(result.citations, ['[1]', '[2]', '[1]']);
+			assert.match(result.bibliography, /^\[1\][^\n]*Zorbin/);
+			
+			result = await call('zotero_generate_citation', {
+				citations: [[{ key: item.key }], [{ key: item.key }]],
+				format: 'document',
+				style: 'chicago-notes-bibliography',
+			});
+			assert.isTrue(result.noteStyle);
+			assert.isBelow(result.citations[1].length, result.citations[0].length);
+			
+			assert.match(
+				await callForError('zotero_generate_citation', { items: [{ key: item.key }], format: 'document' }),
+				/Give citations for format document/
+			);
+		});
+		
 		it("should not cite notes", async function () {
 			let note = await createDataObject('item', { itemType: 'note' });
 			let error = await callForError('zotero_generate_citation', { items: [{ key: note.key }], format: 'citation' });

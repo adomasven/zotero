@@ -707,13 +707,13 @@
 		{
 			"name": "zotero_generate_citation",
 			"title": "Generate Zotero citations",
-			"description": "Format items as one citation (with page or other locators) or a bibliography in a citation style. For BibTeX, RIS and other export formats, use zotero_export. Defaults to the style the user copies citations with. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",
+			"description": "Format items in a citation style: as one citation (with page or other locators), as a bibliography, or, with format document, all of a document's citations at once. Use format document when writing a document with several citations: give its citations in the order they appear, and get each one formatted and the bibliography, with numbering, disambiguation (Smith 2020a, 2020b) and ibid. or short forms worked out across the document, as Zotero's word processor plugins do. A citation formatted on its own always starts at [1] in a numeric style. For BibTeX, RIS and other export formats, use zotero_export. Defaults to the style the user copies citations with. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"items": {
 						"type": "array",
-						"description": "In citation order",
+						"description": "For format citation or bibliography, in citation order",
 						"items": {
 							"type": "object",
 							"properties": {
@@ -730,13 +730,36 @@
 						"minItems": 1,
 						"maxItems": 100
 					},
-					"format": { "enum": ["citation", "bibliography"] },
+					"citations": {
+						"type": "array",
+						"description": "For format document: the document's citations in the order they appear, each the items cited together in one place",
+						"items": {
+							"type": "array",
+							"items": {
+									"type": "object",
+									"properties": {
+										"key": { "type": "string" },
+										"locator": { "type": "string", "description": "e.g. \"23\" or \"23-25\"" },
+										"label": {
+											"enum": ["act", "appendix", "article-locator", "book", "canon", "chapter", "column", "elocation", "equation", "figure", "folio", "issue", "line", "note", "opus", "page", "paragraph", "part", "rule", "scene", "section", "sub-verbo", "table", "timestamp", "title-locator", "verse", "volume"],
+											"default": "page"
+										}
+									},
+									"required": ["key"],
+									"additionalProperties": false
+								},
+							"minItems": 1
+						},
+						"minItems": 1,
+						"maxItems": 500
+					},
+					"format": { "enum": ["citation", "bibliography", "document"] },
 					"style": { "type": "string", "description": "A style's short name, e.g. \"apa\", or its ID" },
 					"locale": { "type": "string", "description": "e.g. \"en-GB\"" },
 					"html": { "type": "boolean", "default": false, "description": "HTML instead of plain text" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["items", "format"],
+				"required": ["format"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -746,9 +769,12 @@
 					"style": { "type": "string" },
 					"styleTitle": { "type": "string" },
 					"locale": { "type": "string" },
-					"output": { "type": "string" }
+					"output": { "type": "string", "description": "For format citation or bibliography" },
+					"citations": { "type": "array", "items": { "type": "string" }, "description": "For format document, each citation in the order given" },
+					"bibliography": { "type": "string", "description": "For format document. Empty for a style without one." },
+					"noteStyle": { "type": "boolean", "description": "For format document: whether the style puts citations in footnotes, one footnote per citation" }
 				},
-				"required": ["format", "output"]
+				"required": ["format"]
 			},
 			"annotations": {
 				"readOnlyHint": true

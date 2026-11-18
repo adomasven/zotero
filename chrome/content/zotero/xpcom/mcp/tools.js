@@ -875,12 +875,17 @@ Zotero.MCP.Tools = new function () {
 	 * Citations and bibliographies in a CSL style
 	 */
 	this.generateCitation = async function ({
-		items: refs, format, style, locale, html = false, libraryID,
+		items: refs, citations: clusters, format, style, locale, html = false, libraryID,
 	}, call) {
 		libraryID = getLibraryID(libraryID);
+		if (format == 'document' ? !clusters?.length || refs : !refs?.length || clusters) {
+			throw new Zotero.MCP.ToolError(
+				'Give citations for format document, and items for format citation or bibliography'
+			);
+		}
 		let items = [];
 		let missing = [];
-		for (let ref of refs) {
+		for (let ref of format == 'document' ? clusters.flat() : refs) {
 			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, ref.key);
 			if (!item || item.deleted) {
 				missing.push(ref.key);
@@ -910,29 +915,44 @@ Zotero.MCP.Tools = new function () {
 			|| Zotero.locale;
 		let outputFormat = html ? 'html' : 'text';
 		let engine = style.getCiteProc(locale, outputFormat);
-		let output;
-		if (format == 'citation') {
-			engine.updateItems(items.map(item => item.id));
-			let citation = {
-				citationItems: items.map((item, i) => ({
-					id: item.id,
-					locator: refs[i].locator,
-					label: refs[i].locator ? (refs[i].label ?? 'page') : undefined,
-				})),
-				properties: {},
-			};
-			output = engine.previewCitationCluster(citation, [], [], outputFormat);
-		}
-		else {
-			output = Zotero.Cite.makeFormattedBibliographyOrCitationList(engine, items, outputFormat);
-		}
-		return Zotero.MCP.jsonResult({
+		let itemIDs = new Map(items.map(item => [item.key, item.id]));
+		let toCitationItem = ref => ({
+			id: itemIDs.get(ref.key),
+			locator: ref.locator,
+			label: ref.locator ? (ref.label ?? 'page') : undefined,
+		});
+		let result = {
 			format,
 			style: style.styleID,
 			styleTitle: style.title,
 			locale: engine.opt.lang,
-			output: output.trim(),
-		});
+		};
+		if (format == 'document') {
+			// Formatted together, as in a word processor document, so that numbering,
+			// disambiguation and ibid. follow from the citations before each one
+			let noteStyle = engine.opt.xclass == 'note';
+			let formatted = engine.rebuildProcessorState(
+				clusters.map((cluster, i) => ({
+					citationID: String(i),
+					citationItems: cluster.map(toCitationItem),
+					// Each citation in a footnote of its own
+					properties: { noteIndex: noteStyle ? i + 1 : 0 },
+				})),
+				outputFormat
+			);
+			result.noteStyle = noteStyle;
+			result.citations = formatted.map(([, , output]) => output);
+			result.bibliography = (Zotero.Cite.makeFormattedBibliography(engine, outputFormat) || '').trim();
+		}
+		else if (format == 'citation') {
+			engine.updateItems(items.map(item => item.id));
+			let citation = { citationItems: refs.map(toCitationItem), properties: {} };
+			result.output = engine.previewCitationCluster(citation, [], [], outputFormat).trim();
+		}
+		else {
+			result.output = Zotero.Cite.makeFormattedBibliographyOrCitationList(engine, items, outputFormat).trim();
+		}
+		return Zotero.MCP.jsonResult(result);
 	};
 	
 	/**
