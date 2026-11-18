@@ -238,6 +238,24 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * Saved searches, with their conditions and how many items each finds
+	 */
+	this.listSavedSearches = async function ({ libraryID }) {
+		libraryID = getLibraryID(libraryID);
+		let searches = Zotero.Searches.getByLibrary(libraryID).filter(search => !search.deleted);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			savedSearches: await Promise.all(searches.map(async search => ({
+				key: search.key,
+				name: search.name,
+				conditions: search.toJSON().conditions,
+				itemCount: await countSearchItems(search),
+				link: `zotero://select/${Zotero.API.getLibraryPrefix(libraryID)}/searches/${search.key}`,
+			}))),
+		});
+	};
+	
+	/**
 	 * Tags in the library, colored tags first (in the tag selector's order), then by how
 	 * many items have them
 	 */
@@ -1087,6 +1105,69 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * Create a saved search from a query in zotero_search's syntax, or rename one or change
+	 * its query
+	 */
+	this.manageSavedSearches = async function ({
+		action, key, name, query, mode = Zotero.Prefs.get('search.quicksearch-mode'), libraryID,
+	}, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		name = name?.trim();
+		query = query?.trim();
+		if (action == 'create' ? !name || !query : !name && !query) {
+			throw new Zotero.MCP.ToolError(
+				action == 'create' ? 'create needs a name and a query' : 'update needs a name or a query'
+			);
+		}
+		let search;
+		if (action == 'create') {
+			search = new Zotero.Search({ libraryID });
+		}
+		else {
+			search = key && Zotero.Searches.getByLibraryAndKey(libraryID, key);
+			if (!search || search.deleted) {
+				throw new Zotero.MCP.ToolError(`No saved search ${key} in library ${libraryID}`);
+			}
+		}
+		if (!search.isEditable()) {
+			throw new Zotero.MCP.ToolError(`${search.key} can't be changed`);
+		}
+		let conditions;
+		if (query) {
+			let parsed = Zotero.SearchQuery.getSearch(query, { libraryID, mode });
+			if (!parsed) {
+				parsed = new Zotero.Search({ libraryID });
+				parsed.addCondition('quicksearch-' + mode, 'contains', query);
+			}
+			conditions = parsed.toJSON().conditions;
+		}
+		try {
+			await edit(clientID, async () => {
+				search.fromJSON({
+					name: name || search.name,
+					conditions: conditions || search.toJSON().conditions,
+				});
+				// Not selected, so as not to disturb the user
+				await search.save({ skipSelect: true });
+			});
+		}
+		catch (e) {
+			if (search.id) {
+				await search.reload(null, true);
+			}
+			throw e;
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			key: search.key,
+			name: search.name,
+			conditions: search.toJSON().conditions,
+			itemCount: await countSearchItems(search),
+			link: `zotero://select/${Zotero.API.getLibraryPrefix(libraryID)}/searches/${search.key}`,
+		});
+	};
+	
+	/**
 	 * A note from Markdown, under an item, in a collection, or standalone
 	 */
 	this.addNote = async function ({ markdown, parentKey, collectionKey, libraryID }, { clientID }) {
@@ -1290,14 +1371,14 @@ Zotero.MCP.Tools = new function () {
 	 * Trashing needs DELETE, but restoring only EDIT_LIBRARY, so this asks for the permission
 	 * itself instead of declaring one in tools.json.
 	 */
-	this.trash = async function ({ keys = [], collectionKeys = [], restore = false, libraryID }, call) {
+	this.trash = async function ({ keys = [], collectionKeys = [], savedSearchKeys = [], restore = false, libraryID }, call) {
 		libraryID = getLibraryID(libraryID);
 		let library = Zotero.Libraries.get(libraryID);
 		if (!library.editable || !library.hasTrash) {
 			throw new Zotero.MCP.ToolError(`${library.name} is read-only`);
 		}
-		if (!keys.length && !collectionKeys.length) {
-			throw new Zotero.MCP.ToolError('Give keys or collectionKeys');
+		if (!keys.length && !collectionKeys.length && !savedSearchKeys.length) {
+			throw new Zotero.MCP.ToolError('Give keys, collectionKeys or savedSearchKeys');
 		}
 		let check = (object, type, key) => {
 			if (!object) {
@@ -1323,6 +1404,8 @@ Zotero.MCP.Tools = new function () {
 		}
 		let collections = [...new Set(collectionKeys)]
 			.map(key => check(Zotero.Collections.getByLibraryAndKey(libraryID, key), 'collection', key));
+		let searches = [...new Set(savedSearchKeys)]
+			.map(key => check(Zotero.Searches.getByLibraryAndKey(libraryID, key), 'saved search', key));
 		// Subcollections go with their collection
 		collections = collections.filter(collection => !collections.some(
 			other => other != collection && other.hasDescendent('collection', collection.id)
@@ -1333,15 +1416,15 @@ Zotero.MCP.Tools = new function () {
 		await edit(call.clientID, async () => {
 			if (!restore) {
 				await Zotero.Items.trash(items.map(item => item.id));
-				for (let collection of collections) {
-					collection.deleted = true;
-					await collection.save();
+				for (let object of [...collections, ...searches]) {
+					object.deleted = true;
+					await object.save();
 				}
 				return;
 			}
 			// As when the user restores only parent items and collections in the trash
 			// (ZoteroPane.restoreSelectedItems()), their children come back too
-			let restored = [...items, ...collections];
+			let restored = [...items, ...collections, ...searches];
 			for (let item of items) {
 				if (item.isRegularItem()) {
 					restored.push(...Zotero.Items.get([...item.getNotes(true), ...item.getAttachments(true)]));
@@ -1364,6 +1447,7 @@ Zotero.MCP.Tools = new function () {
 			restored: restore,
 			items: items.map(item => item.key),
 			collections: collections.map(collection => collection.key),
+			savedSearches: searches.map(search => search.key),
 		});
 	};
 	
@@ -2533,6 +2617,14 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError(`No library ${libraryID}. zotero_status lists the libraries.`);
 		}
 		return libraryID;
+	}
+	
+	/**
+	 * The items a saved search shows, as in its view: top-level, and not in the trash
+	 */
+	async function countSearchItems(search) {
+		let items = await Zotero.Items.getAsync(await search.search());
+		return Zotero.Items.getTopLevel(items).filter(item => !item.deleted).length;
 	}
 	
 	function getCollection(libraryID, key) {

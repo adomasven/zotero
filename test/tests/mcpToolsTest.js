@@ -960,6 +960,41 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("saved searches", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should create a saved search from a query, list it, change it and trash it", async function () {
+			let tag = Zotero.Utilities.randomString();
+			let title = Zotero.Utilities.randomString();
+			await createDataObject('item', { title, tags: [{ tag }] });
+			await createDataObject('item', { tags: [{ tag }] });
+			let name = Zotero.Utilities.randomString();
+			let created = await call('zotero_manage_saved_searches', { action: 'create', name, query: `tag:${tag} no notes` });
+			assert.equal(created.itemCount, 2);
+			let { savedSearches } = await call('zotero_list_saved_searches', {});
+			let listed = savedSearches.find(search => search.key == created.key);
+			assert.equal(listed.name, name);
+			assert.equal(listed.itemCount, 2);
+			assert.deepInclude(listed.conditions, { condition: 'tag', operator: 'is', value: tag });
+			
+			let updated = await call('zotero_manage_saved_searches', {
+				action: 'update', key: created.key, query: `${title} tag:${tag}`, mode: 'titleCreatorYear',
+			});
+			assert.equal(updated.name, name);
+			assert.equal(updated.itemCount, 1);
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			let search = Zotero.Searches.getByLibraryAndKey(Zotero.Libraries.userLibraryID, created.key);
+			assert.equal((await search.search()).length, 2);
+			
+			let result = await call('zotero_trash', { savedSearchKeys: [created.key] });
+			assert.deepEqual(result.savedSearches, [created.key]);
+			assert.isTrue(search.deleted);
+		});
+	});
+	
 	describe("zotero_manage_tags", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');

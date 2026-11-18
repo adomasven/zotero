@@ -251,6 +251,53 @@
 			}
 		},
 		{
+			"name": "zotero_list_saved_searches",
+			"title": "List Zotero saved searches",
+			"description": "List a library's saved searches, with their conditions and how many items each finds. Show one to the user with zotero_select's savedSearchKey; get its items with zotero_search, or zotero_select's selection.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"savedSearches": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"name": { "type": "string" },
+								"conditions": {
+									"type": "array",
+									"description": "As in Zotero's API",
+									"items": {
+										"type": "object",
+										"properties": {
+											"condition": { "type": "string" },
+											"operator": { "type": "string" },
+											"value": { "type": "string" }
+										}
+									}
+								},
+								"itemCount": { "type": "integer", "description": "Top-level items it finds, as its view shows them" },
+								"link": { "type": "string", "description": "zotero:// link that shows it in Zotero" }
+							},
+							"required": ["key", "name", "conditions", "itemCount", "link"]
+						}
+					}
+				},
+				"required": ["libraryID", "savedSearches"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
 			"name": "zotero_search_fulltext",
 			"title": "Search Zotero full text",
 			"description": "Find where words or phrases occur in the text of PDFs, EPUBs, web page snapshots and other files in a Zotero library, and get the passage around each match, with its page and a link that opens the file there. Matches words, not meaning: every word or \"quoted phrase\" in the query must occur in a file, ignoring case and accents, and a word also matches words it starts (\"archive\" matches \"archives\"). Only files Zotero has indexed are searched, and by default only the first 100 pages of a PDF. Files are listed by when their item was last modified, not by relevance. Use zotero_read_text to read more around a passage, and zotero_search with fulltext: to combine full text with other criteria.",
@@ -915,6 +962,45 @@
 			}
 		},
 		{
+			"name": "zotero_manage_saved_searches",
+			"title": "Manage Zotero saved searches",
+			"description": "Create a saved search, which shows in Zotero's collection pane and keeps finding matching items as the library changes, or rename one or change its query. The query uses zotero_search's syntax. To delete one, use zotero_trash. The user can undo it in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"action": { "enum": ["create", "update"] },
+					"key": { "type": "string", "description": "For update, the saved search's key" },
+					"name": { "type": "string" },
+					"query": { "type": "string", "description": "As for zotero_search, e.g. `tag:\"to read\" no notes`" },
+					"mode": { "enum": ["titleCreatorYear", "fields", "everything"], "description": "How free text in the query matches, as for zotero_search. Defaults to the search box's mode." },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["action"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string" },
+					"name": { "type": "string" },
+					"conditions": { "type": "array", "items": { "type": "object" } },
+					"itemCount": { "type": "integer" },
+					"link": { "type": "string", "description": "zotero:// link that shows it in Zotero" }
+				},
+				"required": ["libraryID", "key", "name", "conditions", "itemCount", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false,
+				"openWorldHint": false
+			}
+		},
+		{
 			"name": "zotero_add_note",
 			"title": "Add a Zotero note",
 			"description": "Add a note, written in Markdown, under an item (a child note) or as a standalone note, optionally in a collection. Supports CommonMark with tables, ~~strikethrough~~ and TeX math: $…$ inline, and display math between lines of just $$. As when Markdown is pasted into a Zotero note, dollar signs only become math around something that looks like math (a TeX command, braces or an operator), so $x$ alone or $5 stays text. Raw HTML is shown as text, and images become links. The user can undo it in Zotero with Edit → Undo, which moves the note to the trash. Zotero asks the user for permission unless it was already granted.",
@@ -1029,12 +1115,13 @@
 		{
 			"name": "zotero_trash",
 			"title": "Move to or restore from the Zotero trash",
-			"description": "Move items (with their notes and attachments) or collections (with their subcollections) to the trash, or restore them from it. Items in a trashed collection stay in the library. The user can restore trashed things from the trash, or undo the whole call in Zotero with Edit → Undo, until the trash is emptied. Zotero asks the user for permission unless it was already granted: to trash, for an hour at most.",
+			"description": "Move items (with their notes and attachments), collections (with their subcollections) or saved searches to the trash, or restore them from it. Items in a trashed collection stay in the library. The user can restore trashed things from the trash, or undo the whole call in Zotero with Edit → Undo, until the trash is emptied. Zotero asks the user for permission unless it was already granted: to trash, for an hour at most.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"keys": { "type": "array", "items": { "type": "string" }, "maxItems": 100, "description": "Items, notes or attachments" },
 					"collectionKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100 },
+					"savedSearchKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100 },
 					"restore": { "type": "boolean", "default": false, "description": "Restore from the trash instead" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
@@ -1046,7 +1133,8 @@
 					"libraryID": { "type": "integer" },
 					"restored": { "type": "boolean" },
 					"items": { "type": "array", "items": { "type": "string" } },
-					"collections": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" }
+					"collections": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
+					"savedSearches": { "type": "array", "items": { "type": "string" } }
 				},
 				"required": ["libraryID", "restored", "items", "collections"]
 			},
