@@ -1127,6 +1127,59 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * Add Markdown to the end of a note, or replace its content
+	 *
+	 * Refuses if the note changed since the model read it, so an edit the user made in the
+	 * meantime isn't lost, and refuses to replace content Markdown can't hold: highlights and
+	 * citations linked to items, and images stored in Zotero.
+	 */
+	this.editNote = async function ({ key, markdown, mode = 'append', dateModified, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		if (!markdown.trim()) {
+			throw new Zotero.MCP.ToolError('The Markdown must not be empty');
+		}
+		let note = await getItem(libraryID, key);
+		if (!note.isNote()) {
+			throw new Zotero.MCP.ToolError(`${note.key} isn't a note`);
+		}
+		if (!note.isEditable()) {
+			throw new Zotero.MCP.ToolError(`${note.key} can't be edited`);
+		}
+		if (Zotero.Date.sqlToISO8601(note.dateModified) != dateModified) {
+			throw new Zotero.MCP.ToolError(
+				`The note has changed since ${dateModified}, maybe because the user edited it. `
+					+ 'Get it again with zotero_get_notes, then make the edit to what it is now.'
+			);
+		}
+		let html = markdownToNoteHTML(markdown);
+		if (mode == 'replace') {
+			if (/\sdata-(annotation|citation|attachment-key)=/.test(note.getNote())) {
+				throw new Zotero.MCP.ToolError(
+					"The note has highlights, citations or images that Markdown can't hold, which "
+						+ 'replacing it would lose. Append to it instead, or ask the user to make the change.'
+				);
+			}
+		}
+		else {
+			// Inside the note's own wrapper, which carries its schema version and citation data
+			let [, wrapper, content] = note.getNote()
+				.match(/^\s*(<div\b[^>]*\bdata-schema-version="[^"]*"[^>]*>)([\s\S]*)<\/div>\s*$/)
+				?? [null, '<div data-schema-version="9">', note.getNote()];
+			html = wrapper + content + html.replace(/^<div[^>]*>|<\/div>$/g, '') + '</div>';
+		}
+		note.setNote(html);
+		await edit(clientID, () => note.save({ skipSelect: true }));
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			key: note.key,
+			parentKey: note.parentKey || undefined,
+			title: note.getNoteTitle(),
+			dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
+			link: getSelectLink(note),
+		});
+	};
+	
+	/**
 	 * Move items and collections to the trash, or restore them from it
 	 *
 	 * Trashing needs DELETE, but restoring only EDIT_LIBRARY, so this asks for the permission

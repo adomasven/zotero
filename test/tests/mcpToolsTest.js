@@ -960,6 +960,55 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("zotero_edit_note", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should append inside the note's wrapper, and undo", async function () {
+			let note = new Zotero.Item('note');
+			let citationItems = 'data-citation-items="%5B%5D"';
+			note.setNote(`<div ${citationItems} data-schema-version="8"><h1>Notes</h1><p>One</p></div>`);
+			await note.saveTx();
+			let [{ dateModified }] = (await call('zotero_get_notes', { keys: [note.key] })).notes;
+			let result = await call('zotero_edit_note', { key: note.key, markdown: 'Two **more**', dateModified });
+			assert.equal(result.title, 'Notes');
+			assert.equal(
+				note.getNote(),
+				`<div ${citationItems} data-schema-version="8"><h1>Notes</h1><p>One</p><p>Two <strong>more</strong></p>\n</div>`
+			);
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.include(note.getNote(), '<p>One</p></div>');
+		});
+		
+		it("should refuse to edit a note that changed since it was read", async function () {
+			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
+			let [{ dateModified }] = (await call('zotero_get_notes', { keys: [note.key] })).notes;
+			note.setNote('<p>The user\'s edit</p>');
+			note.setField('dateModified', '2099-01-01 00:00:00');
+			await note.saveTx({ skipDateModifiedUpdate: true });
+			let error = await callForError('zotero_edit_note', { key: note.key, markdown: 'New', mode: 'replace', dateModified });
+			assert.match(error, /has changed since/);
+			assert.equal(note.getNote(), '<p>The user\'s edit</p>');
+		});
+		
+		it("should replace a note, but not one with highlights", async function () {
+			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
+			let dateModified = Zotero.Date.sqlToISO8601(note.dateModified);
+			let result = await call('zotero_edit_note', { key: note.key, markdown: '# New', mode: 'replace', dateModified });
+			assert.equal(note.getNote(), '<div data-schema-version="9"><h1>New</h1>\n</div>');
+			
+			note.setNote('<div data-schema-version="9"><p><span class="highlight" data-annotation="%7B%7D">Quote</span></p></div>');
+			await note.saveTx();
+			let error = await callForError('zotero_edit_note', {
+				key: note.key, markdown: 'New', mode: 'replace', dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
+			});
+			assert.match(error, /can't hold/);
+			assert.notEqual(result.dateModified, undefined);
+		});
+	});
+	
 	describe("zotero_add_note", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');

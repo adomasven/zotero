@@ -950,6 +950,44 @@
 			}
 		},
 		{
+			"name": "zotero_edit_note",
+			"title": "Edit a Zotero note",
+			"description": "Add Markdown to the end of a note, or replace its content, with the same Markdown as zotero_add_note. Give the note's dateModified from zotero_get_notes: if the note changed since, e.g. because the user edited it, nothing is changed and you get it again first. Replacing works only on notes without highlights, citations or images, which Markdown can't hold; append to the others. The user can undo it in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"key": { "type": "string", "description": "The note's key" },
+					"markdown": { "type": "string", "minLength": 1 },
+					"mode": { "enum": ["append", "replace"], "default": "append", "description": "replace: the Markdown becomes the whole note, and its first line the note's title" },
+					"dateModified": { "type": "string", "description": "The note's dateModified from zotero_get_notes" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["key", "markdown", "dateModified"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string" },
+					"parentKey": { "type": "string" },
+					"title": { "type": "string" },
+					"dateModified": { "type": "string", "description": "For a further edit" },
+					"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
+				},
+				"required": ["libraryID", "key", "title", "dateModified", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": false,
+				"openWorldHint": false
+			}
+		},
+		{
 			"name": "zotero_trash",
 			"title": "Move to or restore from the Zotero trash",
 			"description": "Move items (with their notes and attachments) or collections (with their subcollections) to the trash, or restore them from it. Items in a trashed collection stay in the library. The user can restore trashed things from the trash, or undo the whole call in Zotero with Edit → Undo, until the trash is emptied. Zotero asks the user for permission unless it was already granted: to trash, for an hour at most.",
