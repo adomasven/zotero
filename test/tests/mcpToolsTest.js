@@ -1093,6 +1093,54 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("annotation and note images", function () {
+		it("should give rendered images' paths, and render the others on request", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			let rendered = await createAnnotation('image', attachment);
+			let unrendered = await createAnnotation('image', attachment);
+			let png = await File.createFromFileName(getTestDataDirectory().path + '/test.png');
+			await Zotero.Annotations.saveCacheImage(rendered, png);
+			let render = sinon.stub(Zotero.PDFWorker, 'renderAttachmentAnnotations').callsFake(async () => {
+				await Zotero.Annotations.saveCacheImage(unrendered, png);
+				return 1;
+			});
+			try {
+				let { annotations } = await call('zotero_get_notes', { keys: [attachment.key] });
+				let byKey = Object.fromEntries(annotations.map(annotation => [annotation.key, annotation]));
+				assert.equal(byKey[rendered.key].imagePath, Zotero.Annotations.getCacheImagePath(rendered));
+				assert.notProperty(byKey[unrendered.key], 'imagePath');
+				assert.isFalse(render.called);
+				
+				let { images } = await call('zotero_render_annotation_images', { keys: [unrendered.key] });
+				assert.isTrue(render.calledOnceWith(attachment.id));
+				assert.deepEqual(images, [{
+					key: unrendered.key,
+					path: Zotero.Annotations.getCacheImagePath(unrendered),
+					status: 'rendered',
+				}]);
+				assert.isTrue(await IOUtils.exists(images[0].path));
+			}
+			finally {
+				render.restore();
+			}
+		});
+		
+		it("should list a note's images in order with their files", async function () {
+			let note = await createDataObject('item', { itemType: 'note' });
+			let first = await createEmbeddedImage(note);
+			let second = await createEmbeddedImage(note);
+			note.setNote(`<div data-schema-version="9"><p>A</p><img data-attachment-key="${second.key}"/>`
+				+ `<p>B</p><img data-attachment-key="${first.key}"/></div>`);
+			await note.saveTx();
+			let { notes } = await call('zotero_get_notes', { keys: [note.key] });
+			assert.deepEqual(notes[0].images, [
+				{ key: second.key, path: await second.getFilePathAsync() },
+				{ key: first.key, path: await first.getFilePathAsync() },
+			]);
+			assert.match(notes[0].content, /\[image\][\s\S]*\[image\]/);
+		});
+	});
+	
 	describe("zotero_edit_note", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');

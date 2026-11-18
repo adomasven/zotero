@@ -432,7 +432,7 @@
 		{
 			"name": "zotero_get_notes",
 			"title": "Get Zotero notes and annotations",
-			"description": "Get notes and annotations (highlights, underlines, comments and so on made in Zotero's reader). For an item, returns its notes and the annotations in its files; for an attachment, its annotations; or give note or annotation keys. Notes come as Markdown by default. Annotations are in the order they're in the file, with the page label for citing and a link that opens the file at the annotation.",
+			"description": "Get notes and annotations (highlights, underlines, comments and so on made in Zotero's reader). For an item, returns its notes and the annotations in its files; for an attachment, its annotations; or give note or annotation keys. Notes come as Markdown by default. Annotations are in the order they're in the file, with the page label for citing and a link that opens the file at the annotation. Image and ink annotations (areas or drawings the user marked) have an imagePath once Zotero has rendered them; get the others' with zotero_render_annotation_images. Images in notes show as [image] in Markdown, and come in images in the same order, with their files.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -464,7 +464,8 @@
 								"tags": { "type": "array", "items": { "type": "string" } },
 								"dateModified": { "type": "string" },
 								"content": { "type": "string" },
-								"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
+								"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" },
+								"images": { "type": "array", "description": "Images in the note, in order", "items": { "type": "object", "properties": { "key": { "type": "string" }, "path": { "type": "string", "description": "The image file, if it's on this computer" } }, "required": ["key"] } }
 							},
 							"required": ["key", "title", "tags", "dateModified", "content", "link"]
 						}
@@ -483,7 +484,8 @@
 								"page": { "type": "integer", "description": "PDF page, from 1" },
 								"pageLabel": { "type": "string", "description": "The page number printed on the page, for citing" },
 								"tags": { "type": "array", "items": { "type": "string" } },
-								"link": { "type": "string", "description": "zotero:// link that opens the file at the annotation" }
+								"link": { "type": "string", "description": "zotero:// link that opens the file at the annotation" },
+								"imagePath": { "type": "string", "description": "For an image or ink annotation Zotero has rendered, a PNG of it. Read it now rather than keep the path: Zotero replaces the file when the annotation changes." }
 							},
 							"required": ["key", "attachmentKey", "type", "tags", "link"]
 						}
@@ -491,6 +493,43 @@
 					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" }
 				},
 				"required": ["libraryID", "notes", "annotations"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
+			"name": "zotero_render_annotation_images",
+			"title": "Render Zotero annotation images",
+			"description": "Get PNG files of image and ink annotations in PDFs (areas or drawings the user marked), rendering the ones Zotero hasn't rendered yet. Use it for annotations zotero_get_notes gives no imagePath for, e.g. to see a figure the user marked. Rendering opens the PDF, and renders its other missing images too. Read the files now rather than keep the paths: Zotero replaces a file when its annotation changes.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"keys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50, "description": "Annotation keys" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["keys"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"images": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"path": { "type": "string" },
+								"status": { "enum": ["rendered", "rendering", "failed"], "description": "rendering: Zotero is still rendering it" }
+							},
+							"required": ["key", "status"]
+						}
+					},
+					"notice": { "type": "string" }
+				},
+				"required": ["libraryID", "images"]
 			},
 			"annotations": {
 				"readOnlyHint": true

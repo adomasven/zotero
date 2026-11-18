@@ -68,6 +68,8 @@ Zotero.MCP.Tools = new function () {
 	const MAX_LISTED_ITEMS = 50;
 	// Longest export zotero_export returns as text, in characters
 	const MAX_EXPORT_CHARS = 200000;
+	// Annotations Zotero keeps an image of
+	const IMAGE_ANNOTATION_TYPES = ['image', 'ink'];
 	// Most items zotero_export gives the BibTeX citation keys of
 	const MAX_CITATION_KEYS = 500;
 	const BIBTEX_TRANSLATOR_ID = '9cb70025-a888-4a29-a210-93ec52da40d4';
@@ -564,6 +566,15 @@ Zotero.MCP.Tools = new function () {
 		}
 		let noteResults = [];
 		for (let note of notes) {
+			// Embedded images, in the order they're in the note
+			let imageKeys = [...note.getNote().matchAll(/<img\b[^>]*\bdata-attachment-key="([^"]+)"/g)]
+				.map(match => match[1]);
+			let images = [];
+			for (let key of imageKeys) {
+				let image = Zotero.Items.getByLibraryAndKey(note.libraryID, key);
+				let path = image && await image.getFilePathAsync();
+				images.push({ key, path: path || undefined });
+			}
 			noteResults.push({
 				key: note.key,
 				parentKey: note.parentKey || undefined,
@@ -574,19 +585,80 @@ Zotero.MCP.Tools = new function () {
 					? note.getNote()
 					: (await exportItems([note], Zotero.Translators.TRANSLATOR_ID_NOTE_MARKDOWN))
 						.replace(/\r\n/g, '\n').trim(),
+				images: images.length ? images : undefined,
 				link: getSelectLink(note),
 			});
 		}
 		// In the order they're in the file, as in the reader's sidebar
-		let annotationResults = [...annotations]
+		let sorted = [...annotations]
 			.sort((a, b) => a.parentID - b.parentID
-				|| (a.annotationSortIndex < b.annotationSortIndex ? -1 : 1))
-			.map(describeAnnotation);
+				|| (a.annotationSortIndex < b.annotationSortIndex ? -1 : 1));
+		let annotationResults = [];
+		for (let annotation of sorted) {
+			let result = describeAnnotation(annotation);
+			// Only an image already rendered, as rendering means opening the PDF
+			if (IMAGE_ANNOTATION_TYPES.includes(annotation.annotationType)
+					&& await Zotero.Annotations.hasCacheImage(annotation)) {
+				result.imagePath = Zotero.Annotations.getCacheImagePath(annotation);
+			}
+			annotationResults.push(result);
+		}
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			notes: noteResults,
 			annotations: annotationResults,
 			missing: missing.length ? missing : undefined,
+		});
+	};
+	
+	/**
+	 * Image files of image and ink annotations, rendering those not rendered yet from their
+	 * PDFs, as the attachment pane does when it shows them
+	 *
+	 * Zotero renders all of a PDF's missing images at once, so asking for one also renders the
+	 * others in its PDF.
+	 */
+	this.renderAnnotationImages = async function ({ keys, libraryID }, { deadline }) {
+		libraryID = getLibraryID(libraryID);
+		let annotations = [];
+		for (let key of new Set(keys)) {
+			let annotation = await getItem(libraryID, key);
+			if (!annotation.isAnnotation() || !IMAGE_ANNOTATION_TYPES.includes(annotation.annotationType)) {
+				throw new Zotero.MCP.ToolError(`${key} isn't an image or ink annotation`);
+			}
+			if (!annotation.parentItem.isPDFAttachment()) {
+				throw new Zotero.MCP.ToolError(`${key} isn't in a PDF, and only PDFs' annotations can be rendered`);
+			}
+			annotations.push(annotation);
+		}
+		let attachmentIDs = new Set();
+		for (let annotation of annotations) {
+			if (!await Zotero.Annotations.hasCacheImage(annotation)) {
+				attachmentIDs.add(annotation.parentID);
+			}
+		}
+		let rendering = Promise.all([...attachmentIDs].map(
+			id => Zotero.PDFWorker.renderAttachmentAnnotations(id, true).catch(e => Zotero.logError(e))
+		));
+		let pending = await untilDeadline(rendering, deadline) === TIMED_OUT;
+		let images = [];
+		for (let annotation of annotations) {
+			let rendered = await Zotero.Annotations.hasCacheImage(annotation);
+			images.push({
+				key: annotation.key,
+				path: rendered ? Zotero.Annotations.getCacheImagePath(annotation) : undefined,
+				status: rendered ? 'rendered' : pending ? 'rendering' : 'failed',
+			});
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			images,
+			notice: [
+				pending && 'Zotero is still rendering the images with status rendering. Call again shortly.',
+				images.some(image => image.status == 'failed')
+					&& "Zotero couldn't render the images with status failed, e.g. because the PDF isn't "
+						+ 'on this computer.',
+			].filter(Boolean).join(' ') || undefined,
 		});
 	};
 	
