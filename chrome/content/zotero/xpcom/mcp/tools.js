@@ -1360,9 +1360,12 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * Attach a file to an item from a URL or this computer
+	 * Attach a file to an item from a URL or this computer, or add a file from this computer
+	 * as a standalone attachment, which Zotero identifies as with Retrieve Metadata
 	 */
-	this.addAttachment = async function ({ parentKey, url, path, title, libraryID }, { clientID, deadline }) {
+	this.addAttachment = async function ({
+		parentKey, url, path, linkFile = false, title, collectionKey, libraryID,
+	}, { clientID, deadline }) {
 		libraryID = getLibraryID(libraryID);
 		let library = Zotero.Libraries.get(libraryID);
 		if (!library.editable || !library.filesEditable) {
@@ -1370,6 +1373,21 @@ Zotero.MCP.Tools = new function () {
 		}
 		if (!url == !path) {
 			throw new Zotero.MCP.ToolError('Give url or path');
+		}
+		if (url && linkFile) {
+			throw new Zotero.MCP.ToolError('Only a file from path can be linked');
+		}
+		if (linkFile && library.libraryType != 'user') {
+			throw new Zotero.MCP.ToolError('Files can be linked only in My Library');
+		}
+		if (!parentKey) {
+			if (url) {
+				throw new Zotero.MCP.ToolError('Give parentKey to attach a file from a URL');
+			}
+			return addStandaloneFile({ path, linkFile, title, collectionKey, libraryID }, { clientID, deadline });
+		}
+		if (collectionKey) {
+			throw new Zotero.MCP.ToolError("Give collectionKey only without parentKey. A file is in its parent's collections.");
 		}
 		let parent = await getItem(libraryID, parentKey);
 		if (!parent.isRegularItem()) {
@@ -1430,17 +1448,26 @@ Zotero.MCP.Tools = new function () {
 			if (info?.type != 'regular') {
 				throw new Zotero.MCP.ToolError(`There's no file at ${path} on this computer.`);
 			}
-			// Renamed as when the user adds the item's first file (ZoteroPane.addAttachmentFromDialog())
-			let fileBaseName;
-			if (Zotero.Attachments.shouldAutoRenameFile(false, libraryID) && !parent.numNonHTMLFileAttachments()) {
-				fileBaseName = await Zotero.Attachments.getRenamedFileBaseNameIfAllowedType(parent, path);
+			if (linkFile) {
+				attachment = await finish(await Zotero.Attachments.linkFromFile({
+					file: path,
+					parentItemID: parent.id,
+					saveOptions: { skipSelect: true },
+				}));
 			}
-			attachment = await finish(await Zotero.Attachments.importFromFile({
-				file: path,
-				parentItemID: parent.id,
-				fileBaseName,
-				saveOptions: { skipSelect: true },
-			}));
+			else {
+				// Renamed as when the user adds the item's first file (ZoteroPane.addAttachmentFromDialog())
+				let fileBaseName;
+				if (Zotero.Attachments.shouldAutoRenameFile(false, libraryID) && !parent.numNonHTMLFileAttachments()) {
+					fileBaseName = await Zotero.Attachments.getRenamedFileBaseNameIfAllowedType(parent, path);
+				}
+				attachment = await finish(await Zotero.Attachments.importFromFile({
+					file: path,
+					parentItemID: parent.id,
+					fileBaseName,
+					saveOptions: { skipSelect: true },
+				}));
+			}
 		}
 		return Zotero.MCP.jsonResult({
 			libraryID,
@@ -1450,6 +1477,76 @@ Zotero.MCP.Tools = new function () {
 			link: getOpenLink(attachment),
 		});
 	};
+	
+	/**
+	 * Add a file as a standalone attachment and identify it, creating its parent item from the
+	 * metadata found, as when the user adds a PDF or EPUB on its own
+	 *
+	 * The file and its new parent become one undo step once identifying ends, which can be
+	 * after the call's deadline.
+	 */
+	async function addStandaloneFile({ path, linkFile, title, collectionKey, libraryID }, { clientID, deadline }) {
+		let collection = collectionKey ? getCollection(libraryID, collectionKey) : null;
+		let info = await statPath(path);
+		if (info?.type != 'regular') {
+			throw new Zotero.MCP.ToolError(`There's no file at ${path} on this computer.`);
+		}
+		let options = {
+			file: path,
+			libraryID,
+			collections: collection ? [collection.id] : undefined,
+			saveOptions: { skipSelect: true },
+		};
+		let attachment = linkFile
+			? await Zotero.Attachments.linkFromFile(options)
+			: await Zotero.Attachments.importFromFile(options);
+		let identifying = (async () => {
+			if (Zotero.RecognizeDocument.canRecognize(attachment)) {
+				await Zotero.RecognizeDocument.recognizeItems([attachment]);
+			}
+			let parent = attachment.parentItem;
+			await edit(clientID, async () => {
+				if (parent) {
+					Zotero.UndoHistory.stageCreation(parent);
+				}
+				Zotero.UndoHistory.stageCreation(attachment);
+				if (title) {
+					attachment.setField('title', title);
+					await attachment.save();
+				}
+			});
+			return parent || false;
+		})();
+		identifying.catch(e => Zotero.logError(e));
+		let parent = await Promise.race([
+			identifying,
+			Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => null),
+		]);
+		let result = {
+			libraryID,
+			status: 'attached',
+			...await describeAttachment(attachment),
+			link: getOpenLink(attachment),
+		};
+		if (parent) {
+			result.identified = 'yes';
+			result.parent = await summarize(parent);
+			result.parentKey = parent.key;
+		}
+		else if (parent === null) {
+			result.identified = 'pending';
+			result.notice = 'Zotero is still identifying the file. Call zotero_get_items on the '
+				+ 'attachment later to see whether it has a parent item.';
+		}
+		else {
+			result.identified = 'no';
+			result.notice = Zotero.RecognizeDocument.canRecognize(attachment)
+				? "Zotero couldn't identify the file, so it's a standalone attachment. If you know "
+					+ 'what it is, add the item with zotero_add_items and attach the file to it.'
+				: 'Zotero identifies only PDFs and EPUBs, so the file is a standalone attachment.';
+		}
+		return Zotero.MCP.jsonResult(result);
+	}
 	
 	/**
 	 * Import a file, or text, in a format Zotero imports, such as BibTeX, RIS or Zotero RDF,

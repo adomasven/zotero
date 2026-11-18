@@ -1350,5 +1350,49 @@ describe("MCP tools", function () {
 			error = await callForError('zotero_add_attachment', { parentKey: parent.key, path: missing });
 			assert.match(error, /There's no file at/);
 		});
+		
+		it("should add a file without a parent, identify it in a collection, and undo both", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			let collection = await createDataObject('collection');
+			let recognized = new Zotero.Item('journalArticle');
+			recognized.setField('title', 'Recognized paper');
+			sinon.stub(Zotero.RecognizeDocument, '_recognize').callsFake(async () => {
+				await recognized.saveTx();
+				return recognized;
+			});
+			let file = getTestDataDirectory();
+			file.append('test.pdf');
+			let result = await call('zotero_add_attachment', { path: file.path, collectionKey: collection.key });
+			assert.equal(result.identified, 'yes');
+			assert.equal(result.parentKey, recognized.key);
+			assert.equal(result.parent.title, 'Recognized paper');
+			let attachment = Zotero.Items.getByLibraryAndKey(recognized.libraryID, result.key);
+			assert.equal(attachment.parentID, recognized.id);
+			assert.isTrue(collection.hasItem(recognized));
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(recognized.deleted);
+			assert.isTrue(attachment.deleted);
+		});
+		
+		it("should link a file it can't identify as a standalone attachment", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			sinon.stub(Zotero.RecognizeDocument, '_recognize').resolves(false);
+			let file = getTestDataDirectory();
+			file.append('test.pdf');
+			let result = await call('zotero_add_attachment', { path: file.path, linkFile: true });
+			assert.equal(result.identified, 'no');
+			assert.equal(result.linkMode, 'linked_file');
+			assert.notProperty(result, 'parentKey');
+			assert.match(result.notice, /couldn't identify/);
+			let attachment = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.key);
+			assert.isTrue(attachment.isTopLevelItem());
+			assert.equal(attachment.getFilePath(), file.path);
+			
+			assert.match(
+				await callForError('zotero_add_attachment', { url: 'https://example.com/a.pdf' }),
+				/Give parentKey/
+			);
+		});
 	});
 });

@@ -1035,17 +1035,18 @@
 		{
 			"name": "zotero_add_attachment",
 			"title": "Attach a file in Zotero",
-			"description": "Attach a PDF, EPUB or other file to an item: from a URL, which Zotero downloads, or from a file on this computer, e.g. one you downloaded or one in the user's Downloads folder. Use it when zotero_add_items finds no PDF and you've found a copy elsewhere, such as on arXiv, PubMed Central or the author's site. A URL can be a link to a PDF or EPUB, or a page that links to one; it's downloaded from the user's computer, so access through their institution works. If Zotero can't get the file, as a last resort ask the user to save it with the Zotero Connector from a browser where they're signed in. The user can undo it in Zotero with Edit → Undo, which moves the attachment to the trash. Zotero asks the user for permission unless it was already granted.",
+			"description": "Attach a PDF, EPUB or other file to an item: from a URL, which Zotero downloads, or from a file on this computer, e.g. one you downloaded or one in the user's Downloads folder. Without parentKey, adds a file on this computer as a standalone attachment and has Zotero identify it from its contents (a PDF's or EPUB's DOI, ISBN or title page), creating its parent item, as Zotero does when the user adds a file on its own; use this to bring the user's existing PDFs into Zotero, one call per file. Attach to an item when zotero_add_items finds no PDF and you've found a copy elsewhere, such as on arXiv, PubMed Central or the author's site. A URL can be a link to a PDF or EPUB, or a page that links to one; it's downloaded from the user's computer, so access through their institution works. If Zotero can't get the file, as a last resort ask the user to save it with the Zotero Connector from a browser where they're signed in. The user can undo it in Zotero with Edit → Undo, which moves the attachment, and a parent item Zotero created, to the trash. Zotero asks the user for permission unless it was already granted.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"parentKey": { "type": "string", "description": "The regular item (e.g. a journal article) to attach the file to" },
-					"url": { "type": "string", "description": "http or https. Only PDFs and EPUBs are attached from URLs." },
+					"parentKey": { "type": "string", "description": "The regular item (e.g. a journal article) to attach the file to. Omit to add a file from path as a standalone attachment that Zotero identifies." },
+					"url": { "type": "string", "description": "http or https, with parentKey. Only PDFs and EPUBs are attached from URLs." },
 					"path": { "type": "string", "description": "The absolute path of a file on this computer" },
+					"linkFile": { "type": "boolean", "default": false, "description": "Link to the file at path where it is, instead of copying it into Zotero" },
+					"collectionKey": { "type": "string", "description": "Without parentKey, a collection to add the file and the item Zotero creates for it to" },
 					"title": { "type": "string", "description": "The attachment's title. By default Zotero names it, e.g. \"Full Text PDF\"." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["parentKey"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -1054,6 +1055,19 @@
 					"libraryID": { "type": "integer" },
 					"parentKey": { "type": "string" },
 					"status": { "enum": ["attached", "downloading"], "description": "downloading: Zotero is still downloading the file" },
+					"identified": { "enum": ["yes", "no", "pending"], "description": "Without parentKey, whether Zotero identified the file and created its parent item. pending: Zotero is still identifying it." },
+					"parent": {
+						"type": "object",
+						"description": "The item Zotero created for the file",
+						"properties": {
+							"key": { "type": "string" },
+							"itemType": { "type": "string" },
+							"title": { "type": "string" },
+							"creators": { "type": "string" },
+							"date": { "type": "string" },
+							"link": { "type": "string" }
+						}
+					},
 					"key": { "type": "string" },
 					"title": { "type": "string" },
 					"contentType": { "type": "string" },
@@ -1063,7 +1077,7 @@
 					"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" },
 					"notice": { "type": "string" }
 				},
-				"required": ["libraryID", "parentKey", "status"]
+				"required": ["libraryID", "status"]
 			},
 			"_meta": {
 				"org.zotero/permission": "editLibrary"
