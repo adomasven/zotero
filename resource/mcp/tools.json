@@ -1307,6 +1307,58 @@
 			}
 		},
 		{
+			"name": "zotero_find_full_text",
+			"title": "Find full text in Zotero",
+			"description": "Look for a PDF or EPUB of items that have none, as Zotero's Find Full Text menu command does: by DOI, URL or PMCID, from open-access sources and from the publisher's site, through the user's institution where they have access. Use it for items added without files, e.g. by zotero_import. Items that already have a PDF or EPUB, or have no DOI, URL or PMCID, are skipped. If the search takes too long, the call returns and Zotero goes on in the background. The user can undo it in Zotero with Edit → Undo, which moves the files found to the trash. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"keys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50 },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["keys"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"results": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"title": { "type": "string" },
+								"status": { "enum": ["found", "notFound", "searching", "skipped"], "description": "searching: Zotero is still looking" },
+								"reason": { "type": "string", "description": "Why it was skipped" },
+								"file": {
+									"type": "object",
+									"properties": {
+										"key": { "type": "string" },
+										"title": { "type": "string" },
+										"contentType": { "type": "string" }
+									}
+								}
+							},
+							"required": ["key", "title", "status"]
+						}
+					},
+					"notice": { "type": "string" }
+				},
+				"required": ["libraryID", "results"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false,
+				"openWorldHint": true
+			}
+		},
+		{
 			"name": "zotero_add_attachment",
 			"title": "Attach a file in Zotero",
 			"description": "Attach a PDF, EPUB or other file to an item: from a URL, which Zotero downloads, or from a file on this computer, e.g. one you downloaded or one in the user's Downloads folder. Without parentKey, adds a file on this computer as a standalone attachment and has Zotero identify it from its contents (a PDF's or EPUB's DOI, ISBN or title page), creating its parent item, as Zotero does when the user adds a file on its own; use this to bring the user's existing PDFs into Zotero, one call per file. Attach to an item when zotero_add_items finds no PDF and you've found a copy elsewhere, such as on arXiv, PubMed Central or the author's site. A URL can be a link to a PDF or EPUB, or a page that links to one; it's downloaded from the user's computer, so access through their institution works. If Zotero can't get the file, as a last resort ask the user to save it with the Zotero Connector from a browser where they're signed in. The user can undo it in Zotero with Edit → Undo, which moves the attachment, and a parent item Zotero created, to the trash. Zotero asks the user for permission unless it was already granted.",

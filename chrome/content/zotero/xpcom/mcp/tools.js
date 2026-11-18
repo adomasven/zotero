@@ -1819,6 +1819,76 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * Find Full Text for existing items, as the item menu does, with what it found for each
+	 *
+	 * The files found become one undo step once the search ends, which can be after the
+	 * call's deadline.
+	 */
+	this.findFullText = async function ({ keys, libraryID }, { clientID, deadline }) {
+		libraryID = getLibraryID(libraryID);
+		let library = Zotero.Libraries.get(libraryID);
+		if (!library.editable || !library.filesEditable) {
+			throw new Zotero.MCP.ToolError(`Files can't be added to ${library.name}`);
+		}
+		let items = [];
+		for (let key of new Set(keys)) {
+			items.push(await getItem(libraryID, key));
+		}
+		let eligible = items.filter(item => Zotero.Attachments.canFindFileForItem(item));
+		let before = new Map(eligible.map(item => [item, new Set(item.getAttachments())]));
+		let added = item => Zotero.Items.get(item.getAttachments().filter(id => !before.get(item).has(id)));
+		let finding = (async () => {
+			if (eligible.length) {
+				await Zotero.Attachments.addAvailableFiles(eligible);
+			}
+			let attachments = eligible.flatMap(added);
+			if (attachments.length) {
+				await edit(clientID, async () => {
+					for (let attachment of attachments) {
+						Zotero.UndoHistory.stageCreation(attachment);
+					}
+				});
+			}
+		})();
+		finding.catch(e => Zotero.logError(e));
+		let searching = await untilDeadline(finding, deadline) === TIMED_OUT;
+		let results = await Promise.all(items.map(async (item) => {
+			let result = { key: item.key, title: item.getDisplayTitle() };
+			if (!before.has(item)) {
+				result.status = 'skipped';
+				result.reason = !item.isRegularItem()
+					? 'Only regular items, such as a journal article, can have files found'
+					: Zotero.Attachments.FIND_AVAILABLE_FILE_TYPES
+						.some(type => item.numFileAttachmentsWithContentType(type))
+						? 'It already has a PDF or EPUB'
+						: 'It has no DOI, URL or PMCID to look for a file by';
+				return result;
+			}
+			let [attachment] = added(item);
+			if (attachment) {
+				result.status = 'found';
+				result.file = await describeAttachment(attachment);
+			}
+			else {
+				result.status = searching ? 'searching' : 'notFound';
+			}
+			return result;
+		}));
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			results,
+			notice: [
+				searching && 'Zotero is still looking for files for the items with status searching. '
+					+ 'Call zotero_get_items on them later to see whether it found one.',
+				results.some(result => result.status == 'notFound')
+					&& "Zotero found no PDF or EPUB for items with status notFound. Find one elsewhere "
+						+ "(e.g. arXiv, PubMed Central or the author's site) and attach it with "
+						+ 'zotero_add_attachment. ' + LAST_RESORT,
+			].filter(Boolean).join(' ') || undefined,
+		});
+	};
+	
+	/**
 	 * Add a file as a standalone attachment and identify it, creating its parent item from the
 	 * metadata found, as when the user adds a PDF or EPUB on its own
 	 *

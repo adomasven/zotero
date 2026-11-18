@@ -1402,6 +1402,50 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("zotero_find_full_text", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should report what it found for each item, and undo the files it added", async function () {
+			let found = await createArticle();
+			found.setField('DOI', '10.1234/' + Zotero.Utilities.randomString());
+			await found.saveTx();
+			let notFound = await createArticle();
+			notFound.setField('url', 'https://example.com/' + Zotero.Utilities.randomString());
+			await notFound.saveTx();
+			let noIdentifier = await createArticle();
+			let attachment;
+			let search = sinon.stub(Zotero.Attachments, 'addAvailableFiles').callsFake(async (items) => {
+				assert.sameMembers(items, [found, notFound]);
+				attachment = await importFileAttachment('test.pdf', { parentID: found.id });
+			});
+			
+			let { results, notice } = await call('zotero_find_full_text', {
+				keys: [found.key, notFound.key, noIdentifier.key],
+			});
+			assert.isTrue(search.calledOnce);
+			assert.deepEqual(results.map(result => result.status), ['found', 'notFound', 'skipped']);
+			assert.equal(results[0].file.key, attachment.key);
+			assert.match(results[2].reason, /no DOI, URL or PMCID/);
+			assert.match(notice, /zotero_add_attachment/);
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(attachment.deleted);
+		});
+		
+		it("should say which items it's still searching for at the deadline", async function () {
+			let item = await createArticle();
+			item.setField('DOI', '10.1234/' + Zotero.Utilities.randomString());
+			await item.saveTx();
+			sinon.stub(Zotero.Attachments, 'addAvailableFiles').returns(new Promise(() => {}));
+			let { results, notice } = await withBudget(300, () => call('zotero_find_full_text', { keys: [item.key] }));
+			assert.equal(results[0].status, 'searching');
+			assert.match(notice, /still looking/);
+		});
+	});
+	
 	describe("zotero_import", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');
