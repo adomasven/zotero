@@ -142,6 +142,7 @@ describe("MCP tools", function () {
 				contentType: 'application/pdf',
 				linkMode: 'imported_file',
 				fileExists: true,
+				path: attachment.getFilePath(),
 				annotationCount: 0,
 			}]);
 			assert.deepEqual(items[0].notes, [{ key: note.key, title: 'My note' }]);
@@ -575,6 +576,7 @@ describe("MCP tools", function () {
 				parentKey: item.key,
 				title: item.getField('title'),
 				contentType: 'application/pdf',
+				path: attachment.getFilePath(),
 				type: 'pdf',
 				page: 1,
 				pageLabel: '1',

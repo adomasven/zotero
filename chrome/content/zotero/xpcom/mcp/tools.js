@@ -2621,6 +2621,7 @@ Zotero.MCP.Tools = new function () {
 			parentKey: attachment.parentKey || undefined,
 			title: getTitle(attachment),
 			contentType: attachment.attachmentContentType,
+			path: attachment.getFilePath() || undefined,
 			type: reader.type,
 			page,
 			pageLabel: knownPageLabel(pageLabel),
@@ -2880,6 +2881,8 @@ Zotero.MCP.Tools = new function () {
 		};
 		if (attachment.isFileAttachment()) {
 			description.fileExists = await attachment.fileExists();
+			// For the AI app to open the file itself, e.g. to see a figure
+			description.path = description.fileExists ? attachment.getFilePath() : undefined;
 			description.annotationCount = attachment.getAnnotations().length;
 		}
 		return description;

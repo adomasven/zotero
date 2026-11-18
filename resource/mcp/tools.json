@@ -147,6 +147,7 @@
 											"contentType": { "type": "string" },
 											"linkMode": { "type": "string" },
 											"fileExists": { "type": "boolean" },
+											"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
 											"annotationCount": { "type": "integer" }
 										},
 										"required": ["key", "title", "linkMode"]
@@ -562,6 +563,7 @@
 							"parentKey": { "type": "string" },
 							"title": { "type": "string" },
 							"contentType": { "type": "string" },
+							"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
 							"type": { "enum": ["pdf", "epub", "snapshot"] },
 							"page": { "type": "integer", "description": "PDF page the user is on, from 1" },
 							"pageLabel": { "type": "string", "description": "The page number printed on that page, for citing" },
@@ -1399,6 +1401,7 @@
 					"contentType": { "type": "string" },
 					"linkMode": { "type": "string" },
 					"fileExists": { "type": "boolean" },
+					"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
 					"annotationCount": { "type": "integer" },
 					"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" },
 					"notice": { "type": "string" }
