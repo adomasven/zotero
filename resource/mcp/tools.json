@@ -1113,6 +1113,89 @@
 			}
 		},
 		{
+			"name": "zotero_list_duplicates",
+			"title": "List duplicate Zotero items",
+			"description": "List the sets of items Zotero considers duplicates, as its Duplicate Items view does: items with the same DOI or ISBN, or with similar titles, the same creators and years close together. Check that a set really is one work, e.g. not a preprint and its published version the user keeps apart, before merging it with zotero_merge_items. Each set is oldest first.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "Sets per page" },
+					"offset": { "type": "integer", "minimum": 0, "default": 0 },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"total": { "type": "integer", "description": "Sets in the library" },
+					"sets": {
+						"type": "array",
+						"items": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"key": { "type": "string" },
+									"itemType": { "type": "string" },
+									"title": { "type": "string" },
+									"creators": { "type": "string" },
+									"date": { "type": "string" },
+									"DOI": { "type": "string" },
+									"ISBN": { "type": "string" },
+									"dateAdded": { "type": "string" },
+									"attachmentCount": { "type": "integer" },
+									"noteCount": { "type": "integer" },
+									"link": { "type": "string" }
+								},
+								"required": ["key", "itemType", "title", "dateAdded", "attachmentCount", "noteCount"]
+							}
+						}
+					},
+					"nextOffset": { "type": "integer" }
+				},
+				"required": ["libraryID", "total", "sets"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
+			"name": "zotero_merge_items",
+			"title": "Merge duplicate Zotero items",
+			"description": "Merge items that are the same work, as Zotero's merge button does: the master item keeps its own fields and gets the others' notes, files, annotations, tags, collections and related items, and the others go to the trash. Duplicate PDFs are combined, keeping the annotations of each. To use a field value from another copy, set it on the master with zotero_update_items. The items must be regular items of the same type. The user can undo it in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"keys": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 20 },
+					"masterKey": { "type": "string", "description": "The item to keep, one of keys. Defaults to the oldest." },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["keys"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string", "description": "The master item" },
+					"trashed": { "type": "array", "items": { "type": "string" } },
+					"link": { "type": "string", "description": "zotero:// link that shows the master item in Zotero" }
+				},
+				"required": ["libraryID", "key", "trashed", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "delete"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": false,
+				"openWorldHint": false
+			}
+		},
+		{
 			"name": "zotero_trash",
 			"title": "Move to or restore from the Zotero trash",
 			"description": "Move items (with their notes and attachments), collections (with their subcollections) or saved searches to the trash, or restore them from it. Items in a trashed collection stay in the library. The user can restore trashed things from the trash, or undo the whole call in Zotero with Edit → Undo, until the trash is emptied. Zotero asks the user for permission unless it was already granted: to trash, for an hour at most.",

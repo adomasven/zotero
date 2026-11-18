@@ -91,6 +91,25 @@ Zotero.Duplicates.prototype.getSetItemsByItemID = function (itemID) {
 }
 
 
+/**
+ * The sets of items that are duplicates of each other, as the Duplicate Items view groups them
+ *
+ * @return {Promise<Integer[][]>} The item IDs of each set
+ */
+Zotero.Duplicates.prototype.getSets = async function () {
+	await this._findDuplicates();
+	var sets = new Map();
+	for (let obj of this._sets.findAll()) {
+		let root = this._sets.find(obj);
+		if (!sets.has(root)) {
+			sets.set(root, []);
+		}
+		sets.get(root).push(obj.id);
+	}
+	return [...sets.values()];
+};
+
+
 Zotero.Duplicates.prototype._getObjectFromID = function (id) {
 	return {
 		get id() { return id; }

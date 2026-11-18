@@ -1366,6 +1366,80 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * Sets of items Zotero considers duplicates, as its Duplicate Items view shows them
+	 */
+	this.listDuplicates = async function ({ libraryID, limit = 20, offset = 0 }) {
+		libraryID = getLibraryID(libraryID);
+		let sets = await Promise.all(
+			(await new Zotero.Duplicates(libraryID).getSets()).map(ids => Zotero.Items.getAsync(ids))
+		);
+		for (let set of sets) {
+			set.sort((a, b) => (a.dateAdded < b.dateAdded ? -1 : a.dateAdded > b.dateAdded ? 1 : 0));
+		}
+		sets.sort((a, b) => Zotero.localeCompare(a[0].getDisplayTitle(), b[0].getDisplayTitle()));
+		let page = sets.slice(offset, offset + limit);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			total: sets.length,
+			sets: await Promise.all(page.map(set => Promise.all(set.map(async item => ({
+				...await summarize(item),
+				DOI: item.getField('DOI') || undefined,
+				ISBN: item.getField('ISBN') || undefined,
+				dateAdded: Zotero.Date.sqlToISO8601(item.dateAdded),
+				attachmentCount: item.numAttachments(),
+				noteCount: item.numNotes(),
+			}))))),
+			nextOffset: offset + limit < sets.length ? offset + limit : undefined,
+		});
+	};
+	
+	/**
+	 * Merge duplicates as Zotero's merge pane does: the master item gets the others' notes,
+	 * attachments, tags, collections and relations, and the others go to the trash
+	 */
+	this.mergeItems = async function ({ keys, masterKey, libraryID }) {
+		libraryID = getLibraryID(libraryID);
+		keys = [...new Set(keys)];
+		if (keys.length < 2) {
+			throw new Zotero.MCP.ToolError('Give at least two items to merge');
+		}
+		let items = [];
+		for (let key of keys) {
+			let item = await getItem(libraryID, key);
+			if (!item.isRegularItem()) {
+				throw new Zotero.MCP.ToolError(
+					`${item.key} is ${item.isNote() ? 'a note' : 'an ' + item.itemType}. Only regular items can be merged.`
+				);
+			}
+			if (!item.isEditable()) {
+				throw new Zotero.MCP.ToolError(`${item.key} can't be changed`);
+			}
+			items.push(item);
+		}
+		if (new Set(items.map(item => item.itemTypeID)).size > 1) {
+			throw new Zotero.MCP.ToolError(
+				'Items of different types can\'t be merged. Change their types with zotero_update_items first.'
+			);
+		}
+		// The oldest by default, as in the merge pane
+		let master = masterKey
+			? items.find(item => item.key == masterKey)
+			: items.reduce((oldest, item) => (item.dateAdded < oldest.dateAdded ? item : oldest));
+		if (!master) {
+			throw new Zotero.MCP.ToolError('masterKey must be one of keys');
+		}
+		let others = items.filter(item => item != master);
+		let { mergeItems } = ChromeUtils.importESModule('chrome://zotero/content/mergeItems.mjs');
+		await mergeItems(master, others);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			key: master.key,
+			trashed: others.map(item => item.key),
+			link: getSelectLink(master),
+		});
+	};
+	
+	/**
 	 * Move items and collections to the trash, or restore them from it
 	 *
 	 * Trashing needs DELETE, but restoring only EDIT_LIBRARY, so this asks for the permission

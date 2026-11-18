@@ -960,6 +960,53 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("duplicates", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should list duplicates and merge them into the oldest, and undo", async function () {
+			let DOI = '10.1234/' + Zotero.Utilities.randomString();
+			let older = await createDataObject('item', { title: 'Merge me', dateAdded: '2020-01-01 00:00:00' });
+			older.setField('DOI', DOI);
+			await older.saveTx();
+			let newer = await createDataObject('item', { title: 'Merge me (copy)' });
+			newer.setField('DOI', DOI);
+			newer.addTag('copied');
+			await newer.saveTx();
+			let note = await createDataObject('item', { itemType: 'note', parentID: newer.id });
+			
+			let sets = [];
+			for (let offset = 0; offset !== undefined;) {
+				let result = await call('zotero_list_duplicates', { offset, limit: 100 });
+				sets.push(...result.sets);
+				offset = result.nextOffset;
+			}
+			let set = sets.find(set => set.some(item => item.key == older.key));
+			assert.deepEqual(set.map(item => item.key), [older.key, newer.key]);
+			assert.equal(set[0].DOI, DOI);
+			assert.equal(set[1].noteCount, 1);
+			
+			let result = await call('zotero_merge_items', { keys: [newer.key, older.key] });
+			assert.equal(result.key, older.key);
+			assert.deepEqual(result.trashed, [newer.key]);
+			assert.isTrue(newer.deleted);
+			assert.equal(note.parentID, older.id);
+			assert.isTrue(older.hasTag('copied'));
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isFalse(newer.deleted);
+			assert.equal(note.parentID, newer.id);
+		});
+		
+		it("should refuse to merge items of different types", async function () {
+			let a = await createDataObject('item', { itemType: 'book' });
+			let b = await createDataObject('item', { itemType: 'journalArticle' });
+			assert.match(await callForError('zotero_merge_items', { keys: [a.key, b.key] }), /different types/);
+		});
+	});
+	
 	describe("saved searches", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');
