@@ -79,6 +79,8 @@ class PDFWorker {
 	}
 
 	async _query(action, data, transfer, options = {}) {
+		// The worker is dropped after an error, so there may be none yet
+		this._init();
 		return new Promise((resolve, reject) => {
 			this._lastPromiseID++;
 			this._waitingPromises[this._lastPromiseID] = {
@@ -179,9 +181,22 @@ class PDFWorker {
 		});
 		this._worker.addEventListener('error', (event) => {
 			Zotero.logError(`Document worker error (${event.filename}:${event.lineno}): ${event.message}`);
+			// An uncaught error leaves requests unanswered: fail them all, and
+			// let the next request start a fresh worker
+			this._reset(new Error(`Document worker error: ${event.message}`));
 		});
 	}
-	
+
+	_reset(error) {
+		let pending = Object.values(this._waitingPromises);
+		this._waitingPromises = {};
+		this._worker.terminate();
+		this._worker = null;
+		for (let { reject } of pending) {
+			reject(error);
+		}
+	}
+
 	canImport(item) {
 		if (item.isPDFAttachment()) {
 			return true;
@@ -690,6 +705,101 @@ class PDFWorker {
 
 			Zotero.debug(`Extracted structured document text for item ${attachment.libraryKey} in ${new Date() - t} ms`);
 
+			return result;
+		}, !!isPriority);
+	}
+
+	/**
+	 * Cut a structured document text pack into chunks
+	 *
+	 * @param {ArrayBuffer} buf - The pack
+	 * @param {Object} [options]
+	 * @param {Boolean} [options.isPriority]
+	 * @param {Boolean} [options.segments] - Include each chunk's `segments`
+	 * @returns {Promise<Object>} - { chunks, sourceHash, chunkerVersion }
+	 */
+	async getStructuredDocumentTextChunks(buf, { isPriority = false, segments = false } = {}) {
+		return this._enqueue(async () => {
+			try {
+				var result = await this._query('sdt.getChunks', { buf, segments }, [buf]);
+			}
+			catch (e) {
+				this._throwWorkerError('sdt.getChunks', e);
+			}
+			return result;
+		}, !!isPriority);
+	}
+
+	/**
+	 * Find the reader positions of stretches of a structured document text
+	 * pack, each given as content ranges
+	 *
+	 * @param {ArrayBuffer} buf - The pack
+	 * @param {Array[][]} selections - Content ranges per stretch
+	 * @param {Object} [options]
+	 * @param {Boolean} [options.isPriority]
+	 * @returns {Promise<Array<Object|null>>} - Per stretch, { text,
+	 *     outlinePath, sections, pageLabel, positions }, or null if unresolved
+	 */
+	async locateStructuredDocumentTextRanges(buf, selections, { isPriority = false } = {}) {
+		return this._enqueue(async () => {
+			try {
+				var result = await this._query('sdt.locateRanges', { buf, selections }, [buf]);
+			}
+			catch (e) {
+				this._throwWorkerError('sdt.locateRanges', e);
+			}
+			return result;
+		}, !!isPriority);
+	}
+
+	/**
+	 * Make annotations, in the reader's form and ready to save, over content
+	 * ranges of an attachment's structured text. A PDF's file supplies their
+	 * page labels and sort indexes.
+	 *
+	 * @param {Integer} itemID - The attachment
+	 * @param {ArrayBuffer} buf - Its pack
+	 * @param {Object} options
+	 * @param {Array[]} options.ranges - Content ranges, in text order
+	 * @param {String} [options.type='highlight'] - 'highlight' or 'underline'
+	 * @param {String} [options.color]
+	 * @param {String} [options.password] - For an encrypted PDF
+	 * @param {Boolean} [options.isPriority]
+	 * @returns {Promise<Object|null>} - { text, annotations }, or null when the
+	 *     ranges don't resolve or a PDF's file is missing
+	 */
+	async createAnnotations(itemID, buf, { isPriority = false, ...options } = {}) {
+		return this._enqueue(async () => {
+			let attachment = await Zotero.Items.getAsync(itemID);
+			if (!(attachment.isPDFAttachment()
+					|| attachment.isEPUBAttachment()
+					|| attachment.isSnapshotAttachment())) {
+				throw new Error('Item must be a PDF, EPUB, or snapshot attachment');
+			}
+			// Only a PDF's annotations take anything from the file itself
+			let fileBuf = null;
+			if (attachment.isPDFAttachment()) {
+				let path = await attachment.getFilePathAsync();
+				if (!path) {
+					return null;
+				}
+				let fileSize = (await IOUtils.stat(path)).size;
+				if (fileSize > Math.pow(2, 31) - 1) {
+					throw new Error(`The file "${path}" is too large`);
+				}
+				fileBuf = new Uint8Array(await IOUtils.read(path)).buffer;
+			}
+
+			let t = new Date();
+			try {
+				var result = await this._query('createAnnotations', { packBuf: buf, fileBuf, ...options },
+					[buf, fileBuf].filter(Boolean));
+			}
+			catch (e) {
+				this._throwWorkerError('createAnnotations', e, { ranges: options.ranges });
+			}
+			Zotero.debug(`Annotated a selection in item ${attachment.libraryKey} in ${new Date() - t} ms`);
 			return result;
 		}, !!isPriority);
 	}

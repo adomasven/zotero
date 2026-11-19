@@ -112,6 +112,9 @@ pref("extensions.zotero.search.quicksearch-mode", "fields");
 // Fulltext indexing
 pref("extensions.zotero.fulltext.textMaxLength", 500000);
 pref("extensions.zotero.fulltext.pdfMaxPages", 100);
+// Extract the structured text of every PDF, EPUB and snapshot ahead of
+// anything asking for it (see Zotero.SDT.AutoIndex)
+pref("extensions.zotero.sdt.autoExtract", false);
 pref("extensions.zotero.search.useLeftBound", true);
 
 // Notes

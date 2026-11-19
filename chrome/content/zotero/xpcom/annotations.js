@@ -344,6 +344,59 @@ Zotero.Annotations = new function () {
 	};
 
 	/**
+	 * Create a highlight or underline over content ranges of an attachment's
+	 * structured text: one annotation per page of a PDF, per section of an
+	 * EPUB, one for a snapshot
+	 *
+	 * @param {Integer} itemID
+	 * @param {Array[]} ranges - [start, end] pairs of points [...ref, offset]
+	 *     into the structure's text nodes, in text order
+	 * @param {Object} [options]
+	 * @param {String} [options.type='highlight'] - 'highlight' or 'underline'
+	 * @param {String} [options.color] - Hex; the reader's default when omitted
+	 * @returns {Promise<Object>} - { ok: true, items }, or { ok: false, reason }:
+	 *     getPack()'s reasons, 'unsupported', 'unresolved' or 'failed'
+	 */
+	this.createFromRanges = async function (itemID, ranges, { type = 'highlight', color } = {}) {
+		let item = await Zotero.Items.getAsync(itemID);
+		if (!item || !(item.isPDFAttachment() || item.isEPUBAttachment() || item.isSnapshotAttachment())) {
+			return { ok: false, reason: 'unsupported' };
+		}
+		let result = await Zotero.SDT.getPack(itemID, { isPriority: true });
+		if (!result.ok) {
+			return { ok: false, reason: result.reason };
+		}
+		let made;
+		try {
+			made = await Zotero.PDFWorker.createAnnotations(itemID, result.bytes, {
+				ranges,
+				type,
+				color: color || this.DEFAULT_COLOR,
+				isPriority: true,
+			});
+		}
+		catch {
+			// Logged by the worker manager
+			return { ok: false, reason: 'failed' };
+		}
+		if (!made?.annotations.length) {
+			return { ok: false, reason: 'unresolved' };
+		}
+		let items = [];
+		let notifierQueue = new Zotero.Notifier.Queue();
+		try {
+			for (let annotation of made.annotations) {
+				annotation.key = Zotero.DataObjectUtilities.generateKey();
+				items.push(await this.saveFromJSON(item, annotation, { notifierQueue }));
+			}
+		}
+		finally {
+			await Zotero.Notifier.commit(notifierQueue);
+		}
+		return { ok: true, items };
+	};
+
+	/**
 	 * Return the distinct authors of annotations in a library, for the Annotation Author
 	 * search condition's value menu
 	 *

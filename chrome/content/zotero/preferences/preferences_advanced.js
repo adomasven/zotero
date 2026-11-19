@@ -53,6 +53,15 @@ Zotero_Preferences.Advanced = {
 		this.onDataDirLoad();
 
 		this.updateIndexStats();
+
+		// Background extraction of document structure
+		let sdtStatusListener = status => this.updateSDTStatusUI(status);
+		Zotero.SDT.AutoIndex.addListener(sdtStatusListener);
+		Zotero.SDT.AutoIndex.refreshStatus();
+		document.getElementById('zotero-prefpane-advanced').addEventListener('unload', () => {
+			Zotero.SDT.AutoIndex.removeListener(sdtStatusListener);
+		});
+
 		this.updateLocalAPIUI();
 		document.getElementById('zotero-prefpane-advanced-enable-local-api').addEventListener('synctopreference', () => {
 			this.updateLocalAPIUI();
@@ -378,6 +387,22 @@ Zotero_Preferences.Advanced = {
 		return false;
 	},
 	
+	updateSDTStatusUI: function ({ enabled, settled, total }) {
+		let row = document.getElementById('sdt-status-row');
+		row.hidden = total === null;
+		if (row.hidden) {
+			return;
+		}
+		let value = document.getElementById('sdt-status-value');
+		if (enabled) {
+			document.l10n.setAttributes(value, 'preferences-advanced-sdt-status-value', { settled, total });
+		}
+		else {
+			document.l10n.setAttributes(value, 'preferences-advanced-sdt-status-off');
+		}
+	},
+
+
 	updateIndexStats: async function () {
 		// Stop any pending refresh; we'll reschedule below if indexing is still in progress
 		if (this._indexStatsTimeoutID) {
