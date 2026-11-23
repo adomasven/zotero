@@ -339,6 +339,143 @@ describe("Zotero.Annotations", function() {
 		});
 	});
 
+	describe("#createFromRanges()", function () {
+		it("should annotate content ranges in a PDF's structured text", async function () {
+			// The structured text is extracted and the selection annotated
+			// in the document worker
+			this.timeout(120000);
+			let item = await importFileAttachment('test.pdf');
+			let cut = await Zotero.SDT.getItemChunks(item.id, { segments: true });
+			assert.isTrue(cut.ok, cut.reason);
+			let chunk = cut.chunks.find(chunk => chunk.text.includes('easy-to-use tool'));
+			assert.ok(chunk?.segments?.length);
+			// Each segment: a stretch of the text from one node of one block
+			for (let segment of chunk.segments) {
+				assert.isAtMost(segment.end, chunk.text.length);
+				assert.isArray(segment.ref);
+				assert.equal(segment.blocks.at(-1).type, 'paragraph');
+			}
+			let phrase = 'easy-to-use tool';
+			let start = chunk.text.indexOf(phrase);
+			let ranges = Zotero.SDT.getContentRanges(chunk.segments, start, start + phrase.length);
+
+			let result = await Zotero.Annotations.createFromRanges(item.id, ranges);
+			assert.isTrue(result.ok, result.reason);
+			assert.lengthOf(result.items, 1);
+			let [annotation] = result.items;
+			assert.equal(annotation.parentID, item.id);
+			assert.equal(annotation.annotationType, 'highlight');
+			assert.equal(annotation.annotationText, phrase);
+			assert.equal(annotation.annotationColor, Zotero.Annotations.DEFAULT_COLOR);
+			assert.equal(annotation.annotationPageLabel, '1');
+			assert.match(annotation.annotationSortIndex, /^00000\|\d{6}\|\d{5}$/);
+			assert.isFalse(annotation.annotationIsExternal);
+			let position = JSON.parse(annotation.annotationPosition);
+			assert.equal(position.pageIndex, 0);
+			assert.isAtLeast(position.rects.length, 1);
+			assert.sameMembers(item.getAnnotations().map(x => x.id), [annotation.id]);
+
+			// A later one takes the type and color asked for
+			// The annotations alone, each with a new key, saving nothing
+			let made = await Zotero.Annotations.getFromRanges(item.id, ranges);
+			assert.isTrue(made.ok, made.reason);
+			assert.lengthOf(made.annotations, 1);
+			assert.notEqual(made.annotations[0].key, annotation.key);
+			assert.isFalse(!!Zotero.Items.getByLibraryAndKey(item.libraryID, made.annotations[0].key));
+
+			let again = await Zotero.Annotations.createFromRanges(item.id, ranges,
+				{ type: 'underline', color: '#ff6666' });
+			assert.isTrue(again.ok, again.reason);
+			assert.equal(again.items[0].annotationType, 'underline');
+			assert.equal(again.items[0].annotationColor, '#ff6666');
+			assert.equal(again.items[0].annotationPageLabel, '1');
+			assert.deepEqual(JSON.parse(again.items[0].annotationPosition), position);
+
+			// What can't be annotated is reported
+			assert.deepEqual(
+				await Zotero.Annotations.createFromRanges(item.id, [[[99, 0, 0], [99, 0, 3]]]),
+				{ ok: false, reason: 'unresolved' }
+			);
+			let image = await importFileAttachment('test.png');
+			assert.deepEqual(
+				await Zotero.Annotations.createFromRanges(image.id, ranges),
+				{ ok: false, reason: 'unsupported' }
+			);
+		});
+
+		// The selection over the chunk that spans the most blocks, from inside
+		// its first word to inside its last, with the text it covers
+		async function selectAcrossBlocks(item) {
+			let cut = await Zotero.SDT.getItemChunks(item.id, { segments: true });
+			assert.isTrue(cut.ok, cut.reason);
+			let blocks = chunk => new Set(chunk.segments.map(s => s.blocks.at(-1).ref.join())).size;
+			let chunk = cut.chunks.filter(chunk => chunk.anchor).sort((a, b) => blocks(b) - blocks(a))[0];
+			assert.isAbove(blocks(chunk), 1, 'The document must chunk across blocks');
+			let start = chunk.segments[0].start + 1;
+			let end = chunk.segments.at(-1).end - 1;
+			return { ranges: Zotero.SDT.getContentRanges(chunk.segments, start, end), text: chunk.text.slice(start, end) };
+		}
+
+		// The annotations made of a selection in an EPUB or snapshot: one
+		// per position the reader stores it as, each provisionally at the
+		// top of its section or document, with a zero offset for the reader
+		// to replace, together covering the selection
+		function checkProvisional(result, { text, type, sortIndex }) {
+			assert.isTrue(result.ok, result.reason);
+			assert.isAtLeast(result.items.length, 1);
+			for (let annotation of result.items) {
+				assert.equal(annotation.annotationType, type);
+				// No page label, dropped as empty when saved
+				assert.notOk(annotation.annotationPageLabel);
+				assert.equal(annotation.annotationSortIndex, sortIndex(JSON.parse(annotation.annotationPosition)));
+			}
+			let [head, tail] = [text.split('\n\n')[0], text.split('\n\n').at(-1)];
+			assert.isTrue(result.items[0].annotationText.startsWith(head), result.items[0].annotationText);
+			assert.isTrue(result.items.at(-1).annotationText.endsWith(tail), result.items.at(-1).annotationText);
+		}
+
+		it("should annotate a selection across blocks of an EPUB at the top of its section", async function () {
+			this.timeout(120000);
+			let item = await importFileAttachment('recognizeEPUB_test_content.epub');
+			let { ranges, text } = await selectAcrossBlocks(item);
+			assert.include(text, '\n\n');
+			let result = await Zotero.Annotations.createFromRanges(item.id, ranges);
+			checkProvisional(result, {
+				text, type: 'highlight',
+				// The section the CFI's base step counts to
+				sortIndex: (position) => {
+					assert.equal(position.type, 'FragmentSelector');
+					let [, step] = position.value.match(/^epubcfi\(\/\d+\/(\d+)!/);
+					return String(step / 2 - 1).padStart(5, '0') + '|00000000';
+				},
+			});
+		});
+
+		it("should annotate a selection across blocks of a snapshot at the top of the document", async function () {
+			this.timeout(120000);
+			let paragraphs = Array.from({ length: 6 }, (_, i) => `<p>Paragraph ${i + 1} of the page keeps owls, hawks and other birds of prey in view for the reader to annotate at length.</p>`);
+			let file = Zotero.getTempDirectory();
+			file.append('snapshot-' + Zotero.Utilities.randomString() + '.html');
+			await Zotero.File.putContentsAsync(file, `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Birds</title></head>
+				<body><article><h1>Birds of prey</h1>${paragraphs.join('\n')}</article></body></html>`);
+			let parent = await createDataObject('item');
+			let item = await Zotero.Attachments.importSnapshotFromFile({
+				title: 'Birds', url: 'http://example.com/birds', file, parentItemID: parent.id,
+				contentType: 'text/html', charset: 'utf-8'
+			});
+			let { ranges, text } = await selectAcrossBlocks(item);
+			assert.include(text, '\n\n');
+			let result = await Zotero.Annotations.createFromRanges(item.id, ranges, { type: 'underline' });
+			checkProvisional(result, {
+				text, type: 'underline',
+				sortIndex: (position) => {
+					assert.equal(position.type, 'TextPositionSelector');
+					return '0000000';
+				},
+			});
+		});
+	});
+
 	describe("#splitAnnotations()", function () {
 		it("should split a highlight annotation", async function () {
 			await Zotero.Items.erase(attachment.getAnnotations().map(x => x.id));

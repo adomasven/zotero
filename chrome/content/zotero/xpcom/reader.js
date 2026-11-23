@@ -178,6 +178,118 @@ class ReaderInstance {
 		return null;
 	}
 
+	/**
+	 * Of positions in an EPUB or a snapshot, given in the file's order, the last that starts
+	 * at or before the start of what the view the user last used shows, or else the first
+	 *
+	 * @param {Array<Object|null>} positions - Reader positions: an EPUB's CFIs, or a
+	 *     snapshot's text positions and CSS selectors. Others are passed over.
+	 * @returns {Integer|null} - Its index, or null for a PDF or without a view
+	 */
+	getPositionIndexInView(positions) {
+		let internalReader = this._internalReader;
+		// Not a Reading Mode view over it, which keeps it in step
+		let view = internalReader?._lastViewPrimary === false
+			? internalReader._secondaryView
+			: internalReader?._primaryView;
+		if (!view) {
+			return null;
+		}
+		if (this._type === 'epub') {
+			return this._getEPUBPositionIndexInView(view, positions);
+		}
+		if (this._type === 'snapshot') {
+			return this._getSnapshotPositionIndexInView(view, positions);
+		}
+		return null;
+	}
+
+	/**
+	 * The last position to start at or before where the text in view starts, by the
+	 * reader's comparison of CFIs, or else the first, as on a cover, which has no text
+	 *
+	 * @param {Object} view - The reader's EPUB view
+	 * @param {Array<Object|null>} positions
+	 * @returns {Integer}
+	 */
+	_getEPUBPositionIndexInView(view, positions) {
+		let startCFI = view.flow.startCFI;
+		let found = 0;
+		if (!startCFI) {
+			return found;
+		}
+		// As a string, as the CFI object the flow builds from a range has no spine position,
+		// which compare() goes by first
+		let start = startCFI.toString();
+		for (let [index, position] of positions.entries()) {
+			if (position?.type != 'FragmentSelector') {
+				continue;
+			}
+			if (startCFI.compare(position.value, start) > 0) {
+				break;
+			}
+			found = index;
+		}
+		return found;
+	}
+
+	/**
+	 * The last position to start above the top of the view, or else the first. Where each
+	 * starts is found in the page, so text that stays in view, such as a sticky header or
+	 * table of contents, doesn't count.
+	 *
+	 * @param {Object} view - The reader's snapshot view
+	 * @param {Array<Object|null>} positions - A character offset into the text of the page's
+	 *     text nodes, as the reader counts it, or an element
+	 * @returns {Integer}
+	 */
+	_getSnapshotPositionIndexInView(view, positions) {
+		let doc = view._iframeWindow.document;
+		// Where each position is shown, relative to the top of the view
+		let tops = [];
+		let topOf = rect => (rect.width || rect.height ? rect.top : undefined);
+		let offsets = [];
+		positions.forEach((position, index) => {
+			if (position?.type == 'TextPositionSelector') {
+				offsets.push({ offset: position.start, index });
+			}
+			else if (position?.type == 'CssSelector') {
+				try {
+					let element = doc.body.querySelector(position.value);
+					tops[index] = element ? topOf(element.getBoundingClientRect()) : undefined;
+				}
+				catch {}
+			}
+		});
+		offsets.sort((a, b) => a.offset - b.offset);
+		let iterator = doc.createNodeIterator(doc.body, doc.defaultView.NodeFilter.SHOW_TEXT);
+		let charCount = 0;
+		let next = 0;
+		let node;
+		while (next < offsets.length && (node = iterator.nextNode())) {
+			let length = node.nodeValue.length;
+			for (; next < offsets.length && offsets[next].offset < charCount + length; next++) {
+				let offset = Math.max(0, offsets[next].offset - charCount);
+				let range = doc.createRange();
+				range.setStart(node, offset);
+				range.setEnd(node, Math.min(length, offset + 1));
+				tops[offsets[next].index] = topOf(range.getBoundingClientRect());
+			}
+			charCount += length;
+		}
+		let found = 0;
+		for (let index = 0; index < positions.length; index++) {
+			if (tops[index] === undefined) {
+				continue;
+			}
+			if (tops[index] > 0) {
+				break;
+			}
+			found = index;
+		}
+		return found;
+	}
+
 	async migrateMendeleyColors(libraryID, annotations) {
 		let colorMap = new Map();
 		colorMap.set('#fff5ad', '#ffd400');

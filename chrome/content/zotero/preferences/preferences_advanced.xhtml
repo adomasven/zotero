@@ -261,6 +261,17 @@
 				<html:input id="fulltext-pdfMaxPages" type="text" size="5" preference="extensions.zotero.fulltext.pdfMaxPages"/>
 				<html:label>(&zotero.preferences.default; 100)</html:label>
 			</hbox>
+
+			<separator class="thin"/>
+
+			<checkbox id="sdt-auto-extract" native="true"
+				data-l10n-id="preferences-advanced-sdt-auto-extract"
+				preference="extensions.zotero.sdt.autoExtract"/>
+			<description data-l10n-id="preferences-advanced-sdt-auto-extract-description"/>
+			<hbox id="sdt-status-row" align="center" hidden="true">
+				<label data-l10n-id="preferences-advanced-sdt-status"/>
+				<label id="sdt-status-value"/>
+			</hbox>
 		</groupbox>
 		
 		<groupbox id="fulltext-stats" tabindex="0" aria-label="&zotero.preferences.search.indexStats;" aria-describedby="fulltext-stats-grid">

@@ -38,15 +38,25 @@ Zotero.SDT = new function () {
 	let _moduleErrorLogged = false;
 	let _documentWorkerMetadata = null;
 	let _documentWorkerMetadataErrorLogged = false;
+	let _sentenceSegmenter = null;
+	// Blocks whose text is one sentence, as cited
+	const WHOLE_BLOCK_TYPES = new Set(['preformatted', 'math']);
+	// The chunks of the last attachments cut, by item ID, with the pack they
+	// were cut from, least recently used first
+	const MAX_KEPT_CUTS = 3;
+	let _cuts = new Map();
 
-	// Load the bundled SDT module lazily, so that a missing or broken
-	// resource degrades to an 'unavailable' result instead of breaking
-	// Zotero startup. Load failures aren't cached, so a load is retried
-	// on the next call (require() itself caches successful loads)
+	// Load the bundled SDT modules (pack reader and chunker) lazily, so that a
+	// missing or broken resource degrades to an 'unavailable' result instead
+	// of breaking Zotero startup. Load failures aren't cached, so a load is
+	// retried on the next call (require() itself caches successful loads)
 	function _getModule() {
 		if (!_module) {
 			try {
-				_module = require('resource://zotero/document-worker/structured-document-text.js');
+				_module = {
+					...require('resource://zotero/document-worker/structured-document-text.js'),
+					...require('resource://zotero/document-worker/structured-document-text-chunker.js')
+				};
 			}
 			catch (e) {
 				if (!_moduleErrorLogged) {
@@ -72,11 +82,13 @@ Zotero.SDT = new function () {
 	 * @param {Object} [options]
 	 * @param {Boolean} [options.isPriority] - Put a needed extraction at the
 	 *     front of the worker queue (for user-initiated requests)
+	 * @param {Boolean} [options.cachedOnly] - Return 'not-cached' rather than
+	 *     extract the document
 	 * @param {Function} [options.onProgress] - Called with SDT generation
 	 *     progress from 0 to 100 when generation is needed
 	 * @returns {Promise<Object>} { ok: true, bytes: ArrayBuffer, packVersion,
-	 *     schemaMajorVersion }, or { ok: false, reason: 'unavailable' |
-	 *     'password-required' | 'failed' }
+	 *     schemaMajorVersion, sourceHash, processorVersion }, or { ok: false,
+	 *     reason: 'unavailable' | 'password-required' | 'not-cached' | 'failed' }
 	 */
 	this.getPack = async function (itemID, options = {}) {
 		try {
@@ -93,6 +105,10 @@ Zotero.SDT = new function () {
 					_generate(context, {}).catch(e => Zotero.logError(e));
 				}
 				return _makeResult(cache);
+			}
+			// Extraction takes seconds, which some callers won't wait for
+			if (options.cachedOnly) {
+				return { ok: false, reason: 'not-cached' };
 			}
 			return await _generate(context, options);
 		}
@@ -152,6 +168,397 @@ Zotero.SDT = new function () {
 		return _openPack(new Uint8Array(result.bytes));
 	};
 
+	/**
+	 * Whether the cached pack was made by the current extraction: the same
+	 * pack format, schema major version and processor. Reads only the pack's
+	 * header and metadata, not the attachment's file.
+	 *
+	 * @param {Integer} itemID
+	 * @returns {Promise<Boolean>} - False also when there's no readable pack
+	 */
+	this.isCurrent = async function (itemID) {
+		let item = await Zotero.Items.getAsync(itemID, { noCache: true });
+		let processorType = item && item.isAttachment() && _getProcessorType(item);
+		let expected = processorType && _getModule() && await _getDocumentWorkerMetadata();
+		if (!expected) {
+			return false;
+		}
+		let path = _getCachePath(item);
+		try {
+			let { size } = await IOUtils.stat(path);
+			let reader = await _getModule().openStructuredDocumentTextPack({
+				byteLength: size,
+				read: async (offset, length) => {
+					let bytes = await IOUtils.read(path, { offset, maxBytes: length });
+					return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+				}
+			}, { inflate: b => require('pako').inflateRaw(b) });
+			let { header } = reader;
+			let { processor } = await reader.getMetadata();
+			return header.packVersion === expected.SDT_PACK_VERSION
+				&& _getSchemaMajorVersion(header.schemaVersion)
+					=== _getSchemaMajorVersion(expected.SDT_SCHEMA_VERSION)
+				&& processor?.type === processorType
+				&& processor?.version === expected.SDT_PROCESSOR_VERSIONS[processorType];
+		}
+		catch {
+			// Missing, or not a pack this module can open
+			return false;
+		}
+	};
+
+	/**
+	 * Cut an attachment's structured text into chunks, in the document worker.
+	 * Each chunk has `position`, where the reader opens it. Recent cuts are
+	 * kept and shared, so chunks aren't to be changed.
+	 *
+	 * @param {Integer} itemID
+	 * @param {Object} [options] - isPriority, cachedOnly, onProgress
+	 * @param {Boolean} [options.segments] - Include each chunk's `segments`,
+	 *     its text's structure per text node
+	 * @returns {Promise<Object>} - { ok: true, chunks, contentHash }, or
+	 *     { ok: false, reason }
+	 */
+	this.getItemChunks = async function (itemID, { segments = false, ...options } = {}) {
+		let result = await this.getPack(itemID, options);
+		if (!result.ok) {
+			return { ok: false, reason: result.reason };
+		}
+		let pack = [result.sourceHash, result.processorVersion, result.bytes.byteLength].join('/');
+		let kept = _cuts.get(itemID);
+		if (kept?.pack === pack && (kept.segments || !segments)) {
+			// The most recently used last
+			_cuts.delete(itemID);
+			_cuts.set(itemID, kept);
+			return {
+				ok: true,
+				chunks: segments == kept.segments
+					? kept.chunks
+					: kept.chunks.map(({ segments: _segments, ...chunk }) => chunk),
+				contentHash: kept.contentHash,
+			};
+		}
+		let cut;
+		try {
+			cut = await Zotero.PDFWorker.getStructuredDocumentTextChunks(
+				result.bytes, { isPriority: options.isPriority, segments });
+		}
+		catch {
+			// Logged by the worker manager
+			return { ok: false, reason: 'cut-failed' };
+		}
+		// The worker and the bundled chunker come from the same build, so a
+		// mismatch is a build defect, not something to work around
+		let version = _getModule().CHUNKER_VERSION;
+		if (cut.chunkerVersion !== version) {
+			Zotero.logError(new Error(`Document worker chunker version ${cut.chunkerVersion} `
+				+ `doesn't match the bundled chunker's ${version}`));
+			return { ok: false, reason: 'cut-failed' };
+		}
+		let chunks = cut.chunks.map(_withFirstPosition);
+		_cuts.delete(itemID);
+		_cuts.set(itemID, { pack, segments, chunks, contentHash: cut.sourceHash });
+		if (_cuts.size > MAX_KEPT_CUTS) {
+			_cuts.delete(_cuts.keys().next().value);
+		}
+		return { ok: true, chunks, contentHash: cut.sourceHash };
+	};
+
+	/**
+	 * Read pages of a PDF's structured text, in the document worker
+	 *
+	 * @param {Integer} itemID
+	 * @param {Array<Integer|String>} pages - Page numbers, from 1, or page labels. A page
+	 *     without a label is labelled with its number.
+	 * @param {Object} [options] - isPriority, cachedOnly, onProgress
+	 * @returns {Promise<Object>} - { ok: true, pages, missing, totalPages }: `pages` in
+	 *     order, each { pageIndex, pageLabel, text, sections, segments, positions };
+	 *     `missing` the pages the PDF doesn't have. Or { ok: false, reason }.
+	 */
+	this.getPages = async function (itemID, pages, options = {}) {
+		let item = await Zotero.Items.getAsync(itemID);
+		if (!item?.isPDFAttachment()) {
+			return { ok: false, reason: 'unsupported' };
+		}
+		let result = await this.getPack(itemID, options);
+		if (!result.ok) {
+			return { ok: false, reason: result.reason };
+		}
+		// Before the bytes go to the worker
+		let { pages: pageInfos = [] } = await (await _openPack(new Uint8Array(result.bytes))).getCatalog();
+		let labelOf = i => pageInfos[i].label ?? String(i + 1);
+		let pageIndexes = new Set();
+		let missing = [];
+		for (let page of pages) {
+			let found = typeof page == 'number'
+				? (page >= 1 && page <= pageInfos.length ? [page - 1] : [])
+				: pageInfos.map((_, i) => i).filter(i => labelOf(i) === page);
+			if (!found.length) {
+				missing.push(page);
+			}
+			found.forEach(i => pageIndexes.add(i));
+		}
+		let indexes = [...pageIndexes].sort((a, b) => a - b);
+		if (!indexes.length) {
+			return { ok: true, pages: [], missing, totalPages: pageInfos.length };
+		}
+		// A page's whole area, or everything where the pack doesn't give it
+		let anchors = indexes.map(i => ({
+			pageRects: [[i, ...(pageInfos[i].viewRect || [-1e6, -1e6, 1e6, 1e6])]]
+		}));
+		let read;
+		try {
+			read = await Zotero.PDFWorker.readStructuredDocumentTextAnchors(
+				result.bytes, anchors, { isPriority: options.isPriority });
+		}
+		catch {
+			// Logged by the worker manager
+			return { ok: false, reason: 'failed' };
+		}
+		return {
+			ok: true,
+			pages: indexes.map((pageIndex, i) => ({
+				text: '',
+				sections: [],
+				segments: [],
+				positions: [],
+				...read.chunks[i],
+				pageIndex,
+				pageLabel: labelOf(pageIndex),
+			})),
+			missing,
+			totalPages: pageInfos.length,
+		};
+	};
+
+	/**
+	 * Cut text with no structure into chunks; blank lines separate paragraphs
+	 *
+	 * @param {String} text
+	 * @param {Object} [options] - The module's chunking options
+	 * @returns {Object[]}
+	 */
+	this.getPlainTextChunks = function (text, options = {}) {
+		return _getModule().getPlainTextChunks(text, options);
+	};
+
+	/**
+	 * The sections of a file's chunks as a tree
+	 *
+	 * @param {Object[]} chunks - All of the file's, in order
+	 * @returns {Object[]} - [{ title, chunks, children }]: `chunks` the [first, last] indexes
+	 *     of each run of chunks with the section's text; `title` null under no heading
+	 */
+	this.getOutline = function (chunks) {
+		return _getModule().getChunkOutline(chunks);
+	};
+
+	/**
+	 * A chunk's or a page's text as blocks, in text order, each with its sentences. A code
+	 * or math block is one sentence. A heading block marks where each later section starts,
+	 * unless the text has the heading. Text without segments is paragraphs.
+	 *
+	 * @param {Object} chunk
+	 * @returns {Object[]} - Each one of:
+	 *     - { type, start, end, within, ordered?, number?, sentences }: `within` the types
+	 *       of the enclosing blocks, `sentences` as [{ start, end, number }]
+	 *     - { type: 'heading', outlinePath }
+	 *     - { type: 'table', rows }: rows of cells { start, end, sentences }
+	 */
+	this.getChunkBlocks = function (chunk) {
+		if (!chunk.segments?.length) {
+			return _withSentences(chunk.text, _getParagraphs(chunk.text));
+		}
+		let blocks = [];
+		let starts = (chunk.sections || []).slice(1);
+		let last = null;
+		for (let segment of chunk.segments) {
+			let holder = segment.blocks.at(-1);
+			while (starts.length && starts[0].start <= segment.start) {
+				let { outlinePath, start } = starts.shift();
+				if (!(holder.type == 'heading' && segment.start == start)) {
+					blocks.push({ type: 'heading', outlinePath });
+					last = null;
+				}
+			}
+			let table = _addToTable(blocks, last, segment);
+			if (table) {
+				last = table;
+				continue;
+			}
+			let key = holder.ref.join('.');
+			// Same block, or the next part of a paragraph continued across
+			// pages, which the text joins without a blank line
+			if (last && !last.rows && (last.key == key
+					|| last.type == holder.type && !/\n/.test(chunk.text.slice(last.end, segment.start)))) {
+				last.end = segment.end;
+				continue;
+			}
+			last = { key, type: holder.type, start: segment.start, end: segment.end,
+				within: segment.blocks.slice(0, -1).map(block => block.type) };
+			if (holder.type == 'listitem') {
+				let list = segment.blocks.at(-2);
+				last.ordered = !!list?.ordered;
+				last.number = (list?.startIndex ?? 1) + holder.ref.at(-1);
+			}
+			blocks.push(last);
+		}
+		// Without the keys the blocks were put together by
+		return _withSentences(chunk.text, blocks.map(({ key: _key, tableKey: _tableKey, rows, ...block }) => (rows
+			? { ...block, rows: rows.map(row => row.cells.map(({ start, end }) => ({ start, end }))) }
+			: block)));
+	};
+
+	/**
+	 * A chunk's or a page's sentences, in number order
+	 *
+	 * @param {Object} chunk
+	 * @returns {Object[]} - [{ start, end, number }]
+	 */
+	this.getSentences = function (chunk) {
+		return this.getChunkBlocks(chunk).flatMap(block => (block.rows
+			? block.rows.flat().flatMap(cell => cell.sentences)
+			: block.sentences || []));
+	};
+
+	/**
+	 * The sentences of a stretch of text, trimmed, each as its extent in the text
+	 *
+	 * @param {String} text
+	 * @param {Object} [extent] - { start, end }; defaults to all of it
+	 * @returns {Object[]} - [{ start, end }]
+	 */
+	this.splitSentences = function (text, { start = 0, end = text.length } = {}) {
+		if (!_sentenceSegmenter) {
+			// Sentence rules don't vary by locale, but the default locale varies by machine
+			_sentenceSegmenter = new Intl.Segmenter('en', { granularity: 'sentence' });
+		}
+		let sentences = [];
+		for (let { segment, index } of _sentenceSegmenter.segment(text.slice(start, end))) {
+			let trimmed = segment.trim();
+			if (!trimmed) {
+				continue;
+			}
+			let sentenceStart = start + index + (segment.length - segment.trimStart().length);
+			sentences.push({ start: sentenceStart, end: sentenceStart + trimmed.length });
+		}
+		return sentences;
+	};
+
+	/**
+	 * The content ranges covering a stretch of a chunk's text: one [start,
+	 * end] pair of points [...ref, offset] per segment it overlaps
+	 *
+	 * @param {Object[]} segments - The chunk's `segments`
+	 * @param {Integer} start - Offset into the chunk's text
+	 * @param {Integer} end
+	 * @param {Object} [options]
+	 * @param {String[]} [options.skipBlocks] - Block types to leave out
+	 * @returns {Array[]}
+	 */
+	this.getContentRanges = function (segments, start, end, { skipBlocks = [] } = {}) {
+		let point = (segment, offset) => [...segment.ref, segment.offset + offset - segment.start];
+		return segments
+			.filter(segment => Math.max(start, segment.start) < Math.min(end, segment.end)
+				&& !segment.blocks.some(block => skipBlocks.includes(block.type)))
+			.map(segment => [point(segment, Math.max(start, segment.start)), point(segment, Math.min(end, segment.end))]);
+	};
+
+	/**
+	 * Find the reader positions of stretches of an attachment's structured
+	 * text, in the document worker
+	 *
+	 * @param {Integer} itemID
+	 * @param {Array[][]} selections - Content ranges per stretch
+	 * @param {Object} [options] - isPriority, cachedOnly, onProgress
+	 * @returns {Promise<Object>} - { ok: true, selections }, each { text,
+	 *     sections, pageLabel, positions } or null if unresolved; or
+	 *     { ok: false, reason }
+	 */
+	this.locateRanges = async function (itemID, selections, options = {}) {
+		let result = await this.getPack(itemID, options);
+		if (!result.ok) {
+			return { ok: false, reason: result.reason };
+		}
+		try {
+			return {
+				ok: true,
+				selections: await Zotero.PDFWorker.locateStructuredDocumentTextRanges(
+					result.bytes, selections, { isPriority: options.isPriority })
+			};
+		}
+		catch {
+			// Logged by the worker manager
+			return { ok: false, reason: 'failed' };
+		}
+	};
+
+	// Add a segment in a table cell to its table block, starting one unless `last` is it.
+	// Returns the table block, or null outside table cells.
+	function _addToTable(blocks, last, segment) {
+		let cell = segment.blocks.map(block => block.type).lastIndexOf('tablecell');
+		if (cell < 2) {
+			return null;
+		}
+		let [tableKey, rowKey, cellKey] = segment.blocks.slice(cell - 2, cell + 1)
+			.map(block => block.ref.join('.'));
+		let table = last;
+		if (table?.tableKey != tableKey) {
+			table = { type: 'table', tableKey, rows: [] };
+			blocks.push(table);
+		}
+		let row = table.rows.at(-1);
+		if (row?.key != rowKey) {
+			row = { key: rowKey, cells: [] };
+			table.rows.push(row);
+		}
+		let lastCell = row.cells.at(-1);
+		if (lastCell?.key == cellKey) {
+			lastCell.end = segment.end;
+		}
+		else {
+			row.cells.push({ key: cellKey, start: segment.start, end: segment.end });
+		}
+		return table;
+	}
+
+	// Give blocks their sentences, numbered from 1. Headings have none.
+	function _withSentences(text, blocks) {
+		let number = 0;
+		let numbered = extents => extents.map(extent => ({ ...extent, number: ++number }));
+		for (let block of blocks) {
+			if (block.rows) {
+				block.rows.flat().forEach(cell => cell.sentences = numbered(Zotero.SDT.splitSentences(text, cell)));
+			}
+			else if (WHOLE_BLOCK_TYPES.has(block.type)) {
+				block.sentences = numbered([{ start: block.start, end: block.end }]);
+			}
+			else if (block.type != 'heading') {
+				block.sentences = numbered(Zotero.SDT.splitSentences(text, block));
+			}
+		}
+		return blocks;
+	}
+
+	// The paragraphs of text without structure, which blank lines separate, as blocks
+	function _getParagraphs(text) {
+		let blocks = [];
+		let re = /\n\s*\n/g;
+		let start = 0;
+		let match;
+		while ((match = re.exec(text))) {
+			blocks.push({ type: 'paragraph', start, end: match.index });
+			start = match.index + match[0].length;
+		}
+		blocks.push({ type: 'paragraph', start, end: text.length });
+		return blocks.filter(block => block.end > block.start);
+	}
+
+	// A chunk with only its first position, where the reader opens it
+	function _withFirstPosition({ positions, ...chunk }) {
+		return { ...chunk, position: positions?.[0] || null };
+	}
+
 	async function _readValidCache({ sourceHash, cachePath, processorType }, options) {
 		let bytes;
 		try {
@@ -202,20 +609,22 @@ Zotero.SDT = new function () {
 						&& _isPositiveInteger(metadata.processor?.version))) {
 				return { ok: false, reason: 'stale-processor' };
 			}
-			return { ok: true, bytes, header, staleProcessorVersion };
+			return { ok: true, bytes, header, metadata, staleProcessorVersion };
 		}
 		catch (e) {
 			return { ok: false, reason: 'invalid-cache', error: e };
 		}
 	}
 
-	function _makeResult({ bytes, header }) {
+	function _makeResult({ bytes, header, metadata }) {
 		return {
 			ok: true,
 			// IOUtils.read() and the worker both produce exactly-sized buffers
 			bytes: bytes.buffer,
 			packVersion: header.packVersion,
 			schemaMajorVersion: _getSchemaMajorVersion(header.schemaVersion),
+			sourceHash: metadata.source.hash,
+			processorVersion: metadata.processor.version,
 		};
 	}
 
@@ -378,8 +787,9 @@ Zotero.SDT = new function () {
 	}
 
 	async function _getAttachmentContext(itemID) {
-		// getAsync() returns false, not null, for a nonexistent item
-		let item = await Zotero.Items.getAsync(itemID);
+		// getAsync() returns false, not null, for a nonexistent item. The item
+		// is only read, so it isn't added to the cache.
+		let item = await Zotero.Items.getAsync(itemID, { noCache: true });
 		if (!item || !item.isAttachment()) {
 			return { ok: false, reason: 'unavailable' };
 		}
@@ -463,5 +873,229 @@ Zotero.SDT = new function () {
 		// to the user. (PDFWorker restores the error name from the worker
 		// error JSON.)
 		return e?.name === 'PasswordException';
+	}
+};
+
+/**
+ * Zotero.SDT.AutoIndex -- extract eligible attachments' structured text in
+ * the background while the sdt.autoExtract pref is on
+ */
+Zotero.SDT.AutoIndex = new function () {
+	// Debounce before a sweep starts, so a burst of saved attachments (an
+	// import, a sync) is taken in one
+	const KICK_DELAY = 3000;
+	// Before the first sweep of a session, out of the way of startup
+	const STARTUP_DELAY = 10000;
+	// While a sweep runs, how often listeners hear of its progress
+	const NOTIFY_INTERVAL = 500;
+
+	let _initialized = false;
+	let _sweeping = null;
+	let _kicked = false;
+	let _kickTimer = null;
+	// Attachments done this session, extracted or not, until they're saved again
+	let _settled = new Set();
+	// Eligible attachments as the last count found them, null before one
+	let _total = null;
+	let _listeners = new Set();
+	let _notifiedAt = 0;
+
+	/**
+	 * Sweep at startup, and after attachments are saved or a sync finishes
+	 */
+	this.init = function () {
+		if (_initialized) {
+			return;
+		}
+		_initialized = true;
+		Zotero.Prefs.registerObserver('sdt.autoExtract', () => {
+			_notify();
+			this.kick();
+		});
+		Zotero.Notifier.registerObserver({
+			notify: (event, type, ids) => {
+				if (type == 'sync') {
+					if (event == 'finish') {
+						this.kick();
+					}
+					return;
+				}
+				if (event == 'add' || event == 'modify') {
+					// A saved attachment may have a new file, or its first
+					for (let id of ids) {
+						_settled.delete(id);
+					}
+					this.kick();
+				}
+			}
+		}, ['item', 'sync'], 'sdtAutoIndex');
+		this.kick(STARTUP_DELAY);
+	};
+
+	/**
+	 * @return {Boolean}
+	 */
+	this.isEnabled = function () {
+		return !!Zotero.Prefs.get('sdt.autoExtract');
+	};
+
+	/**
+	 * Sweep after a delay, so a burst of kicks makes one sweep
+	 *
+	 * @param {Number} [delay=KICK_DELAY] - Milliseconds
+	 */
+	this.kick = function (delay = KICK_DELAY) {
+		if (!this.isEnabled()) {
+			return;
+		}
+		if (_kickTimer) {
+			clearTimeout(_kickTimer);
+		}
+		_kickTimer = setTimeout(() => {
+			_kickTimer = null;
+			this.sweep();
+		}, delay);
+	};
+
+	/**
+	 * @return {Object} - { enabled, sweeping, settled, total }, `total` null
+	 *     until counted
+	 */
+	this.getStatus = function () {
+		return {
+			enabled: this.isEnabled(),
+			sweeping: !!_sweeping,
+			settled: _settled.size,
+			total: _total
+		};
+	};
+
+	/**
+	 * Count the eligible attachments if not yet counted, and notify listeners
+	 *
+	 * @return {Promise<Object>} - The status
+	 */
+	this.refreshStatus = async function () {
+		if (_total === null) {
+			_total = (await _getEligibleIDs()).length;
+		}
+		_notify();
+		return this.getStatus();
+	};
+
+	/**
+	 * @param {Function} fn - Called with the status as a sweep progresses
+	 */
+	this.addListener = function (fn) {
+		_listeners.add(fn);
+	};
+
+	this.removeListener = function (fn) {
+		_listeners.delete(fn);
+	};
+
+	/**
+	 * Sweep now, including attachments already done this session
+	 *
+	 * @return {Promise}
+	 */
+	this.restart = function () {
+		_settled.clear();
+		_notify();
+		if (_kickTimer) {
+			clearTimeout(_kickTimer);
+			_kickTimer = null;
+		}
+		return this.sweep();
+	};
+
+	/**
+	 * Sweep now, extracting attachments with no current pack, or join the
+	 * sweep already running
+	 *
+	 * @return {Promise}
+	 */
+	this.sweep = function () {
+		if (_sweeping) {
+			_kicked = true;
+			return _sweeping;
+		}
+		_sweeping = _sweep()
+			.catch(e => Zotero.logError(e))
+			.finally(() => {
+				_sweeping = null;
+				_notify();
+				if (_kicked) {
+					_kicked = false;
+					this.kick();
+				}
+			});
+		return _sweeping;
+	};
+
+	// PDFs and EPUBs with a file and imported snapshots, in user and group
+	// libraries
+	async function _getEligibleIDs() {
+		let libraryIDs = Zotero.Libraries.getAll()
+			.filter(library => ['user', 'group'].includes(library.libraryType))
+			.map(library => library.libraryID);
+		return Zotero.DB.columnQueryAsync(
+			"SELECT itemID FROM itemAttachments IA JOIN items I USING (itemID) "
+				+ "WHERE ((IA.contentType IN ('application/pdf', 'application/epub+zip') "
+					+ "AND IA.linkMode!=" + Zotero.Attachments.LINK_MODE_LINKED_URL + ") "
+					+ "OR (IA.contentType='text/html' "
+						+ "AND IA.linkMode=" + Zotero.Attachments.LINK_MODE_IMPORTED_URL + ")) "
+				+ "AND I.libraryID IN (" + (libraryIDs.join(',') || 'NULL') + ") "
+				+ "ORDER BY I.itemID"
+		);
+	}
+
+	function _notify() {
+		_notifiedAt = Date.now();
+		let status = Zotero.SDT.AutoIndex.getStatus();
+		for (let fn of _listeners) {
+			try {
+				fn(status);
+			}
+			catch (e) {
+				Zotero.logError(e);
+			}
+		}
+	}
+
+	async function _sweep() {
+		let started = Date.now();
+		let extracted = 0;
+		let eligibleIDs = await _getEligibleIDs();
+		// Attachments gone since, or no longer eligible, don't count
+		let eligible = new Set(eligibleIDs);
+		_settled = new Set([..._settled].filter(id => eligible.has(id)));
+		_total = eligibleIDs.length;
+		_notify();
+		for (let itemID of eligibleIDs) {
+			if (!Zotero.SDT.AutoIndex.isEnabled()) {
+				break;
+			}
+			if (_settled.has(itemID)) {
+				continue;
+			}
+			// Reads only the pack's header, so an extracted library is cheap
+			// to go over
+			if (!await Zotero.SDT.isCurrent(itemID)) {
+				// Done whatever the outcome, until the attachment is saved again
+				if (await Zotero.SDT.ensure(itemID)) {
+					extracted++;
+				}
+			}
+			_settled.add(itemID);
+			if (Date.now() - _notifiedAt >= NOTIFY_INTERVAL) {
+				_notify();
+			}
+		}
+		if (extracted) {
+			Zotero.debug(`SDT: sweep extracted ${extracted} `
+				+ Zotero.Utilities.pluralize(extracted, 'attachment')
+				+ ` in ${Math.round((Date.now() - started) / 1000)} s`);
+		}
 	}
 };

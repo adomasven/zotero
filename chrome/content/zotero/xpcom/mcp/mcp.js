@@ -260,6 +260,30 @@ Zotero.MCP = new function () {
 	 * the model as is.
 	 */
 	this.ToolError = class extends Error {};
+
+	// What untilDeadline() gives when the deadline comes first
+	this.TIMED_OUT = Symbol('timedOut');
+
+	/**
+	 * The promise's value, or TIMED_OUT if the deadline comes first. The work goes on, and an
+	 * error after the deadline is logged.
+	 *
+	 * @param {Number} deadline - Date.now() time to stop waiting at
+	 */
+	this.untilDeadline = async function (promise, deadline) {
+		let timedOut = false;
+		promise.catch((e) => {
+			if (timedOut) {
+				Zotero.logError(e);
+			}
+		});
+		let result = await Promise.race([
+			promise,
+			Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => Zotero.MCP.TIMED_OUT),
+		]);
+		timedOut = result === Zotero.MCP.TIMED_OUT;
+		return result;
+	};
 	
 	/**
 	 * @param {String} text

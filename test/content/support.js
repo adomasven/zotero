@@ -1517,6 +1517,45 @@ async function postMCP(body, headers = {}) {
 	return { status: xmlhttp.status, body: xmlhttp.response };
 }
 
+/**
+ * A chunk of structured text as Zotero.SDT.getItemChunks() gives it with segments: blocks
+ * separated by blank lines, each one text node
+ *
+ * @param {Array} blocks - Each a block's text, or [type, text]
+ * @param {Object} [options]
+ * @param {Array[]} [options.sections] - [the section's headings, written 'Outer > Inner',
+ *     the text it starts at] pairs; the first starts the chunk
+ * @return {Object}
+ */
+function makeTestChunk(blocks, { sections = [['', null]], ...fields } = {}) {
+	let text = '';
+	let segments = [];
+	blocks.forEach((block, i) => {
+		let [type, blockText] = Array.isArray(block) ? block : ['paragraph', block];
+		if (text) {
+			text += '\n\n';
+		}
+		segments.push({
+			start: text.length,
+			end: text.length + blockText.length,
+			ref: [i, 0],
+			offset: 0,
+			blocks: [{ type, ref: [i] }],
+		});
+		text += blockText;
+	});
+	let toPath = headings => (headings ? headings.split(' > ') : []);
+	return {
+		text,
+		sections: sections.map(([headings, at], i) => ({ outlinePath: toPath(headings), start: i ? text.indexOf(at) : 0 })),
+		pageLabel: null,
+		position: null,
+		reference: false,
+		segments,
+		...fields,
+	};
+}
+
 async function callMCPTool(name, args, clientInfo = { name: 'test-client', version: '1.0' }) {
 	let _meta = {
 		'io.modelcontextprotocol/protocolVersion': '2026-07-28',

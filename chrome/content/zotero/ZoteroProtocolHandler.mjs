@@ -816,7 +816,7 @@ export function ZoteroProtocolHandler() {
 			
 			Zotero.API.parseParams(params);
 			var results = await Zotero.API.getResultsFromParams(params);
-			var { annotation, page, cfi, sel } = params;
+			var { annotation, page, rect, cfi, sel, start, end } = params;
 			
 			if (!results.length) {
 				Zotero.warn(`No item found for ${uriPath}`);
@@ -844,19 +844,42 @@ export function ZoteroProtocolHandler() {
 			if (annotation) {
 				location.annotationID = annotation;
 			}
-			
-			if (cfi) {
+
+			// A rectangle on the page: x1,y1,x2,y2 in PDF points
+			let rectValues = page && rect ? decodeURIComponent(rect).split(',').map(Number) : [];
+			if (rectValues.length == 4 && rectValues.every(Number.isFinite)) {
+				location.position = {
+					pageIndex: parseInt(page) - 1,
+					rects: [rectValues]
+				};
+			}
+			else if (cfi) {
 				location.position = {
 					type: 'FragmentSelector',
 					conformsTo: 'http://www.idpf.org/epub/linking/cfi/epub-cfi.html',
 					value: decodeURIComponent(cfi)
 				};
 			}
-			else if (sel) {
-				location.position = {
-					type: 'CssSelector',
-					value: decodeURIComponent(sel)
-				};
+			else {
+				// A range of text, by character offsets
+				let [rangeStart, rangeEnd] = [start, end].map(value => parseInt(value));
+				let textRange = rangeStart >= 0 && rangeEnd > rangeStart
+					? { type: 'TextPositionSelector', start: rangeStart, end: rangeEnd }
+					: null;
+				if (sel) {
+					location.position = {
+						type: 'CssSelector',
+						value: decodeURIComponent(sel)
+					};
+					// Of the element's text
+					if (textRange) {
+						location.position.refinedBy = textRange;
+					}
+				}
+				// Of all of a snapshot's text
+				else if (textRange) {
+					location.position = textRange;
+				}
 			}
 			
 			// Don't pass empty location

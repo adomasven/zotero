@@ -751,6 +751,8 @@ const { CommandLineOptions } = ChromeUtils.importESModule("chrome://zotero/conte
 			Zotero.MCP.init().catch(e => Zotero.logError(e));
 			
 			await Zotero.Fulltext.init();
+			// Extracts document structure in the background while its pref is on
+			Zotero.SDT.AutoIndex.init();
 			
 			Zotero.Notifier.registerObserver(Zotero.Tags, 'setting', 'tags');
 			

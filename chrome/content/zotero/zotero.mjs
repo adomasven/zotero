@@ -141,6 +141,7 @@ const xpcomFilesLocal = [
 	'mcp/jsonc',
 	'mcp/apps',
 	'mcp/appConfig',
+	'mcp/text',
 	'mcp/tools',
 	'mcp/server',
 	'session',

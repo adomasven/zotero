@@ -218,53 +218,114 @@ describe("MCP tools", function () {
 		}
 	}
 	
-	function stubStructure(catalog) {
-		return sinon.stub(Zotero.SDT, 'getReader').resolves({ getCatalog: async () => catalog });
+	/**
+	 * Text zotero_read_text gives, without its sentence IDs
+	 */
+	function withoutIDs(text) {
+		return text.replace(/\[[cp]\d+\.\d+\] ?/g, '');
 	}
-	
+
 	let randomWord = () => Zotero.Utilities.randomString(12, 'abcdefghijklmnopqrstuvwxyz');
 	
 	describe("zotero_search_fulltext", function () {
-		it("should return passages by page, with every term's passages first and the original text", async function () {
+		beforeEach(function () {
+			// No structure, so files are cut from their full text
+			sinon.stub(Zotero.SDT, 'getPack').resolves({ ok: false, reason: 'unavailable' });
+		});
+
+		afterEach(function () {
+			Zotero.MCP.Text._structureWait = 15 * 1000;
+		});
+
+		it("should return the chunks with the most terms first, with the passage around their matches", async function () {
 			let word = randomWord();
 			let item = await createArticle();
 			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
-			await setText(attachment, [
+			let texts = [
 				`Introduction about ${word} cycles.`,
 				`Here Sôil–organic matter and ${word} interact.`,
+				`A. Author. Soil organic ${word}.`,
 				`Only soil here, and organic elsewhere, with ${word}.`,
-			]);
+			];
+			await setText(attachment, texts);
+			let onPage = pageIndex => ({ pageLabel: String(pageIndex), position: { pageIndex, rects: [] } });
+			sinon.stub(Zotero.SDT, 'getItemChunks').resolves({
+				ok: true,
+				chunks: [
+					makeTestChunk([texts[0]], { sections: [['Intro', null]], ...onPage(0) }),
+					makeTestChunk([texts[1]], { sections: [['Results', null]], ...onPage(1) }),
+					makeTestChunk([texts[2]], { sections: [['References', null]], reference: true, ...onPage(2) }),
+					makeTestChunk([texts[3]], { sections: [['Discussion', null]], ...onPage(3) }),
+				],
+			});
 			// Has the word but not the phrase
 			let other = await importFileAttachment('test.pdf');
 			await setText(other, [`Just ${word}.`]);
-			stubStructure({ pages: [{ label: 'i' }, { label: '1' }, { label: '2' }] });
-			
+
 			let { total, results } = await call('zotero_search_fulltext', { query: `${word} "soil organic"` });
 			assert.equal(total, 1);
 			assert.equal(results[0].key, attachment.key);
 			assert.equal(results[0].parentKey, item.key);
 			assert.equal(results[0].title, item.getField('title'));
-			assert.equal(results[0].matchCount, 4);
+			assert.equal(results[0].matchCount, 6);
+			// Both terms first, the reference list after the other chunk with both, then in order
 			assert.deepEqual(results[0].passages, [
 				{
+					chunk: 1,
+					section: 'Results',
 					page: 2,
 					pageLabel: '1',
-					text: `Here Sôil–organic matter and ${word} interact.`,
+					terms: [word, 'soil organic'],
+					text: texts[1],
 					link: `zotero://open/library/items/${attachment.key}?page=2`,
 				},
 				{
-					page: 1,
-					pageLabel: 'i',
-					text: `Introduction about ${word} cycles.`,
-					link: `zotero://open/library/items/${attachment.key}?page=1`,
-				},
-				{
+					chunk: 2,
+					section: 'References',
 					page: 3,
 					pageLabel: '2',
-					text: `Only soil here, and organic elsewhere, with ${word}.`,
+					terms: [word, 'soil organic'],
+					text: texts[2],
 					link: `zotero://open/library/items/${attachment.key}?page=3`,
 				},
+				{
+					chunk: 0,
+					section: 'Intro',
+					page: 1,
+					pageLabel: '0',
+					terms: [word],
+					text: texts[0],
+					link: `zotero://open/library/items/${attachment.key}?page=1`,
+				},
 			]);
+		});
+
+		it("should list a file whose chunks don't have the terms", async function () {
+			let word = randomWord();
+			let attachment = await importFileAttachment('test.pdf');
+			await setText(attachment, [`Indexed ${word}.`]);
+			// The structure's text differs from the index's
+			sinon.stub(Zotero.SDT, 'getItemChunks').resolves({ ok: true, chunks: [makeTestChunk(['Other text.'])] });
+
+			let { results } = await call('zotero_search_fulltext', { query: word });
+			assert.deepEqual(results.map(file => [file.key, file.matchCount, file.passages]), [[attachment.key, 0, []]]);
+		});
+
+		it("should search a file's plain text while its structure is worked out", async function () {
+			let word = randomWord();
+			let attachment = await importFileAttachment('test.pdf');
+			await setText(attachment, [`About ${word}.`]);
+			Zotero.MCP.Text._structureWait = 200;
+			sinon.stub(Zotero.SDT, 'getItemChunks').returns(new Promise(() => {}));
+
+			let { results, notice } = await call('zotero_search_fulltext', { query: word });
+			assert.deepEqual(results[0].passages, [{
+				chunk: 0,
+				terms: [word],
+				text: `About ${word}.`,
+				link: `zotero://open/library/items/${attachment.key}`,
+			}]);
+			assert.match(notice, /still working out the structure of some files/);
 		});
 		
 		it("should cut long text into passages between words", async function () {
@@ -300,6 +361,7 @@ describe("MCP tools", function () {
 	
 	describe("zotero_search_fulltext when indexing is slow", function () {
 		it("should list files whose text isn't ready by the deadline", async function () {
+			sinon.stub(Zotero.SDT, 'getPack').resolves({ ok: false, reason: 'unavailable' });
 			let attachment = await importFileAttachment('test.pdf');
 			await setText(attachment, ['Some text']);
 			// In the index, but its text has to be extracted again
@@ -322,64 +384,54 @@ describe("MCP tools", function () {
 		});
 		
 		afterEach(function () {
-			Zotero.MCP.Tools._structureWait = 15 * 1000;
+			Zotero.MCP.Text._structureWait = 15 * 1000;
 		});
 		
-		it("should read a PDF by page, up to about maxChars, with labels and the outline", async function () {
+		it("should read a file without sections as chunks of its plain text", async function () {
 			let item = await createArticle();
 			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
-			let pages = ['a', 'b', 'c'].map(letter => `${letter} `.repeat(300).trim());
-			await setText(attachment, pages);
-			stubStructure({
-				pages: [{ label: 'i' }, { label: '1' }, { label: '2' }],
-				outline: [{
-					title: 'Chapter',
-					target: { position: { pageIndex: 1 } },
-					children: [{ title: 'Section', target: { position: { pageIndex: 2 } } }],
-				}],
-			});
-			
+			await setText(attachment, ['Owls hunt at night. They see well.', 'Mice hide.']);
+
 			// The parent's key reads its PDF
-			let result = await call('zotero_read_text', { key: item.key, maxChars: 1000 });
+			let result = await call('zotero_read_text', { key: item.key });
 			assert.equal(result.key, attachment.key);
-			assert.equal(result.totalPages, 3);
-			assert.deepEqual(result.pages, [
-				{ page: 1, label: 'i', text: pages[0] },
-				{ page: 2, label: '1', text: pages[1] },
-			]);
-			assert.equal(result.nextPage, 3);
-			assert.deepEqual(result.outline, [
-				{ title: 'Chapter', page: 2, children: [{ title: 'Section', page: 3 }] },
-			]);
-			assert.notProperty(result, 'notice');
-			
-			result = await call('zotero_read_text', { key: attachment.key, startPage: 3 });
-			assert.deepEqual(result.pages, [{ page: 3, label: '2', text: pages[2] }]);
-			assert.notProperty(result, 'nextPage');
-			assert.notProperty(result, 'outline');
+			assert.equal(result.totalChunks, 1);
+			let [chunk] = result.chunks;
+			assert.equal(chunk.chunk, 0);
+			assert.notProperty(chunk, 'section');
+			assert.notProperty(chunk, 'pageLabel');
+			assert.equal(chunk.link, result.link);
+			// A paragraph continues across pages. Its sentences can't be found in the file, so
+			// they have no IDs.
+			assert.equal(chunk.text, 'Owls hunt at night. They see well. Mice hide.');
+			assert.match(result.notice, /doesn't have this file's structure.*sentences have no IDs/);
+
+			assert.match(await callForError('zotero_read_text', { key: attachment.key, chunks: [1] }),
+				/has no chunk 1. Its chunks are 0 to 0/);
 		});
-		
-		it("should wait for page labels only until the deadline, and have them later", async function () {
+
+		it("should read a PDF without sections by page from its full text", async function () {
 			let attachment = await importFileAttachment('test.pdf');
-			await setText(attachment, ['One', 'Two']);
-			Zotero.MCP.Tools._structureWait = 200;
-			let getReader = sinon.stub(Zotero.SDT, 'getReader');
-			let catalog = { pages: [{ label: 'i' }, { label: 'ii' }] };
-			let generated = Zotero.Promise.delay(1000).then(() => ({ getCatalog: async () => catalog }));
-			getReader.returns(generated);
-			
-			let result = await call('zotero_read_text', { key: attachment.key, startPage: 2 });
-			assert.deepEqual(result.pages, [{ page: 2, text: 'Two' }]);
-			assert.match(result.notice, /Page labels .* aren't available yet/);
-			assert.isTrue(getReader.calledWith(attachment.id, sinon.match({ isPriority: true })));
-			
-			// Generation went on, so a later call has the labels
-			await generated;
-			result = await call('zotero_read_text', { key: attachment.key, startPage: 2 });
-			assert.deepEqual(result.pages, [{ page: 2, label: 'ii', text: 'Two' }]);
-			assert.notProperty(result, 'notice');
+			await setText(attachment, ['Owls hunt at night.', 'Mice hide. They run.']);
+
+			let result = await call('zotero_read_text', { key: attachment.key, pages: [2] });
+			assert.deepEqual(result.pages, [{
+				page: 2,
+				link: `zotero://open/library/items/${attachment.key}?page=2`,
+				text: 'Mice hide. They run.',
+			}]);
+			assert.match(result.notice, /sentences have no IDs/);
+			assert.equal(result.totalPages, 2);
+			assert.notProperty(result, 'chunks');
+
+			assert.match(await callForError('zotero_read_text', { key: attachment.key, pages: [3] }),
+				/has 2 pages, so no page 3/);
+			assert.match(await callForError('zotero_read_text', { key: attachment.key, pages: ['iv'] }),
+				/no page labels .* Give page numbers/);
+			assert.match(await callForError('zotero_read_text', { key: attachment.key, pages: [1], chunks: [0] }),
+				/Give chunks or pages, not both/);
 		});
-		
+
 		it("should extract pages past the ones Zotero indexed", async function () {
 			this.timeout(30000);
 			Zotero.Prefs.set('fulltext.pdfMaxPages', 1);
@@ -387,34 +439,37 @@ describe("MCP tools", function () {
 				let attachment = await importFileAttachment('wonderland_short.pdf');
 				assert.equal((await Zotero.FullText.getPages(attachment.id)).indexedPages, 1);
 				let expected = (await Zotero.PDFWorker.getFullText(attachment.id, [1, 2])).text
-					.split('\f').map(text => text.trim());
-				
-				let result = await call('zotero_read_text', { key: attachment.key, startPage: 2, endPage: 3 });
-				assert.equal(result.totalPages, 29);
-				assert.deepEqual(result.pages, [{ page: 2, text: expected[0] }, { page: 3, text: expected[1] }]);
+					.split('\f').map(text => text.trim().replace(/\s+/g, ' '));
+
+				let result = await call('zotero_read_text', { key: attachment.key, pages: [2, 3] });
+				let pageTexts = result.pages.map(page => withoutIDs(page.text).replace(/\s+/g, ' '));
+				assert.deepEqual(result.pages.map(page => page.page), [2, 3]);
+				assert.deepEqual(pageTexts, expected);
 				assert.isNotEmpty(expected[0]);
-				assert.notEqual(expected[0], expected[1]);
 			}
 			finally {
 				Zotero.Prefs.clear('fulltext.pdfMaxPages');
 			}
 		});
-		
+
 		it("should return the pages it has by the deadline, and say more are coming", async function () {
 			let attachment = await importFileAttachment('test.pdf');
-			await setText(attachment, ['One', 'Two'], { totalPages: 4 });
+			await setText(attachment, ['One.', 'Two.'], { totalPages: 4 });
 			let extracted = Zotero.Promise.defer();
 			sinon.stub(Zotero.PDFWorker, 'getFullText').returns(extracted.promise);
-			
-			let result = await withBudget(300, () => call('zotero_read_text', { key: attachment.key }));
-			assert.deepEqual(result.pages, [{ page: 1, text: 'One' }, { page: 2, text: 'Two' }]);
-			assert.equal(result.nextPage, 3);
+
+			let result = await withBudget(300, () => call('zotero_read_text', { key: attachment.key, pages: [1, 2, 3] }));
+			assert.deepEqual(result.pages.map(page => page.page), [1, 2]);
+			assert.deepEqual(result.remainingPages, [3]);
 			assert.match(result.notice, /still getting the text/);
-			
-			extracted.resolve({ text: 'Three\fFour', totalPages: 4 });
-			result = await call('zotero_read_text', { key: attachment.key, startPage: 3 });
-			assert.deepEqual(result.pages, [{ page: 3, text: 'Three' }, { page: 4, text: 'Four' }]);
-			assert.notProperty(result, 'notice');
+			extracted.resolve({ text: 'Three.\fFour.', totalPages: 4 });
+		});
+
+		it("should say when Zotero has the text of only some of the pages", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			await setText(attachment, ['One.'], { totalPages: 3 });
+			let result = await call('zotero_read_text', { key: attachment.key });
+			assert.match(result.notice, /only the first 1 of 3 pages/);
 		});
 		
 		it("should say when a file's text isn't ready by the deadline", async function () {
@@ -422,43 +477,350 @@ describe("MCP tools", function () {
 			await IOUtils.remove(Zotero.FullText.getItemCacheFile(attachment).path, { ignoreAbsent: true });
 			let indexing = Zotero.Promise.defer();
 			sinon.stub(Zotero.FullText, 'indexItems').returns(indexing.promise);
-			
-			let result = await withBudget(300, () => call('zotero_read_text', { key: attachment.key }));
-			assert.notProperty(result, 'text');
-			assert.match(result.notice, /still getting the text/);
+
+			let error = await withBudget(300, () => callForError('zotero_read_text', { key: attachment.key }));
+			assert.match(error, /still getting the text/);
 			indexing.resolve();
 		});
-		
-		it("should read other files in chunks that end between words", async function () {
-			// Words and their spaces are 7 characters, so the character after each 1000 is a space
+
+		it("should read a text file chunk by chunk, all of it", async function () {
 			let words = [];
-			for (let i = 0; i < 600; i++) {
+			for (let i = 0; i < 3000; i++) {
 				words.push(`w${String(i).padStart(5, '0')}`);
 			}
 			let content = words.join(' ');
 			let path = PathUtils.join(await getTempDirectory(), 'words.txt');
 			await Zotero.File.putContentsAsync(path, content);
 			let attachment = await Zotero.Attachments.importFromFile({ file: path });
-			
-			let chunks = [];
-			let offset = 0;
-			while (offset !== undefined) {
-				let result = await call('zotero_read_text', { key: attachment.key, offset, maxChars: 1000 });
-				assert.equal(result.totalChars, content.length);
-				assert.isAtMost(result.text.length, 1000);
-				chunks.push(result.text);
-				offset = result.nextOffset;
+
+			let texts = [];
+			let chunks;
+			do {
+				let result = await call('zotero_read_text', { key: attachment.key, chunks, maxChars: 1000 });
+				assert.isAbove(result.totalChunks, 1);
+				for (let chunk of result.chunks) {
+					texts.push(withoutIDs(chunk.text));
+				}
+				chunks = result.remainingChunks;
 			}
-			assert.isAbove(chunks.length, 3);
-			assert.equal(chunks.join(''), content);
-			assert.isTrue(chunks.slice(0, -1).every(chunk => chunk.endsWith(' ')));
+			while (chunks);
+			// A paragraph split across chunks overlaps a little from one to the next
+			assert.deepEqual([...new Set(texts.join(' ').split(' '))], words);
 		});
 		
+		describe("by chunk", function () {
+			// The attachment's structure, cut into these chunks
+			function stubChunks(chunks) {
+				return sinon.stub(Zotero.SDT, 'getItemChunks').resolves({ ok: true, chunks });
+			}
+
+			it("should read from the start, up to about maxChars", async function () {
+				let item = await createArticle();
+				let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
+				let long = 'Owls hunt at night. '.repeat(30).trim();
+				stubChunks([
+					makeTestChunk(['Owls of the world', long], {
+						sections: [['', null], ['Intro', long]],
+						position: { pageIndex: 0, rects: [[1, 2, 3, 4]] },
+					}),
+					makeTestChunk([long], { sections: [['Intro', null]], pageLabel: '2', position: { pageIndex: 1, rects: [] } }),
+					makeTestChunk(['A. Author. A title.'], { sections: [['References', null]], reference: true }),
+				]);
+
+				// The parent's key reads its PDF
+				let result = await call('zotero_read_text', { key: item.key, maxChars: 1000 });
+				assert.equal(result.key, attachment.key);
+				assert.equal(result.totalChunks, 3);
+				assert.notProperty(result, 'outline');
+				assert.deepEqual(result.chunks.map(chunk => chunk.chunk), [0, 1]);
+				assert.deepEqual(result.remainingChunks, [2]);
+				let [first, second] = result.chunks;
+				assert.notProperty(first, 'section');
+				assert.match(first.link, /\?page=1$/);
+				assert.isTrue(first.text.startsWith('[c0.1] Owls of the world\n\n# Intro\n\n[c0.2] Owls hunt at night. [c0.3] Owls hunt at night.'));
+				assert.equal(second.section, 'Intro');
+				assert.equal(second.pageLabel, '2');
+				assert.match(second.link, /\?page=2$/);
+				assert.notProperty(result, 'pages');
+
+				result = await call('zotero_read_text', { key: attachment.key, chunks: [2] });
+				assert.deepEqual(result.chunks.map(chunk => chunk.chunk), [2]);
+				assert.equal(result.chunks[0].section, 'References');
+				assert.notProperty(result, 'remainingChunks');
+
+				// In order, each once
+				result = await call('zotero_read_text', { key: attachment.key, chunks: [2, 0, 2] });
+				assert.deepEqual(result.chunks.map(chunk => chunk.chunk), [0, 2]);
+
+				assert.match(await callForError('zotero_read_text', { key: attachment.key, chunks: [3] }),
+					/has no chunk 3. Its chunks are 0 to 2/);
+			});
+
+			it("should read a PDF's pages from its structure", async function () {
+				let attachment = await importFileAttachment('test.pdf');
+				let page = (pageIndex, pageLabel, blocks) => ({ ...makeTestChunk(blocks), pageIndex, pageLabel });
+				let getPages = sinon.stub(Zotero.SDT, 'getPages').resolves({
+					ok: true,
+					pages: [
+						page(1, '1', [['heading', 'Intro'], 'Owls hunt. They see well.']),
+						page(2, '2', ['Mice hide.']),
+					],
+					missing: [],
+					totalPages: 9,
+				});
+
+				let result = await call('zotero_read_text', { key: attachment.key, pages: ['1', 3], maxChars: 1000 });
+				assert.isTrue(getPages.calledWith(attachment.id, ['1', 3]));
+				assert.deepEqual(result.pages, [
+					{
+						page: 2,
+						pageLabel: '1',
+						link: `zotero://open/library/items/${attachment.key}?page=2`,
+						text: '# Intro\n\n[p2.1] Owls hunt. [p2.2] They see well.',
+					},
+					{
+						page: 3,
+						pageLabel: '2',
+						link: `zotero://open/library/items/${attachment.key}?page=3`,
+						text: '[p3.1] Mice hide.',
+					},
+				]);
+				assert.notProperty(result, 'remainingPages');
+				assert.equal(result.totalPages, 9);
+
+				getPages.resolves({ ok: true, pages: [], missing: ['x'], totalPages: 9 });
+				assert.match(await callForError('zotero_read_text', { key: attachment.key, pages: ['x'] }),
+					/has no page x/);
+			});
+
+			it("should refuse pages for an EPUB", async function () {
+				let epub = await importFileAttachment('stub.epub');
+				assert.match(await callForError('zotero_read_text', { key: epub.key, pages: ['1'] }),
+					/has no pages. Read it by chunk/);
+			});
+
+			it("should read pages from the full text while the structure is worked out", async function () {
+				let attachment = await importFileAttachment('test.pdf');
+				await setText(attachment, ['One.']);
+				Zotero.MCP.Text._structureWait = 200;
+				sinon.stub(Zotero.SDT, 'getPages').returns(new Promise(() => {}));
+
+				let result = await call('zotero_read_text', { key: attachment.key, pages: [1] });
+				assert.equal(result.pages[0].text, 'One.');
+				assert.match(result.notice, /still working out the file's structure.*sentences have no IDs/);
+				assert.match(await callForError('zotero_read_text', { key: attachment.key, pages: ['i'] }),
+					/still working out the pages .* give page numbers/);
+			});
+
+			it("should link to where an EPUB's or a snapshot's chunk starts", async function () {
+				let epub = await importFileAttachment('stub.epub');
+				let cfi = 'epubcfi(/6/4!/4/2/1:0)';
+				let stub = stubChunks([makeTestChunk(['Text.'], {
+					position: { type: 'FragmentSelector', conformsTo: 'http://www.idpf.org/epub/linking/cfi/epub-cfi.html', value: cfi },
+				})]);
+				let result = await call('zotero_read_text', { key: epub.key });
+				assert.isTrue(result.chunks[0].link.endsWith('?cfi=' + encodeURIComponent(cfi)));
+
+				// A snapshot's text is at its offsets in the page's text, and a block without
+				// text at its element
+				stub.resolves({ ok: true, chunks: [
+					makeTestChunk(['Text.'], { position: { type: 'TextPositionSelector', start: 120, end: 125 } }),
+					makeTestChunk(['Figure.'], { position: { type: 'CssSelector', value: 'body > p:nth-child(2)' } }),
+				] });
+				let snapshot = await importSnapshotAttachment(await createArticle());
+				result = await call('zotero_read_text', { key: snapshot.key });
+				assert.isTrue(result.chunks[0].link.endsWith('?start=120&end=125'));
+				assert.isTrue(result.chunks[1].link.endsWith('?sel=' + encodeURIComponent('body > p:nth-child(2)')));
+			});
+
+			it("should read plain text while the sections are worked out", async function () {
+				let attachment = await importFileAttachment('test.pdf');
+				await setText(attachment, ['One.']);
+				Zotero.MCP.Text._structureWait = 200;
+				sinon.stub(Zotero.SDT, 'getItemChunks').returns(new Promise(() => {}));
+
+				let result = await call('zotero_read_text', { key: attachment.key });
+				assert.equal(result.chunks[0].text, 'One.');
+				assert.match(result.notice, /still working out the file's structure.*sentences have no IDs/);
+			});
+
+			it("should read a PDF's sections from its extracted structure", async function () {
+				// Cold worker startup
+				this.timeout(120000);
+				Zotero.SDT.getPack.restore();
+				let attachment = await importFileAttachment('test.pdf');
+
+				let result = await call('zotero_read_text', { key: attachment.key });
+				assert.isAbove(result.totalChunks, 0);
+				let [chunk] = result.chunks;
+				assert.equal(chunk.chunk, 0);
+				assert.match(chunk.link, /\?page=\d+$/);
+				let ids = [...chunk.text.matchAll(/\[(c\d+\.\d+)\]/g)].map(match => match[1]);
+				assert.isNotEmpty(ids);
+				assert.deepEqual(ids, ids.map((_, i) => `c0.${i + 1}`));
+
+				// Its first page, from the structure, by its label and by its number
+				for (let page of [chunk.pageLabel, 1]) {
+					result = await call('zotero_read_text', { key: attachment.key, pages: [page] });
+					let [read] = result.pages;
+					assert.equal(read.page, 1);
+					assert.equal(read.pageLabel, chunk.pageLabel);
+					assert.include(read.text, '[p1.1] ');
+					assert.notProperty(result, 'notice');
+				}
+			});
+		});
+
 		it("should reject items without a readable file", async function () {
 			let note = await createDataObject('item', { itemType: 'note' });
 			assert.match(await callForError('zotero_read_text', { key: note.key }), /isn't a file Zotero can get text from/);
 			let item = await createArticle();
 			assert.match(await callForError('zotero_read_text', { key: item.key }), /has no PDF/);
+		});
+	});
+
+	describe("zotero_ground_response", function () {
+		it("should give cited sentences' text and links to the passages, a file at a time", async function () {
+			let item = await createArticle();
+			let pdf = await importFileAttachment('test.pdf', { parentID: item.id });
+			let epub = await importFileAttachment('stub.epub');
+			let snapshot = await importSnapshotAttachment(await createArticle());
+			let cfi = 'epubcfi(/6/4!/4/2,/1:0,/1:5)';
+			let locate = sinon.stub(Zotero.MCP.Text, 'locateSentences').callsFake(async (attachment, citations) => {
+				if (attachment.id == pdf.id) {
+					return [
+						{
+							text: 'Owls hunt. They see.',
+							positions: [{ pageIndex: 3, rects: [[10.4, 20.6, 100, 30], [12, 32, 200.2, 41.1]] }],
+							outlinePath: ['Results'],
+							pageLabel: '4',
+						},
+						{ missing: citations[1][0] },
+					];
+				}
+				if (attachment.id == epub.id) {
+					return [{
+						text: 'Owls.',
+						positions: [{ type: 'FragmentSelector', conformsTo: 'http://www.idpf.org/epub/linking/cfi/epub-cfi.html', value: cfi }],
+						outlinePath: [],
+						pageLabel: null,
+					}];
+				}
+				return [{
+					text: 'Mice.',
+					positions: [{ type: 'TextPositionSelector', start: 3, end: 9 }],
+					outlinePath: ['Intro', 'Aims'],
+				}];
+			});
+
+			let { citations } = await call('zotero_ground_response', { citations: [
+				{ key: item.key, sentences: ['c7.3', 'c7.4'] },
+				{ key: epub.key, sentences: ['c0.1'] },
+				{ key: item.key, sentences: ['c9.9'] },
+				{ key: snapshot.key, sentences: ['c1.2'] },
+				{ key: 'AAAAAAAA', sentences: ['c0.1'] },
+			] });
+			// The PDF's citations together, by their parent's key
+			assert.equal(locate.callCount, 3);
+			assert.equal(locate.firstCall.args[0].id, pdf.id);
+			assert.deepEqual(locate.firstCall.args[1], [
+				[{ chunk: 7, sentence: 3, id: 'c7.3' }, { chunk: 7, sentence: 4, id: 'c7.4' }],
+				[{ chunk: 9, sentence: 9, id: 'c9.9' }],
+			]);
+			let link = attachment => `zotero://open/library/items/${attachment.key}`;
+			assert.deepEqual(citations, [
+				{
+					key: item.key,
+					sentences: ['c7.3', 'c7.4'],
+					text: 'Owls hunt. They see.',
+					section: 'Results',
+					pageLabel: '4',
+					page: 4,
+					// Around the passage on its page
+					link: `${link(pdf)}?page=4&rect=10,20,201,42`,
+				},
+				{ key: epub.key, sentences: ['c0.1'], text: 'Owls.', link: `${link(epub)}?cfi=${encodeURIComponent(cfi)}` },
+				{ key: item.key, sentences: ['c9.9'], error: `${pdf.key} has no sentence c9.9` },
+				{
+					key: snapshot.key,
+					sentences: ['c1.2'],
+					text: 'Mice.',
+					// Its headings on one line
+					section: 'Intro > Aims',
+					// The passage's offsets in the page's text
+					link: `${link(snapshot)}?start=3&end=9`,
+				},
+				{ key: 'AAAAAAAA', sentences: ['c0.1'], error: `No item AAAAAAAA in library ${Zotero.Libraries.userLibraryID}` },
+			]);
+		});
+
+		it("should say it can't find sentences in a file without structure", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			await setText(attachment, ['Owls hunt at night. They see well.', 'Mice hide.']);
+			let epub = await importFileAttachment('stub.epub');
+			sinon.stub(Zotero.SDT, 'getItemChunks').resolves({ ok: false, reason: 'not-cached' });
+			sinon.stub(Zotero.SDT, 'getPages').resolves({ ok: false, reason: 'not-cached' });
+
+			let { citations } = await call('zotero_ground_response', { citations: [
+				{ key: attachment.key, sentences: ['c0.1', 'c0.3'] },
+				{ key: attachment.key, sentences: ['p2.1'] },
+				{ key: epub.key, sentences: ['p2.1'] },
+			] });
+			let error = `Zotero doesn't have the structure of ${attachment.key}, so it can't find sentences in `
+				+ 'it. Read it again with zotero_read_text, and use the sentence IDs it gives.';
+			assert.deepEqual(citations, [
+				{ key: attachment.key, sentences: ['c0.1', 'c0.3'], error },
+				{ key: attachment.key, sentences: ['p2.1'], error },
+				{ key: epub.key, sentences: ['p2.1'], error: `${epub.key} has no pages` },
+			]);
+		});
+	});
+
+	describe("zotero_get_outline", function () {
+		afterEach(function () {
+			Zotero.MCP.Text._structureWait = 15 * 1000;
+		});
+
+		it("should give a file's sections with the chunks that hold them", async function () {
+			let item = await createArticle();
+			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
+			sinon.stub(Zotero.SDT, 'getItemChunks').resolves({
+				ok: true,
+				chunks: [
+					makeTestChunk(['Owls of the world', 'Intro text.'], { sections: [['', null], ['Intro', 'Intro text.']] }),
+					makeTestChunk(['Aims text.', 'Methods text.'], {
+						sections: [['Intro > Aims', null], ['Methods', 'Methods text.']],
+					}),
+				],
+			});
+
+			// The parent's key gives its PDF's
+			let result = await call('zotero_get_outline', { key: item.key });
+			assert.equal(result.key, attachment.key);
+			assert.equal(result.totalChunks, 2);
+			assert.deepEqual(result.outline, [
+				{ chunks: [[0, 0]] },
+				{ title: 'Intro', chunks: [[0, 1]], children: [{ title: 'Aims', chunks: [[1, 1]] }] },
+				{ title: 'Methods', chunks: [[1, 1]] },
+			]);
+		});
+
+		it("should give a file without sections one entry for its plain text", async function () {
+			let path = PathUtils.join(await getTempDirectory(), 'plain.txt');
+			await Zotero.File.putContentsAsync(path, 'Plain text');
+			let text = await Zotero.Attachments.importFromFile({ file: path });
+			let result = await call('zotero_get_outline', { key: text.key });
+			assert.deepEqual(result.outline, [{ chunks: [[0, 0]] }]);
+			assert.match(result.notice, /doesn't have this file's structure/);
+
+			// Its sections aren't ready
+			let pdf = await importFileAttachment('test.pdf');
+			await setText(pdf, ['One.']);
+			Zotero.MCP.Text._structureWait = 200;
+			sinon.stub(Zotero.SDT, 'getItemChunks').returns(new Promise(() => {}));
+			result = await call('zotero_get_outline', { key: pdf.key });
+			assert.deepEqual(result.outline, [{ chunks: [[0, 0]] }]);
+			assert.match(result.notice, /still working out the file's structure/);
 		});
 	});
 	
@@ -592,6 +954,81 @@ describe("MCP tools", function () {
 			internalReader._state.primaryViewSelectionPopup = null;
 		});
 		
+		describe("in an EPUB or a snapshot", function () {
+			this.timeout(60000);
+
+			// Open a file, and go to a chunk once Zotero has its structure
+			async function openAtChunk(attachment, chunk, isThere) {
+				let cut = await Zotero.SDT.getItemChunks(attachment.id);
+				assert.isTrue(cut.ok, cut.reason);
+				assert.isAbove(cut.chunks.length, chunk + 1);
+				let reader = await Zotero.Reader.open(attachment.id);
+				await reader._initPromise;
+				let view = reader._internalReader._primaryView;
+				await view.initializedPromise;
+				reader.navigate({ position: cut.chunks[chunk].position });
+				await waitForCallback(() => isThere(view), 200, 10);
+				return reader;
+			}
+
+			it("should return the chunk in view of an EPUB, when Zotero has its structure", async function () {
+				let book = getTestDataDirectory();
+				book.append('moby_dick');
+				book.append('book.epub');
+				let epub = await Zotero.Attachments.importFromFile({ file: book });
+				// Past the book's cover, which has no text
+				let reader = await openAtChunk(epub, 5, view => view.flow.startRange);
+
+				let context = await call('zotero_get_context', {});
+				assert.equal(context.reader.key, epub.key);
+				// Or the one before, if the view starts just before the chunk's text
+				assert.oneOf(context.reader.chunk, [4, 5]);
+				assert.notProperty(context.reader, 'page');
+
+				// No structure
+				let getItemChunks = sinon.stub(Zotero.SDT, 'getItemChunks').resolves({ ok: false, reason: 'failed' });
+				context = await call('zotero_get_context', {});
+				assert.notProperty(context.reader, 'chunk');
+				getItemChunks.restore();
+				win.Zotero_Tabs.close(reader.tabID);
+			});
+
+			it("should return the chunk in view of a snapshot scrolled under a fixed header", async function () {
+				let paragraphs = [];
+				for (let i = 0; i < 80; i++) {
+					let words = [];
+					for (let j = 0; j < 60; j++) {
+						words.push(`word${i}x${j}`);
+					}
+					paragraphs.push(`<p>Paragraph ${i}: ${words.join(' ')}.</p>`);
+				}
+				let file = Zotero.File.pathToFile(PathUtils.join(await getTempDirectory(), 'long.html'));
+				await Zotero.File.putContentsAsync(file, '<html><head><title>Long</title></head><body>'
+					+ '<div style="position: fixed; top: 0; background: white">Contents: Introduction</div>'
+					+ paragraphs.join('') + '</body></html>');
+				let snapshot = await Zotero.Attachments.importSnapshotFromFile({
+					title: 'Long',
+					url: 'http://example.com/long',
+					file,
+					contentType: 'text/html',
+					charset: 'utf-8',
+					parentItemID: (await createDataObject('item')).id,
+				});
+				// Once it's done scrolling
+				let lastY = 0;
+				let reader = await openAtChunk(snapshot, 3, (view) => {
+					let y = view._iframeWindow.scrollY;
+					let settled = y > 0 && y == lastY;
+					lastY = y;
+					return settled;
+				});
+
+				let context = await call('zotero_get_context', {});
+				assert.oneOf(context.reader.chunk, [2, 3]);
+				win.Zotero_Tabs.close(reader.tabID);
+			});
+		});
+
 		it("should say when the main window isn't open", async function () {
 			sinon.stub(Zotero, 'getMainWindow').returns(null);
 			assert.deepEqual(await call('zotero_get_context', {}), { window: false, windows: [] });
@@ -1190,6 +1627,97 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("zotero_add_annotation", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+		});
+
+		it("should highlight a sentence it read", async function () {
+			// Cold worker startup, and the file's structure worked out on reading it
+			this.timeout(120000);
+			let attachment = await importFileAttachment('test.pdf');
+			let read = await call('zotero_read_text', { key: attachment.key });
+			// The ID before the sentence with the phrase
+			let parts = read.chunks.flatMap(chunk => chunk.text.split(/\[(c\d+\.\d+)\] /));
+			let id = parts[parts.findIndex(part => part.includes('easy-to-use')) - 1];
+			assert.match(id, /^c\d+\.\d+$/);
+
+			let result = await call('zotero_add_annotation', {
+				key: attachment.key,
+				sentences: [id],
+				color: 'green',
+				comment: 'Worth quoting',
+				tags: ['mcp'],
+			});
+			assert.include(result.text, 'easy-to-use');
+			assert.lengthOf(result.annotations, 1);
+			let annotation = Zotero.Items.getByLibraryAndKey(attachment.libraryID, result.annotations[0].key);
+			assert.equal(annotation.parentID, attachment.id);
+			assert.equal(annotation.annotationType, 'highlight');
+			assert.equal(annotation.annotationColor, '#5fb236');
+			assert.include(annotation.annotationText, 'easy-to-use');
+			assert.equal(annotation.annotationComment, 'Worth quoting');
+			assert.deepEqual(annotation.getTags().map(tag => tag.tag), ['mcp']);
+			assert.equal(result.annotations[0].link,
+				`zotero://open/library/items/${attachment.key}?annotation=${annotation.key}`);
+		});
+
+		it("should make an annotation of each run of sentences before saving them, the comment on the first", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			// Two sentences apart
+			let runs = [[[[0, 0, 0], [0, 0, 5]]], [[[3, 0, 0], [3, 0, 4]]]];
+			sinon.stub(Zotero.MCP.Text, 'getCitedSentences').resolves([{ text: 'Owls. … Mice.', runs }]);
+			let annotation = (pageIndex, text) => ({
+				type: 'underline',
+				text,
+				color: '#ff6666',
+				pageLabel: String(pageIndex + 1),
+				sortIndex: `0000${pageIndex}|000000|00000`,
+				position: { pageIndex, rects: [[1, 2, 3, 4]] },
+				key: Zotero.DataObjectUtilities.generateKey(),
+			});
+			let getFromRanges = sinon.stub(Zotero.Annotations, 'getFromRanges').callsFake(async (_itemID, ranges) => {
+				// Not while the database is held
+				assert.isFalse(Zotero.DB.inTransaction());
+				return {
+					ok: true,
+					annotations: [ranges == runs[0] ? annotation(0, 'Owls.') : annotation(1, 'Mice.')],
+				};
+			});
+
+			let result = await call('zotero_add_annotation', {
+				key: attachment.key,
+				sentences: ['c0.1', 'c0.4'],
+				type: 'underline',
+				color: 'red',
+				comment: 'Both',
+				tags: ['a', 'b'],
+			});
+			assert.deepEqual(getFromRanges.args, runs.map(
+				ranges => [attachment.id, ranges, { type: 'underline', color: '#ff6666' }]
+			));
+			assert.deepEqual(result.annotations.map(({ pageLabel }) => pageLabel), ['1', '2']);
+			let [first, second] = result.annotations.map(({ key }) => Zotero.Items.getByLibraryAndKey(attachment.libraryID, key));
+			assert.equal(first.annotationComment, 'Both');
+			assert.notOk(second.annotationComment);
+			assert.sameMembers(second.getTags().map(tag => tag.tag), ['a', 'b']);
+		});
+
+		it("should say why it can't annotate", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			let getItemChunks = sinon.stub(Zotero.SDT, 'getItemChunks');
+			let error = args => callForError('zotero_add_annotation', { key: attachment.key, sentences: ['c0.1'], ...args });
+
+			assert.match(await error({ color: 'teal' }), /teal isn't an annotation color. Give one of yellow, red/);
+			getItemChunks.resolves({ ok: false, reason: 'not-cached' });
+			assert.match(await error(), /doesn't have the structure of .* Read it again with zotero_read_text/);
+			getItemChunks.resolves({ ok: true, chunks: [makeTestChunk(['Owls.'])] });
+			assert.match(await error({ sentences: ['c0.9'] }), /has no sentence c0.9/);
+			sinon.stub(Zotero.Annotations, 'getFromRanges').resolves({ ok: false, reason: 'unresolved' });
+			assert.match(await error(), /couldn't find c0.1 in the file/);
+		});
+	});
+
 	describe("zotero_add_note", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');
