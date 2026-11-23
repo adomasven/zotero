@@ -212,6 +212,23 @@ Zotero.Annotations = new function () {
 	 * @return {Promise<Zotero.Item>} - Promise for an annotation item
 	 */
 	this.saveFromJSON = async function (attachment, json, saveOptions = {}) {
+		let item = await this.fromJSON(attachment, json);
+		// Don't try to select annotation, which would clear an active quick search (at least
+		// until annotations are visible in the items list)
+		saveOptions.skipSelect = true;
+		await item.saveTx(saveOptions);
+		return item;
+	};
+
+	/**
+	 * An annotation item made or updated from annotation JSON, unsaved, so it can be saved
+	 * within a transaction
+	 *
+	 * @param {Zotero.Item} attachment - Saved parent attachment item
+	 * @param {Object} json
+	 * @return {Promise<Zotero.Item>}
+	 */
+	this.fromJSON = async function (attachment, json) {
 		if (!attachment) {
 			throw new Error("'attachment' not provided");
 		}
@@ -254,13 +271,7 @@ Zotero.Annotations = new function () {
 				item.addRelation(predicate, json.relations[predicate]);
 			}
 		}
-		
-		// Don't try to select annotation, which would clear an active quick search (at least
-		// until annotations are visible in the items list)
-		saveOptions.skipSelect = true;
-		
-		await item.saveTx(saveOptions);
-		
+
 		return item;
 	};
 
@@ -345,19 +356,49 @@ Zotero.Annotations = new function () {
 
 	/**
 	 * Create a highlight or underline over content ranges of an attachment's
-	 * structured text: one annotation per page of a PDF, per section of an
-	 * EPUB, one for a snapshot
+	 * structured text, as the reader stores a selection: one annotation per page
+	 * of a PDF, or per two pages where it runs onto the next one, per section
+	 * of an EPUB, one for a snapshot
 	 *
 	 * @param {Integer} itemID
 	 * @param {Array[]} ranges - [start, end] pairs of points [...ref, offset]
 	 *     into the structure's text nodes, in text order
+	 * @param {Object} [options] - As getFromRanges() takes them
+	 * @returns {Promise<Object>} - { ok: true, items }, or { ok: false, reason }:
+	 *     getFromRanges()'s reasons
+	 */
+	this.createFromRanges = async function (itemID, ranges, options = {}) {
+		let result = await this.getFromRanges(itemID, ranges, options);
+		if (!result.ok) {
+			return result;
+		}
+		let item = await Zotero.Items.getAsync(itemID);
+		let items = [];
+		let notifierQueue = new Zotero.Notifier.Queue();
+		try {
+			for (let annotation of result.annotations) {
+				items.push(await this.saveFromJSON(item, annotation, { notifierQueue }));
+			}
+		}
+		finally {
+			await Zotero.Notifier.commit(notifierQueue);
+		}
+		return { ok: true, items };
+	};
+
+	/**
+	 * The annotations createFromRanges() makes, as annotation JSON to save, each with a
+	 * new key
+	 *
+	 * @param {Integer} itemID
+	 * @param {Array[]} ranges - As createFromRanges() takes them
 	 * @param {Object} [options]
 	 * @param {String} [options.type='highlight'] - 'highlight' or 'underline'
 	 * @param {String} [options.color] - Hex; the reader's default when omitted
-	 * @returns {Promise<Object>} - { ok: true, items }, or { ok: false, reason }:
+	 * @returns {Promise<Object>} - { ok: true, annotations }, or { ok: false, reason }:
 	 *     getPack()'s reasons, 'unsupported', 'unresolved' or 'failed'
 	 */
-	this.createFromRanges = async function (itemID, ranges, { type = 'highlight', color } = {}) {
+	this.getFromRanges = async function (itemID, ranges, { type = 'highlight', color } = {}) {
 		let item = await Zotero.Items.getAsync(itemID);
 		if (!item || !(item.isPDFAttachment() || item.isEPUBAttachment() || item.isSnapshotAttachment())) {
 			return { ok: false, reason: 'unsupported' };
@@ -382,18 +423,10 @@ Zotero.Annotations = new function () {
 		if (!made?.annotations.length) {
 			return { ok: false, reason: 'unresolved' };
 		}
-		let items = [];
-		let notifierQueue = new Zotero.Notifier.Queue();
-		try {
-			for (let annotation of made.annotations) {
-				annotation.key = Zotero.DataObjectUtilities.generateKey();
-				items.push(await this.saveFromJSON(item, annotation, { notifierQueue }));
-			}
+		for (let annotation of made.annotations) {
+			annotation.key = Zotero.DataObjectUtilities.generateKey();
 		}
-		finally {
-			await Zotero.Notifier.commit(notifierQueue);
-		}
-		return { ok: true, items };
+		return { ok: true, annotations: made.annotations };
 	};
 
 	/**

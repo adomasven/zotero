@@ -376,6 +376,13 @@ describe("Zotero.Annotations", function() {
 			assert.sameMembers(item.getAnnotations().map(x => x.id), [annotation.id]);
 
 			// A later one takes the type and color asked for
+			// The annotations alone, each with a new key, saving nothing
+			let made = await Zotero.Annotations.getFromRanges(item.id, ranges);
+			assert.isTrue(made.ok, made.reason);
+			assert.lengthOf(made.annotations, 1);
+			assert.notEqual(made.annotations[0].key, annotation.key);
+			assert.isFalse(!!Zotero.Items.getByLibraryAndKey(item.libraryID, made.annotations[0].key));
+
 			let again = await Zotero.Annotations.createFromRanges(item.id, ranges,
 				{ type: 'underline', color: '#ff6666' });
 			assert.isTrue(again.ok, again.reason);

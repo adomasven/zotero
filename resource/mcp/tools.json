@@ -1,5 +1,5 @@
 {
-	"instructions": "Zotero is the user's reference manager: their library of papers, books and other sources, with PDFs and other files, annotations, notes, collections and tags. Use these tools to find and read the user's sources, cite them in a citation style, add or organize items in their library, import and export them, and show them to the user in Zotero's windows. They work on the Zotero app on the user's computer, which is started if it isn't running.",
+	"instructions": "Zotero is the user's reference manager: their library of papers, books and other sources, with PDFs and other files, annotations, notes, collections and tags. Use these tools to find and read the user's sources, cite them in a citation style, add or organize items in their library, import and export them, and show them to the user in Zotero's windows. They work on the Zotero app on the user's computer, which is started if it isn't running. To answer from a file's text, get its outline with zotero_get_outline, read the chunks of the sections that answer the question (or the pages asked for) with zotero_read_text, and before answering pass the IDs of the sentences you rely on to zotero_ground_response; cite them in your answer with the text and links it returns, which open the files at the passages. Write each link out in full as plain text after the page label, never as a Markdown link, so the user can copy it where links aren't clickable. Chunks are only how Zotero splits a file's text for reading: their numbers can change and aren't shown anywhere in Zotero, so don't mention chunks or chunk numbers in your answers unless the user asks, and refer to sections and pages instead. To highlight a passage you've read, give its sentence IDs to zotero_add_annotation. For what the user is looking at in the reader, zotero_get_context gives a PDF's page or an EPUB's or snapshot's chunk to read.",
 	"tools": [
 		{
 			"name": "zotero_status",
@@ -301,7 +301,7 @@
 		{
 			"name": "zotero_search_fulltext",
 			"title": "Search Zotero full text",
-			"description": "Find where words or phrases occur in the text of PDFs, EPUBs, web page snapshots and other files in a Zotero library, and get the passage around each match, with its page and a link that opens the file there. Matches words, not meaning: every word or \"quoted phrase\" in the query must occur in a file, ignoring case and accents, and a word also matches words it starts (\"archive\" matches \"archives\"). Only files Zotero has indexed are searched, and by default only the first 100 pages of a PDF. Files are listed by when their item was last modified, not by relevance. Use zotero_read_text to read more around a passage, and zotero_search with fulltext: to combine full text with other criteria.",
+			"description": "Find where words or phrases occur in the text of PDFs, EPUBs, web page snapshots and other files in a Zotero library. For each file, get the chunks of its text with the most of the query's terms, each with the terms it has, the passage around its matches, its section and page, and a link that opens the file there; read a chunk with zotero_read_text to cite it. Matches words, not meaning: every word or \"quoted phrase\" in the query must occur in a file, ignoring case and accents, and a word also matches words it starts (\"archive\" matches \"archives\"), though a chunk can have only some of them. Only files Zotero has indexed are searched, and by default only the first 100 pages of a PDF. Files are listed by when their item was last modified, not by relevance. Use zotero_search with fulltext: to combine full text with other criteria.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -317,7 +317,7 @@
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
 					"limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Files per call" },
 					"offset": { "type": "integer", "minimum": 0, "default": 0 },
-					"passagesPerFile": { "type": "integer", "minimum": 1, "maximum": 20, "default": 3 }
+					"passagesPerFile": { "type": "integer", "minimum": 1, "maximum": 20, "default": 3, "description": "Chunks per file" }
 				},
 				"required": ["query"],
 				"additionalProperties": false
@@ -340,17 +340,19 @@
 								"textPending": { "type": "boolean", "description": "Zotero is still getting the file's text, so its passages are missing" },
 								"passages": {
 									"type": "array",
-									"description": "Passages with the most query terms first",
+									"description": "The chunks with the most of the query's terms first, then in order, reference lists after others",
 									"items": {
 										"type": "object",
 										"properties": {
-											"page": { "type": "integer", "description": "PDF page, from 1, for zotero_read_text and links" },
-											"pageLabel": { "type": "string", "description": "The page number printed on the page, for citing, when Zotero has it" },
-											"offset": { "type": "integer", "description": "Character offset in a file without pages, for zotero_read_text" },
-											"text": { "type": "string" },
-											"link": { "type": "string", "description": "zotero:// link that opens the file, at the page for a PDF" }
+											"chunk": { "type": "integer", "description": "The chunk, for zotero_read_text" },
+											"section": { "type": "string", "description": "The headings its text starts under" },
+											"page": { "type": "integer", "description": "The PDF page it starts on, from 1" },
+											"pageLabel": { "type": "string", "description": "The page number printed where it starts" },
+											"terms": { "type": "array", "items": { "type": "string" }, "description": "The query's terms it has" },
+											"text": { "type": "string", "description": "The passage around its matches" },
+											"link": { "type": "string", "description": "zotero:// link that opens the file, where the chunk starts when Zotero has its structure" }
 										},
-										"required": ["text", "link"]
+										"required": ["chunk", "terms", "text", "link"]
 									}
 								}
 							},
@@ -369,15 +371,24 @@
 		{
 			"name": "zotero_read_text",
 			"title": "Read text from a Zotero file",
-			"description": "Read the text of a PDF, EPUB, web page snapshot or text file in Zotero. PDFs are read by page, with page labels (the page numbers printed on the pages, for citing) and the outline when Zotero has them; other files by character offset. Give an attachment key, or an item key to read its best file. Returns about maxChars characters per call, and nextPage or nextOffset to continue.",
+			"description": "Read the text of a PDF, EPUB, web page snapshot or text file in Zotero, by chunk or, for a PDF, by page. Give an attachment key, or an item key to read its best file. Get the outline with zotero_get_outline, then read the chunks of the sections that answer the question; read pages when they're what's asked for. Without chunks or pages, the file's chunks are read from the start. Text comes as Markdown (headings, lists, tables, quotes, code; other blocks tagged with their type, e.g. \"(caption)\"), each sentence after its ID in brackets, the chunk's or page's and the sentence's number in it ([c7.3] is chunk 7's third sentence, [p12.4] page 12's fourth). Before answering from what you read, pass the IDs of the sentences you rely on to zotero_ground_response, and cite with the text and links it returns; with the chunk's section, its or the page's page label (the page number printed on the page), and a link that opens the file there. Chunks are numbered from 0, and cut along the file's sections where Zotero can work them out, otherwise from its plain text, which has no sections, page labels or places to open at. Sentences of plain text have no IDs, as Zotero can't find them in the file, so they can't be cited with zotero_ground_response or annotated; a notice says when the text is plain. Returns about maxChars characters per call, and remainingChunks or remainingPages to continue.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"key": { "type": "string", "description": "An attachment's key, or an item's key for its best file" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
-					"startPage": { "type": "integer", "minimum": 1, "description": "PDF page to start at, from 1. Defaults to 1." },
-					"endPage": { "type": "integer", "minimum": 1, "description": "Last PDF page to read" },
-					"offset": { "type": "integer", "minimum": 0, "description": "Character offset to start at, for files without pages" },
+					"chunks": {
+						"type": "array",
+						"items": { "type": "integer", "minimum": 0 },
+						"minItems": 1,
+						"description": "Chunks to read, e.g. a section's from zotero_get_outline"
+					},
+					"pages": {
+						"type": "array",
+						"items": { "type": ["integer", "string"] },
+						"minItems": 1,
+						"description": "PDF pages to read instead of chunks: a number is the page's number in the PDF, from 1, and a string the page number printed on it (its page label), e.g. \"iv\" or \"215\""
+					},
 					"maxChars": { "type": "integer", "minimum": 1000, "maximum": 100000, "default": 20000 }
 				},
 				"required": ["key"],
@@ -385,15 +396,151 @@
 			},
 			"outputSchema": {
 				"type": "object",
+				"properties": {
+					"key": { "type": "string", "description": "The attachment's key" },
+					"parentKey": { "type": "string" },
+					"title": { "type": "string" },
+					"contentType": { "type": "string" },
+					"link": { "type": "string", "description": "zotero:// link that opens the file" },
+					"totalChunks": { "type": "integer" },
+					"chunks": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"chunk": { "type": "integer", "description": "The chunk's number" },
+								"section": { "type": "string", "description": "The headings its text starts under, e.g. \"Methods > Sampling\"" },
+								"pageLabel": { "type": "string", "description": "The page number printed where it starts" },
+								"link": { "type": "string", "description": "zotero:// link that opens the file, where it starts for a chunk cut along the sections" },
+								"text": { "type": "string", "description": "Markdown, each sentence after its ID, e.g. [c7.3], unless the text is plain" }
+							},
+							"required": ["chunk", "link", "text"]
+						}
+					},
+					"remainingChunks": {
+						"type": "array",
+						"items": { "type": "integer" },
+						"description": "The chunks asked for that didn't fit in maxChars, to read next"
+					},
+					"totalPages": { "type": "integer", "description": "When reading pages, how many the PDF has" },
+					"pages": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"page": { "type": "integer", "description": "The page's number in the PDF" },
+								"pageLabel": { "type": "string", "description": "The page number printed on it" },
+								"link": { "type": "string", "description": "zotero:// link that opens the file at the page" },
+								"text": { "type": "string", "description": "Markdown, each sentence after its ID, e.g. [p12.4], unless the text is plain" }
+							},
+							"required": ["page", "link", "text"]
+						}
+					},
+					"remainingPages": {
+						"type": "array",
+						"items": { "type": "integer" },
+						"description": "The pages asked for that didn't fit in maxChars or that Zotero is still getting, to read next"
+					},
+					"notice": { "type": "string", "description": "Such as that the text is plain, without sentence IDs, as Zotero doesn't have the file's structure" }
+				},
+				"required": ["key", "title", "link"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
+			"name": "zotero_ground_response",
+			"title": "Ground a response in Zotero files",
+			"description": "Turn the sentences an answer relies on into citations of the user's files: give the IDs of the sentences, as zotero_read_text gives them (e.g. c7.3 or p12.4), grouped into citations, and get each citation's exact text, section, page label and a link that opens the file at that passage. Call it once for all of an answer's citations, before giving the answer, and cite with the text and links it returns. Write each link out in full as plain text, right after the citation's page label if it has one, e.g. (p. 215, zotero://open/library/items/ABCD2345?page=12&rect=56,400,300,452). Never put it in Markdown link syntax or behind link text: many apps don't make zotero:// links clickable, so the user has to be able to see and copy the link itself. Only sentences zotero_read_text gave IDs for can be cited, not search passages or plain text. For citing items in a citation style, use zotero_generate_citation.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"citations": {
+						"type": "array",
+						"minItems": 1,
+						"maxItems": 50,
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string", "description": "The attachment's key, or the item's key it was read by" },
+								"sentences": {
+									"type": "array",
+									"minItems": 1,
+									"items": { "type": "string", "pattern": "^[cp]\\d+\\.\\d+$" },
+									"description": "The IDs of the sentences cited together, e.g. [\"c7.3\", \"c7.4\"]"
+								}
+							},
+							"required": ["key", "sentences"],
+							"additionalProperties": false
+						}
+					},
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["citations"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"citations": {
+						"type": "array",
+						"description": "In the order given",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"sentences": { "type": "array", "items": { "type": "string" } },
+								"text": { "type": "string", "description": "The cited sentences, with … between ones that aren't next to each other" },
+								"section": { "type": "string", "description": "The headings the text is under" },
+								"page": { "type": "integer", "description": "The PDF page it's on, from 1" },
+								"pageLabel": { "type": "string", "description": "The page number printed there" },
+								"link": { "type": "string", "description": "zotero:// link that opens the file at the passage, to write out in full as plain text after the page label" },
+								"error": { "type": "string", "description": "Why the citation couldn't be made" }
+							},
+							"required": ["key", "sentences"]
+						}
+					}
+				},
+				"required": ["citations"]
+			},
+			"annotations": {
+				"readOnlyHint": true
+			}
+		},
+		{
+			"name": "zotero_get_outline",
+			"title": "Get the outline of a Zotero file",
+			"description": "Get the sections of a PDF, EPUB, web page snapshot or text file in Zotero, as a tree of headings, each with the chunks holding its text (its subsections' included) as [first, last] ranges. Most sections have one range; a section the text comes back to after another one, or several sections with the same heading, have more. Use it to choose what to read, then read those chunks with zotero_read_text. Give an attachment key, or an item key for its best file. Zotero works out the sections when it doesn't have them yet. A file without sections is cut from its plain text, and has one entry, without a title, for all its chunks.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"key": { "type": "string", "description": "An attachment's key, or an item's key for its best file" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["key"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
 				"$defs": {
-					"outlineEntry": {
+					"section": {
 						"type": "object",
 						"properties": {
-							"title": { "type": "string" },
-							"page": { "type": "integer" },
-							"children": { "type": "array", "items": { "$ref": "#/$defs/outlineEntry" } }
+							"title": { "type": "string", "description": "Absent for text under no heading" },
+							"chunks": {
+								"type": "array",
+								"items": {
+									"type": "array",
+									"items": { "type": "integer" },
+									"minItems": 2,
+									"maxItems": 2
+								},
+								"description": "The chunks with the section's text, its subsections' included: the [first, last] chunk of each run of chunks that follow one another, in order"
+							},
+							"children": { "type": "array", "items": { "$ref": "#/$defs/section" } }
 						},
-						"required": ["title"]
+						"required": ["chunks"]
 					}
 				},
 				"properties": {
@@ -402,28 +549,11 @@
 					"title": { "type": "string" },
 					"contentType": { "type": "string" },
 					"link": { "type": "string", "description": "zotero:// link that opens the file" },
-					"totalPages": { "type": "integer" },
-					"pages": {
-						"type": "array",
-						"items": {
-							"type": "object",
-							"properties": {
-								"page": { "type": "integer" },
-								"label": { "type": "string", "description": "The page number printed on the page" },
-								"text": { "type": "string" }
-							},
-							"required": ["page", "text"]
-						}
-					},
-					"nextPage": { "type": "integer", "description": "Present when there are more pages in the range" },
-					"outline": { "type": "array", "items": { "$ref": "#/$defs/outlineEntry" }, "description": "With startPage 1" },
-					"totalChars": { "type": "integer" },
-					"offset": { "type": "integer" },
-					"text": { "type": "string" },
-					"nextOffset": { "type": "integer", "description": "Present when there's more text" },
+					"totalChunks": { "type": "integer" },
+					"outline": { "type": "array", "items": { "$ref": "#/$defs/section" } },
 					"notice": { "type": "string" }
 				},
-				"required": ["key", "title", "link"]
+				"required": ["key", "title", "link", "totalChunks", "outline"]
 			},
 			"annotations": {
 				"readOnlyHint": true
@@ -538,7 +668,7 @@
 		{
 			"name": "zotero_get_context",
 			"title": "Get what the user is looking at in Zotero",
-			"description": "Get what the user has open and selected in Zotero's main window, so requests like \"summarize this paper\", \"the page I'm on\", \"the passage I selected\" or \"the papers I selected\" can be answered. Returns the selected library, collections and items in the library tab, and which tab is active. If it's a PDF, EPUB or web page snapshot in Zotero's reader, it also returns the file, the page the user is on, the text they've selected and the annotations they've selected; if it's a note, the note. It also lists the tabs of all of Zotero's windows, with the IDs zotero_select, zotero_open and zotero_close take. Returns window: false when no Zotero window is open.",
+			"description": "Get what the user has open and selected in Zotero's main window, so requests like \"summarize this paper\", \"the page I'm on\", \"the passage I selected\" or \"the papers I selected\" can be answered. Returns the selected library, collections and items in the library tab, and which tab is active. If it's a PDF, EPUB or web page snapshot in Zotero's reader, it also returns the file, where the user is in it (a PDF's page, or an EPUB's or snapshot's chunk), the text they've selected and the annotations they've selected; if it's a note, the note. To read what the user is looking at, pass the page or chunk to zotero_read_text. It also lists the tabs of all of Zotero's windows, with the IDs zotero_select, zotero_open and zotero_close take. Returns window: false when no Zotero window is open.",
 			"inputSchema": {
 				"type": "object",
 				"additionalProperties": false
@@ -604,8 +734,9 @@
 							"contentType": { "type": "string" },
 							"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
 							"type": { "enum": ["pdf", "epub", "snapshot"] },
-							"page": { "type": "integer", "description": "PDF page the user is on, from 1" },
+							"page": { "type": "integer", "description": "PDF page the user is on, from 1, to read with zotero_read_text" },
 							"pageLabel": { "type": "string", "description": "The page number printed on that page, for citing" },
+							"chunk": { "type": "integer", "description": "For an EPUB or snapshot, the chunk the text in view starts in, to read with zotero_read_text. Absent when Zotero hasn't worked out the file's sections yet." },
 							"link": { "type": "string", "description": "zotero:// link that opens the file, at the page for a PDF" },
 							"selection": {
 								"type": "object",
@@ -735,7 +866,7 @@
 				"type": "object",
 				"properties": {
 					"key": { "type": "string", "description": "An attachment, a note, or a regular item to open its PDF, EPUB or snapshot" },
-					"page": { "type": "integer", "minimum": 1, "description": "PDF page to scroll to, from 1, as zotero_read_text and zotero_search_fulltext give" },
+					"page": { "type": "integer", "minimum": 1, "description": "PDF page to scroll to, from 1, as zotero_search_fulltext gives" },
 					"pageLabel": { "type": "string", "description": "The page number printed on the page, for a PDF or an EPUB with page numbers" },
 					"annotationKey": { "type": "string", "description": "An annotation of the file to scroll to and select" },
 					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
@@ -1066,6 +1197,59 @@
 					"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
 				},
 				"required": ["libraryID", "key", "title", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false
+			}
+		},
+		{
+			"name": "zotero_add_annotation",
+			"title": "Add a Zotero annotation",
+			"description": "Highlight or underline a passage of a PDF, EPUB or web page snapshot in Zotero, as the user would in Zotero's reader, optionally with a comment and tags. Give the IDs of the passage's sentences, as zotero_read_text gives them (e.g. c7.3 or p12.4). A passage running onto the next page of a PDF becomes one annotation, as in the reader; one across more pages, or across sections of an EPUB, becomes several, the comment on the first. Sentences that aren't next to each other are annotated separately, so give one passage per call. Only sentences with IDs can be annotated: zotero_read_text gives them once Zotero has worked out the file's structure, which reading the file does. Annotations can't be undone with Edit → Undo, but the user can delete them in the reader. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"key": { "type": "string", "description": "The attachment's key, or the item's key it was read by" },
+					"sentences": {
+						"type": "array",
+						"minItems": 1,
+						"items": { "type": "string", "pattern": "^[cp]\\d+\\.\\d+$" },
+						"description": "The IDs of the passage's sentences, e.g. [\"c7.3\", \"c7.4\"]"
+					},
+					"type": { "enum": ["highlight", "underline"], "default": "highlight" },
+					"color": { "type": "string", "description": "One of yellow, red, green, blue, purple, magenta, orange or gray, or a hex color such as #ffd400. Defaults to yellow." },
+					"comment": { "type": "string", "description": "A comment on the passage, as plain text" },
+					"tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["key", "sentences"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string", "description": "The attachment's key" },
+					"text": { "type": "string", "description": "The annotated sentences" },
+					"annotations": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"pageLabel": { "type": "string", "description": "The page number printed where it is" },
+								"link": { "type": "string", "description": "zotero:// link that opens the file at the annotation" }
+							},
+							"required": ["key", "link"]
+						}
+					}
+				},
+				"required": ["libraryID", "key", "text", "annotations"]
 			},
 			"_meta": {
 				"org.zotero/permission": "editLibrary"

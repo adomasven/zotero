@@ -731,6 +731,29 @@ class PDFWorker {
 	}
 
 	/**
+	 * Read regions of a structured document text pack back as text with its
+	 * structure, as a chunk's anchor is read
+	 *
+	 * @param {ArrayBuffer} buf - The pack
+	 * @param {Object[]} anchors - Per region, an anchor as a chunk has
+	 * @param {Object} [options]
+	 * @param {Boolean} [options.isPriority]
+	 * @returns {Promise<Object>} - { chunks }: per anchor, { text, sections,
+	 *     pageLabel, segments, positions }, or null if it doesn't resolve
+	 */
+	async readStructuredDocumentTextAnchors(buf, anchors, { isPriority = false } = {}) {
+		return this._enqueue(async () => {
+			try {
+				var result = await this._query('sdt.readAnchors', { buf, anchors }, [buf]);
+			}
+			catch (e) {
+				this._throwWorkerError('sdt.readAnchors', e);
+			}
+			return result;
+		}, !!isPriority);
+	}
+
+	/**
 	 * Find the reader positions of stretches of a structured document text
 	 * pack, each given as content ranges
 	 *
@@ -738,8 +761,8 @@ class PDFWorker {
 	 * @param {Array[][]} selections - Content ranges per stretch
 	 * @param {Object} [options]
 	 * @param {Boolean} [options.isPriority]
-	 * @returns {Promise<Array<Object|null>>} - Per stretch, { text,
-	 *     outlinePath, sections, pageLabel, positions }, or null if unresolved
+	 * @returns {Promise<Array<Object|null>>} - Per stretch, { text, sections,
+	 *     pageLabel, positions }, or null if unresolved
 	 */
 	async locateStructuredDocumentTextRanges(buf, selections, { isPriority = false } = {}) {
 		return this._enqueue(async () => {

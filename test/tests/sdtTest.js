@@ -61,8 +61,8 @@ describe("Zotero.SDT", function () {
 		assert.isTrue(chunks[0].anchor.pageRects.every(rect => rect[0] === 0));
 		// Where the Introduction starts, after the front matter
 		assert.deepEqual(chunks[0].sections, [
-			{ outlinePath: '', start: 0 },
-			{ outlinePath: 'Introduction', start: chunks[0].text.indexOf('Owls') },
+			{ outlinePath: [], start: 0 },
+			{ outlinePath: ['Introduction'], start: chunks[0].text.indexOf('Owls') },
 		]);
 		assert.isFalse(chunks[0].reference);
 
@@ -107,11 +107,79 @@ describe("Zotero.SDT", function () {
 		}
 	});
 
+	it("should locate sentences of chunks and pages", async function () {
+		// The structured text is extracted and located in the document worker
+		this.timeout(60000);
+		let item = await importFileAttachment('test.pdf');
+		let pako = getTestRequire()('pako');
+		await writeTestSDTCache(item, makeTestSDTPackV1WithContent(documentWorkerMetadata, pako, {
+			outline: [{ title: 'Introduction', ref: [0] }],
+			pages: [
+				{ label: '1', contentRange: [[0], [2]] },
+				{ label: '2', contentRange: [[2], [3]] },
+			],
+			blocks: [
+				testBlock('Introduction', 0, [10, 700, 300, 720], 'heading'),
+				testBlock('Owls are nocturnal. They hunt mice.', 0, [10, 600, 300, 680]),
+				testBlock('Barn owls nest in barns.', 1, [10, 600, 300, 680]),
+			],
+		}));
+
+		let { chunks: [chunk] } = await Zotero.SDT.getItemChunks(item.id, { segments: true });
+		let { pages: [page] } = await Zotero.SDT.getPages(item.id, [2]);
+		let sentencesOf = unit => Zotero.SDT.getSentences(unit).map(({ start, end }) => unit.text.slice(start, end));
+		// The heading isn't a sentence
+		assert.deepEqual(sentencesOf(chunk), ['Owls are nocturnal.', 'They hunt mice.', 'Barn owls nest in barns.']);
+		assert.deepEqual(sentencesOf(page), ['Barn owls nest in barns.']);
+		// The content ranges of a unit's sentences, from one to another
+		let rangesOf = (unit, first, last) => {
+			let sentences = Zotero.SDT.getSentences(unit);
+			return Zotero.SDT.getContentRanges(unit.segments, sentences[first].start, sentences[last].end);
+		};
+
+		let result = await Zotero.SDT.locateRanges(item.id, [rangesOf(chunk, 0, 1), rangesOf(page, 0, 0)]);
+		assert.isTrue(result.ok, result.reason);
+		let [first, second] = result.selections;
+		assert.equal(first.positions[0].pageIndex, 0);
+		assert.isAtLeast(first.positions[0].rects.length, 1);
+		assert.equal(first.pageLabel, '1');
+		assert.deepEqual(first.sections[0].outlinePath, ['Introduction']);
+		assert.equal(second.positions[0].pageIndex, 1);
+	});
+
+	describe("#getOutline()", function () {
+		it("should give the sections of chunks as a tree, each with its runs of chunks", function () {
+			let chunks = [
+				makeTestChunk(['Title page', 'Intro text'], { sections: [['', null], ['Intro', 'Intro text']] }),
+				makeTestChunk(['Aims text'], { sections: [['Intro > Aims', null]] }),
+				makeTestChunk(['Methods text'], { sections: [['Methods', null]] }),
+				makeTestChunk(['More intro'], { sections: [['Intro', null]] }),
+			];
+			assert.deepEqual(Zotero.SDT.getOutline(chunks), [
+				{ title: null, chunks: [[0, 0]], children: [] },
+				{
+					title: 'Intro',
+					// Without the chunk of Methods between
+					chunks: [[0, 1], [3, 3]],
+					children: [{ title: 'Aims', chunks: [[1, 1]], children: [] }],
+				},
+				{ title: 'Methods', chunks: [[2, 2]], children: [] },
+			]);
+		});
+	});
+
 	describe("#getChunkBlocks()", function () {
 		// A segment of a chunk's text in a block, under the given containers
 		function segment(text, chunkText, ref, blocks) {
 			let start = chunkText.indexOf(text);
 			return { start, end: start + text.length, ref: [...ref, 0], offset: 0, blocks };
+		}
+
+		// A chunk's blocks without their sentences, for testing the blocks alone
+		function blocksOf(chunk) {
+			return Zotero.SDT.getChunkBlocks(chunk).map(({ sentences: _sentences, rows, ...block }) => (rows
+				? { ...block, rows: rows.map(row => row.map(({ sentences: _cellSentences, ...cell }) => cell)) }
+				: block));
 		}
 
 		it("should give a chunk's text as its blocks, with a heading where a later section starts", function () {
@@ -120,8 +188,8 @@ describe("Zotero.SDT", function () {
 			let chunk = {
 				text,
 				sections: [
-					{ outlinePath: 'Intro', start: 0 },
-					{ outlinePath: 'Intro > Methods', start: text.indexOf('Second') },
+					{ outlinePath: ['Intro'], start: 0 },
+					{ outlinePath: ['Intro', 'Methods'], start: text.indexOf('Second') },
 				],
 				segments: [
 					segment('First paragraph.', text, [0], [{ type: 'paragraph', ref: [0] }]),
@@ -132,9 +200,9 @@ describe("Zotero.SDT", function () {
 					segment('A table row', text, [4], [{ type: 'table', ref: [4] }]),
 				],
 			};
-			assert.deepEqual(Zotero.SDT.getChunkBlocks(chunk), [
+			assert.deepEqual(blocksOf(chunk), [
 				{ type: 'paragraph', start: 0, end: 16, within: [] },
-				{ type: 'heading', outlinePath: 'Intro > Methods' },
+				{ type: 'heading', outlinePath: ['Intro', 'Methods'] },
 				{ type: 'paragraph', start: text.indexOf('Second'), end: text.indexOf('here.') + 5, within: [] },
 				{ type: 'listitem', start: text.indexOf('Item'), end: text.indexOf('Item') + 8, within: ['list'],
 					ordered: true, number: 2 },
@@ -147,8 +215,8 @@ describe("Zotero.SDT", function () {
 			let chunk = {
 				text,
 				sections: [
-					{ outlinePath: 'Intro', start: 0 },
-					{ outlinePath: 'Methods', start: text.indexOf('Methods') },
+					{ outlinePath: ['Intro'], start: 0 },
+					{ outlinePath: ['Methods'], start: text.indexOf('Methods') },
 				],
 				segments: [
 					segment('Body.', text, [0], [{ type: 'paragraph', ref: [0] }]),
@@ -161,8 +229,81 @@ describe("Zotero.SDT", function () {
 			assert.equal(Zotero.SDT.getChunkBlocks(chunk)[1].start, text.indexOf('Methods'));
 		});
 
-		it("should give null for a chunk without structure", function () {
-			assert.isNull(Zotero.SDT.getChunkBlocks({ text: 'Plain text', sections: [] }));
+		it("should give a table's text as rows of cells", function () {
+			let text = 'Before.\n\nName\n\nValue\n\nOwl\n\nTwo lines\n\nof text\n\nAfter.';
+			let table = { type: 'table', ref: [1] };
+			let cellSegment = (cellText, row, cell, paragraph = 0) => segment(cellText, text, [1, row, cell, paragraph], [
+				table,
+				{ type: 'tablerow', ref: [1, row] },
+				{ type: 'tablecell', ref: [1, row, cell] },
+				{ type: 'paragraph', ref: [1, row, cell, paragraph] },
+			]);
+			let chunk = {
+				text,
+				sections: [{ outlinePath: [], start: 0 }],
+				segments: [
+					segment('Before.', text, [0], [{ type: 'paragraph', ref: [0] }]),
+					cellSegment('Name', 0, 0),
+					cellSegment('Value', 0, 1),
+					cellSegment('Owl', 1, 0),
+					// A cell of two paragraphs
+					cellSegment('Two lines', 1, 1, 0),
+					cellSegment('of text', 1, 1, 1),
+					segment('After.', text, [2], [{ type: 'paragraph', ref: [2] }]),
+				],
+			};
+			let at = cellText => ({ start: text.indexOf(cellText), end: text.indexOf(cellText) + cellText.length });
+			assert.deepEqual(blocksOf(chunk), [
+				{ type: 'paragraph', start: 0, end: 7, within: [] },
+				{ type: 'table', rows: [
+					[at('Name'), at('Value')],
+					[at('Owl'), { start: text.indexOf('Two'), end: text.indexOf('of text') + 7 }],
+				] },
+				{ type: 'paragraph', ...at('After.'), within: [] },
+			]);
+		});
+
+		it("should give the sentences of blocks and table cells, a code block as one", function () {
+			let text = 'One. Two.\n\nx = 1. y = 2.\n\nA cell. Its end.';
+			let table = { type: 'table', ref: [2] };
+			let chunk = {
+				text,
+				sections: [{ outlinePath: [], start: 0 }],
+				segments: [
+					segment('One. Two.', text, [0], [{ type: 'paragraph', ref: [0] }]),
+					segment('x = 1. y = 2.', text, [1], [{ type: 'preformatted', ref: [1] }]),
+					segment('A cell. Its end.', text, [2, 0, 0, 0], [
+						table,
+						{ type: 'tablerow', ref: [2, 0] },
+						{ type: 'tablecell', ref: [2, 0, 0] },
+						{ type: 'paragraph', ref: [2, 0, 0, 0] },
+					]),
+				],
+			};
+			let sentencesOf = extents => extents.map(({ start, end }) => text.slice(start, end));
+			let [paragraph, code, { rows }] = Zotero.SDT.getChunkBlocks(chunk);
+			assert.deepEqual(sentencesOf(paragraph.sentences), ['One.', 'Two.']);
+			assert.deepEqual(sentencesOf(code.sentences), ['x = 1. y = 2.']);
+			assert.deepEqual(sentencesOf(rows[0][0].sentences), ['A cell.', 'Its end.']);
+			// Numbered through the chunk
+			assert.deepEqual(rows[0][0].sentences.map(sentence => sentence.number), [4, 5]);
+			// All of them, in that order
+			let sentences = Zotero.SDT.getSentences(chunk);
+			assert.deepEqual(sentencesOf(sentences), ['One.', 'Two.', 'x = 1. y = 2.', 'A cell.', 'Its end.']);
+			assert.deepEqual(sentences.map(sentence => sentence.number), [1, 2, 3, 4, 5]);
+		});
+
+		it("should give text without structure as its paragraphs", function () {
+			let text = 'One. Two.\n\nThree.';
+			assert.deepEqual(Zotero.SDT.getChunkBlocks({ text }), [
+				{
+					type: 'paragraph',
+					start: 0,
+					end: 9,
+					sentences: [{ start: 0, end: 4, number: 1 }, { start: 5, end: 9, number: 2 }],
+				},
+				{ type: 'paragraph', start: 11, end: 17, sentences: [{ start: 11, end: 17, number: 3 }] },
+			]);
 		});
 	});
 
@@ -501,6 +642,43 @@ describe("Zotero.SDT", function () {
 		assert.equal(result.reason, 'unavailable');
 	});
 
+	it("should read a PDF's pages, by number or label, in the document worker", async function () {
+		// Cold worker startup
+		this.timeout(60000);
+
+		let item = await importFileAttachment('test.pdf');
+		let pako = getTestRequire()('pako');
+		let bytes = makeTestSDTPackV1WithContent(documentWorkerMetadata, pako, {
+			outline: [
+				{ title: 'Introduction', ref: [0] },
+				{ title: 'Methods', ref: [2] },
+			],
+			pages: [
+				{ label: 'ix', contentRange: [[0], [2]] },
+				{ label: '10', contentRange: [[2], [4]] },
+			],
+			blocks: [
+				testBlock('Introduction', 0, [10, 700, 300, 720], 'heading'),
+				testBlock('Owls are nocturnal birds of prey.', 0, [10, 600, 300, 680]),
+				testBlock('Methods', 1, [10, 700, 300, 720], 'heading'),
+				testBlock('We tracked forty owls.', 1, [10, 600, 300, 680]),
+			],
+		});
+		await writeTestSDTCache(item, bytes);
+
+		let result = await Zotero.SDT.getPages(item.id, ['10', 1, 'xx', 5]);
+		assert.isTrue(result.ok);
+		assert.deepEqual(result.missing, ['xx', 5]);
+		assert.equal(result.totalPages, 2);
+		assert.deepEqual(result.pages.map(page => [page.pageIndex, page.pageLabel]), [[0, 'ix'], [1, '10']]);
+		assert.include(result.pages[1].text, 'We tracked forty owls.');
+		assert.notInclude(result.pages[1].text, 'Owls are nocturnal');
+		assert.isNotEmpty(result.pages[1].segments);
+
+		let epub = await importFileAttachment('stub.epub');
+		assert.deepEqual(await Zotero.SDT.getPages(epub.id, [1]), { ok: false, reason: 'unsupported' });
+	});
+
 	it("should cut chunks in the document worker", async function () {
 		// Cold worker startup
 		this.timeout(60000);
@@ -535,7 +713,7 @@ describe("Zotero.SDT", function () {
 			assert.lengthOf(chunks, 2);
 			assert.include(chunks[0].text, 'Owls are nocturnal');
 			assert.include(chunks[1].text, 'We tracked forty owls');
-			assert.deepEqual(chunks.map(chunk => chunk.outlinePath), ['Introduction', 'Methods']);
+			assert.deepEqual(chunks.map(chunk => chunk.sections[0].outlinePath), [['Introduction'], ['Methods']]);
 			assert.deepEqual(chunks.map(chunk => chunk.anchor.pageRects.map(rect => rect[0])), [[0], [1]]);
 			// Each chunk carries the position it opens at, and no more
 			assert.deepEqual(chunks.map(chunk => chunk.position.pageIndex), [0, 1]);
@@ -544,6 +722,24 @@ describe("Zotero.SDT", function () {
 			assert.isFalse('segments' in chunks[0]);
 			let withSegments = await Zotero.SDT.getItemChunks(item.id, { segments: true });
 			assert.isNotEmpty(withSegments.chunks[0].segments);
+			assert.isTrue(spy.calledTwice);
+
+			// The same pack isn't cut again, with segments or without
+			assert.strictEqual((await Zotero.SDT.getItemChunks(item.id, { segments: true })).chunks, withSegments.chunks);
+			let again = await Zotero.SDT.getItemChunks(item.id);
+			assert.deepEqual(again.chunks.map(chunk => chunk.text), chunks.map(chunk => chunk.text));
+			assert.isFalse('segments' in again.chunks[0]);
+			assert.equal(again.contentHash, TEST_PDF_HASH);
+			assert.isTrue(spy.calledTwice);
+
+			// Another pack for the file is
+			await writeTestSDTCache(item, makeTestSDTPackV1WithContent(documentWorkerMetadata, pako, {
+				pages: [{ label: '1', contentRange: [[0], [1]] }],
+				blocks: [testBlock('Owls are nocturnal birds of prey.', 0, [10, 600, 300, 680])],
+			}));
+			let recut = await Zotero.SDT.getItemChunks(item.id);
+			assert.isTrue(spy.calledThrice);
+			assert.lengthOf(recut.chunks, 1);
 		}
 		finally {
 			spy.restore();
@@ -551,13 +747,15 @@ describe("Zotero.SDT", function () {
 
 		// A worker failure, or a chunker the metadata doesn't describe, is
 		// reported as a failed cut rather than worked around
+		let other = await importFileAttachment('test.pdf');
+		await writeTestSDTCache(other, bytes);
 		let stub = sinon.stub(Zotero.PDFWorker, 'getStructuredDocumentTextChunks')
 			.rejects(new Error('Worker down'));
 		try {
-			assert.deepEqual(await Zotero.SDT.getItemChunks(item.id),
+			assert.deepEqual(await Zotero.SDT.getItemChunks(other.id),
 				{ ok: false, reason: 'cut-failed' });
 			stub.resolves({ chunks: [], sourceHash: TEST_PDF_HASH, chunkerVersion: 999 });
-			assert.deepEqual(await Zotero.SDT.getItemChunks(item.id),
+			assert.deepEqual(await Zotero.SDT.getItemChunks(other.id),
 				{ ok: false, reason: 'cut-failed' });
 		}
 		finally {
@@ -569,7 +767,7 @@ describe("Zotero.SDT", function () {
 		let chunks = Zotero.SDT.getPlainTextChunks('First paragraph.\n\nSecond\nparagraph.');
 		assert.lengthOf(chunks, 1);
 		assert.equal(chunks[0].text, 'First paragraph.\n\nSecond paragraph.');
-		assert.deepEqual(chunks[0].sections, [{ outlinePath: '', start: 0 }]);
+		assert.deepEqual(chunks[0].sections, [{ outlinePath: [], start: 0 }]);
 		assert.isFalse('anchor' in chunks[0]);
 	});
 
