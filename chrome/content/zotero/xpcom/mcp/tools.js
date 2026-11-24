@@ -186,13 +186,13 @@ Zotero.MCP.Tools = new function () {
 	 * Items, notes and attachments as Zotero item JSON, with a regular item's attachments and
 	 * notes, and an attachment's file
 	 */
-	this.getItems = async function ({ keys, libraryID }) {
+	this.getItems = async function ({ keys, includeTrashed = false, libraryID }) {
 		libraryID = getLibraryID(libraryID);
 		let items = [];
 		let missing = [];
 		for (let key of new Set(keys)) {
 			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
-			if (!item) {
+			if (!item || item.deleted && !includeTrashed) {
 				missing.push(key);
 				continue;
 			}

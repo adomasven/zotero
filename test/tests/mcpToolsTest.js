@@ -147,6 +147,21 @@ describe("MCP tools", function () {
 			}]);
 			assert.deepEqual(items[0].notes, [{ key: note.key, title: 'My note' }]);
 		});
+		
+		it("should leave out items in the trash unless asked for them", async function () {
+			let item = await createArticle();
+			item.deleted = true;
+			await item.saveTx();
+			
+			let { items, missing } = await call('zotero_get_items', { keys: [item.key] });
+			assert.lengthOf(items, 0);
+			assert.deepEqual(missing, [item.key]);
+			
+			({ items, missing } = await call('zotero_get_items', { keys: [item.key], includeTrashed: true }));
+			assert.equal(items[0].key, item.key);
+			assert.isTrue(items[0].deleted);
+			assert.isUndefined(missing);
+		});
 	});
 	
 	describe("zotero_list_collections", function () {

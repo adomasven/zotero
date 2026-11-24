@@ -119,6 +119,7 @@
 						"minItems": 1,
 						"maxItems": 50
 					},
+					"includeTrashed": { "type": "boolean", "default": false, "description": "Also get items in the trash, which have deleted: true" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
 				"required": ["keys"],
@@ -168,7 +169,7 @@
 							"required": ["key", "itemType", "link"]
 						}
 					},
-					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys with no item" }
+					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys with no item, or of items in the trash without includeTrashed" }
 				},
 				"required": ["libraryID", "items"]
 			},
