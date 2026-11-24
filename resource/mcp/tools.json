@@ -57,12 +57,15 @@
 					"query": { "type": "string", "description": "Empty lists all items in the scope" },
 					"mode": {
 						"enum": ["titleCreatorYear", "fields", "everything"],
-						"description": "What free text matches: title, creators and year; all fields, tags and notes; or those and attachment full text. Defaults to the user's search mode."
+						"default": "titleCreatorYear",
+						"description": "What free text matches: title, creators and year; all fields, tags and notes; or those and attachment full text"
 					},
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
 					"collectionKey": { "type": "string", "description": "Only items in this collection" },
-					"sort": { "enum": ["dateModified", "dateAdded", "date", "title", "creator"], "default": "dateModified" },
-					"direction": { "enum": ["asc", "desc"], "description": "Defaults to newest first for dates, A to Z otherwise" },
+					"includeSubcollections": { "type": "boolean", "default": false, "description": "Also items in the collection's subcollections, at any depth" },
+					"savedSearchKey": { "type": "string", "description": "Only items this saved search finds. total is how many it finds." },
+					"sortField": { "enum": ["dateModified", "dateAdded", "date", "title", "creator"], "default": "dateModified", "description": "What to order items by" },
+					"sortDirection": { "enum": ["asc", "desc"], "description": "Defaults to newest first for dates, A to Z otherwise" },
 					"limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 25 },
 					"offset": { "type": "integer", "minimum": 0, "default": 0 }
 				},
@@ -183,12 +186,13 @@
 		{
 			"name": "zotero_list_collections",
 			"title": "List Zotero collections",
-			"description": "List a library's collections, or a collection's subcollections at any depth, with how many items each has. The count is of the items directly in the collection, not in its subcollections; zotero_search with the collectionKey lists them.",
+			"description": "List a library's collections, or a collection's subcollections at any depth, with how many items each has. zotero_search with the collectionKey lists them.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
-					"parentKey": { "type": "string" }
+					"parentKey": { "type": "string" },
+					"includeSubcollections": { "type": "boolean", "default": false, "description": "Count the items in each collection's subcollections too" }
 				},
 				"additionalProperties": false
 			},
@@ -204,7 +208,7 @@
 								"key": { "type": "string" },
 								"name": { "type": "string" },
 								"parentKey": { "type": "string" },
-								"itemCount": { "type": "integer", "description": "Items directly in the collection, not in its subcollections" }
+								"itemCount": { "type": "integer", "description": "Top-level items in the collection, and in its subcollections with includeSubcollections" }
 							},
 							"required": ["key", "name", "itemCount"]
 						}
@@ -260,7 +264,7 @@
 		{
 			"name": "zotero_list_saved_searches",
 			"title": "List Zotero saved searches",
-			"description": "List a library's saved searches, with their conditions and how many items each finds. Show one to the user with zotero_select's savedSearchKey; get its items with zotero_search, or zotero_select's selection.",
+			"description": "List a library's saved searches, with their conditions. Get the items one finds, and how many, with zotero_search's savedSearchKey; show it to the user with zotero_select's savedSearchKey.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -291,10 +295,9 @@
 										}
 									}
 								},
-								"itemCount": { "type": "integer", "description": "Top-level items it finds, as its view shows them" },
 								"link": { "type": "string", "description": "zotero:// link that shows it in Zotero" }
 							},
-							"required": ["key", "name", "conditions", "itemCount", "link"]
+							"required": ["key", "name", "conditions", "link"]
 						}
 					}
 				},
@@ -379,6 +382,7 @@
 						"description": "Only these items' files, given by item or attachment keys"
 					},
 					"collectionKey": { "type": "string", "description": "Only the files of items in this collection" },
+					"includeSubcollections": { "type": "boolean", "default": false, "description": "Also items in the collection's subcollections, at any depth" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
 					"limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Files per call" },
 					"offset": { "type": "integer", "minimum": 0, "default": 0 },
@@ -1172,7 +1176,7 @@
 					"key": { "type": "string", "description": "For update, the saved search's key" },
 					"name": { "type": "string" },
 					"query": { "type": "string", "description": "As for zotero_search, e.g. `tag:\"to read\" no notes`" },
-					"mode": { "enum": ["titleCreatorYear", "fields", "everything"], "description": "How free text in the query matches, as for zotero_search. Defaults to the search box's mode." },
+					"mode": { "enum": ["titleCreatorYear", "fields", "everything"], "default": "titleCreatorYear", "description": "How free text in the query matches, as for zotero_search" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
 				"required": ["action"],

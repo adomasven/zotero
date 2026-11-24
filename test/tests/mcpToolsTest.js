@@ -77,7 +77,7 @@ describe("MCP tools", function () {
 			let { items } = await call('zotero_search', { query: word, mode: 'fields' });
 			assert.deepEqual(items.map(item => item.key), [item.key]);
 			
-			({ items } = await call('zotero_search', { query: `type:note ${word}` }));
+			({ items } = await call('zotero_search', { query: `type:note ${word}`, mode: 'fields' }));
 			assert.sameMembers(items.map(item => item.key), notes.map(note => note.key));
 			assert.isTrue(items.every(note => note.parentKey == item.key));
 		});
@@ -93,14 +93,14 @@ describe("MCP tools", function () {
 			await createArticle({ title: `${prefix} d` });
 			let [b, c, a] = keys;
 			
-			let page = await call('zotero_search', { collectionKey: collection.key, sort: 'title', limit: 2 });
+			let page = await call('zotero_search', { collectionKey: collection.key, sortField: 'title', limit: 2 });
 			assert.equal(page.total, 3);
 			assert.deepEqual(page.items.map(item => item.key), [a, b]);
 			assert.equal(page.nextOffset, 2);
 			
-			page = await call('zotero_search', { collectionKey: collection.key, sort: 'title', direction: 'desc', limit: 2 });
+			page = await call('zotero_search', { collectionKey: collection.key, sortField: 'title', sortDirection: 'desc', limit: 2 });
 			assert.deepEqual(page.items.map(item => item.key), [c, b]);
-			page = await call('zotero_search', { collectionKey: collection.key, sort: 'title', direction: 'desc', limit: 2, offset: 2 });
+			page = await call('zotero_search', { collectionKey: collection.key, sortField: 'title', sortDirection: 'desc', limit: 2, offset: 2 });
 			assert.deepEqual(page.items.map(item => item.key), [a]);
 			assert.notProperty(page, 'nextOffset');
 			
@@ -177,6 +177,22 @@ describe("MCP tools", function () {
 				{ key: child.key, name: child.name, parentKey: parent.key, itemCount: 0 },
 				{ key: grandchild.key, name: grandchild.name, parentKey: child.key, itemCount: 1 },
 			]);
+			
+			// Whatever the user's setting for showing items from subcollections
+			Zotero.Prefs.set('recursiveCollections', true);
+			try {
+				({ collections } = await call('zotero_list_collections', { parentKey: parent.key }));
+				assert.equal(collections.find(c => c.key == child.key).itemCount, 0);
+				assert.lengthOf((await call('zotero_search', { collectionKey: child.key })).items, 0);
+			}
+			finally {
+				Zotero.Prefs.clear('recursiveCollections');
+			}
+			({ collections } = await call('zotero_list_collections', { parentKey: parent.key, includeSubcollections: true }));
+			assert.equal(collections.find(c => c.key == child.key).itemCount, 1);
+			assert.lengthOf(
+				(await call('zotero_search', { collectionKey: child.key, includeSubcollections: true })).items, 1
+			);
 		});
 	});
 	
@@ -1168,7 +1184,9 @@ describe("MCP tools", function () {
 			let { savedSearches } = await call('zotero_list_saved_searches', {});
 			let listed = savedSearches.find(search => search.key == created.key);
 			assert.equal(listed.name, name);
-			assert.equal(listed.itemCount, 2);
+			assert.notProperty(listed, 'itemCount');
+			let found = await call('zotero_search', { savedSearchKey: created.key });
+			assert.equal(found.total, 2);
 			assert.deepInclude(listed.conditions, { condition: 'tag', operator: 'is', value: tag });
 			
 			let updated = await call('zotero_manage_saved_searches', {

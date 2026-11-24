@@ -132,20 +132,29 @@ Zotero.MCP.Tools = new function () {
 	 * the item they belong to
 	 */
 	this.search = async function ({
-		query = '', mode = Zotero.Prefs.get('search.quicksearch-mode'), libraryID, collectionKey,
-		sort = 'dateModified', direction, limit = 25, offset = 0,
+		query = '', mode = 'titleCreatorYear', libraryID, collectionKey, includeSubcollections = false,
+		savedSearchKey, sortField = 'dateModified', sortDirection, limit = 25, offset = 0,
 	}) {
 		libraryID = getLibraryID(libraryID);
+		if (collectionKey && savedSearchKey) {
+			throw new Zotero.MCP.ToolError('Give collectionKey or savedSearchKey, not both');
+		}
 		
 		// The scope, as in Zotero.CollectionTreeRow#getSearchObject()
-		let scope = new Zotero.Search();
-		scope.libraryID = libraryID;
-		scope.addCondition('noChildren', 'true');
-		if (collectionKey) {
-			let collection = getCollection(libraryID, collectionKey);
-			scope.addCondition('collectionID', 'is', collection.id);
-			if (Zotero.Prefs.get('recursiveCollections')) {
-				scope.addCondition('recursive', 'true');
+		let scope;
+		if (savedSearchKey) {
+			scope = getSavedSearch(libraryID, savedSearchKey);
+		}
+		else {
+			scope = new Zotero.Search();
+			scope.libraryID = libraryID;
+			scope.addCondition('noChildren', 'true');
+			if (collectionKey) {
+				let collection = getCollection(libraryID, collectionKey);
+				scope.addCondition('collectionID', 'is', collection.id);
+				if (includeSubcollections) {
+					scope.addCondition('recursive', 'true');
+				}
 			}
 		}
 		let search = new Zotero.Search();
@@ -172,7 +181,7 @@ Zotero.MCP.Tools = new function () {
 			items = Zotero.Items.getTopLevel(items);
 		}
 		items = items.filter(item => !item.deleted);
-		sortItems(items, sort, direction);
+		sortItems(items, sortField, sortDirection);
 		let page = items.slice(offset, offset + limit);
 		return Zotero.MCP.jsonResult({
 			libraryID,
@@ -222,7 +231,7 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * All the library's collections, or all those inside a collection, at every depth
 	 */
-	this.listCollections = async function ({ libraryID, parentKey }) {
+	this.listCollections = async function ({ libraryID, parentKey, includeSubcollections = false }) {
 		libraryID = getLibraryID(libraryID);
 		let collections;
 		if (parentKey) {
@@ -238,26 +247,29 @@ Zotero.MCP.Tools = new function () {
 				key: collection.key,
 				name: collection.name,
 				parentKey: collection.parentKey || undefined,
-				itemCount: collection.getChildItems(true).length,
+				itemCount: includeSubcollections
+					? new Set([collection, ...Zotero.Collections.getByParent(collection.id, true)]
+						.flatMap(c => c.getChildItems(true))).size
+					: collection.getChildItems(true).length,
 			})),
 		});
 	};
 	
 	/**
-	 * Saved searches, with their conditions and how many items each finds
+	 * Saved searches, with their conditions. Not how many items each finds, which would run
+	 * every saved search.
 	 */
 	this.listSavedSearches = async function ({ libraryID }) {
 		libraryID = getLibraryID(libraryID);
 		let searches = Zotero.Searches.getByLibrary(libraryID).filter(search => !search.deleted);
 		return Zotero.MCP.jsonResult({
 			libraryID,
-			savedSearches: await Promise.all(searches.map(async search => ({
+			savedSearches: searches.map(search => ({
 				key: search.key,
 				name: search.name,
 				conditions: search.toJSON().conditions,
-				itemCount: await countSearchItems(search),
 				link: `zotero://select/${Zotero.API.getLibraryPrefix(libraryID)}/searches/${search.key}`,
-			}))),
+			})),
 		});
 	};
 	
@@ -338,7 +350,8 @@ Zotero.MCP.Tools = new function () {
 	 * are found again in the text the index was built from.
 	 */
 	this.searchFulltext = async function ({
-		query, keys, collectionKey, libraryID, limit = 10, offset = 0, passagesPerFile = 3,
+		query, keys, collectionKey, includeSubcollections = false, libraryID, limit = 10, offset = 0,
+		passagesPerFile = 3,
 	}, { deadline }) {
 		let structureDeadline = Math.min(deadline, Date.now() + Zotero.MCP.Tools._structureWait);
 		let labelsPending = false;
@@ -351,7 +364,7 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError('query has no words to search for');
 		}
 		// Attachments with every term, as in the search box
-		let ids = await getScopeAttachmentIDs(libraryID, { keys, collectionKey });
+		let ids = await getScopeAttachmentIDs(libraryID, { keys, collectionKey, includeSubcollections });
 		for (let term of terms) {
 			if (ids && !ids.length) {
 				break;
@@ -786,11 +799,7 @@ Zotero.MCP.Tools = new function () {
 			rowID = 'C' + getCollection(libraryID, collectionKey).id;
 		}
 		else if (savedSearchKey) {
-			let search = Zotero.Searches.getByLibraryAndKey(libraryID, savedSearchKey);
-			if (!search || search.deleted) {
-				throw new Zotero.MCP.ToolError(`No saved search ${savedSearchKey} in library ${libraryID}`);
-			}
-			rowID = 'S' + search.id;
+			rowID = 'S' + getSavedSearch(libraryID, savedSearchKey).id;
 		}
 		let items = [];
 		let missing = [];
@@ -1306,7 +1315,7 @@ Zotero.MCP.Tools = new function () {
 	 * its query
 	 */
 	this.manageSavedSearches = async function ({
-		action, key, name, query, mode = Zotero.Prefs.get('search.quicksearch-mode'), libraryID,
+		action, key, name, query, mode = 'titleCreatorYear', libraryID,
 	}, { clientID }) {
 		libraryID = getLibraryID(libraryID);
 		name = name?.trim();
@@ -2537,7 +2546,7 @@ Zotero.MCP.Tools = new function () {
 	 * The attachments of the items given by keys or in a collection, or null for the whole
 	 * library
 	 */
-	async function getScopeAttachmentIDs(libraryID, { keys, collectionKey }) {
+	async function getScopeAttachmentIDs(libraryID, { keys, collectionKey, includeSubcollections }) {
 		if (keys && collectionKey) {
 			throw new Zotero.MCP.ToolError('Give keys or collectionKey, not both');
 		}
@@ -2554,7 +2563,7 @@ Zotero.MCP.Tools = new function () {
 		else if (collectionKey) {
 			let collection = getCollection(libraryID, collectionKey);
 			let collections = [collection];
-			if (Zotero.Prefs.get('recursiveCollections')) {
+			if (includeSubcollections) {
 				collections.push(...Zotero.Collections.get(
 					collection.getDescendents(false, 'collection').map(descendant => descendant.id)
 				));
@@ -3017,6 +3026,14 @@ Zotero.MCP.Tools = new function () {
 	async function countSearchItems(search) {
 		let items = await Zotero.Items.getAsync(await search.search());
 		return Zotero.Items.getTopLevel(items).filter(item => !item.deleted).length;
+	}
+	
+	function getSavedSearch(libraryID, key) {
+		let search = Zotero.Searches.getByLibraryAndKey(libraryID, key);
+		if (!search || search.deleted) {
+			throw new Zotero.MCP.ToolError(`No saved search ${key} in library ${libraryID}`);
+		}
+		return search;
 	}
 	
 	function getCollection(libraryID, key) {
