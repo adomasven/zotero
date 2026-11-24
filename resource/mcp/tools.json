@@ -308,7 +308,7 @@
 		{
 			"name": "zotero_get_item_types",
 			"title": "List Zotero item types",
-			"description": "List the item types an item can be (book, journalArticle and so on), with each type's fields and creator types, by the names zotero_add_items and zotero_update_items take. Pass itemTypes for only some types.",
+			"description": "List the item types an item can be (book, journalArticle and so on), with each type's fields and creator types, by the names zotero_add_items, zotero_update_items and zotero_change_item_types take. Pass itemTypes for only some types.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -944,7 +944,7 @@
 		{
 			"name": "zotero_update_items",
 			"title": "Edit Zotero items",
-			"description": "Change items' metadata, tags and collections: set or clear fields (title, date, DOI, abstractNote and so on), replace creators, add or remove tags, and add items to or remove them from collections. Use it to tag, retitle, correct or file items. Up to 50 items per call. The whole call succeeds or changes nothing: if any change is invalid (an unknown key, or a field the item's type doesn't have), the error says why and nothing is changed. The user can undo the whole call in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
+			"description": "Change items' metadata, tags and collections: set or clear fields (title, date, DOI, abstractNote and so on), replace creators, add or remove tags, and add items to or remove them from collections. Use it to tag, retitle, correct or file items; to change an item's type, use zotero_change_item_types. Up to 50 items per call. The whole call succeeds or changes nothing: if any change is invalid (an unknown key, or a field the item's type doesn't have), the error says why and nothing is changed. The user can undo the whole call in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1022,6 +1022,90 @@
 								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
 							},
 							"required": ["key", "itemType", "title", "link"]
+						}
+					}
+				},
+				"required": ["libraryID", "items"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_change_item_types",
+			"title": "Change Zotero item types",
+			"description": "Change items' types, e.g. from journalArticle to bookSection, as the Item Type menu in Zotero's item pane does. Fields the new type also has keep their values. A field with a counterpart in the new type moves to it (e.g. publicationTitle becomes bookTitle; zotero_get_item_types lists each field's baseField). Fields the new type doesn't have are removed, and the result gives their values, so you can tell the user or put them elsewhere. Creators of the old type's main type (e.g. author) get the new type's main type, and other creators whose type the new type doesn't have become contributors. Use zotero_update_items afterwards to fill the new type's fields. Notes, attachments and annotations can't change type. Up to 50 items per call. The whole call succeeds or changes nothing, and the user can undo it in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"changes": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string", "description": "The item's key" },
+								"itemType": { "enum": ["artwork", "audioRecording", "bill", "blogPost", "book", "bookSection", "case", "computerProgram", "conferencePaper", "dataset", "dictionaryEntry", "document", "email", "encyclopediaArticle", "film", "forumPost", "hearing", "instantMessage", "interview", "journalArticle", "letter", "magazineArticle", "manuscript", "map", "newspaperArticle", "patent", "podcast", "preprint", "presentation", "radioBroadcast", "report", "standard", "statute", "thesis", "tvBroadcast", "videoRecording", "webpage"], "description": "The new type" }
+							},
+							"required": ["key", "itemType"],
+							"additionalProperties": false
+						},
+						"minItems": 1,
+						"maxItems": 50
+					},
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["changes"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"items": {
+						"type": "array",
+						"description": "The items as they are now, with what the change did to them",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"itemType": { "type": "string" },
+								"parentKey": { "type": "string" },
+								"title": { "type": "string" },
+								"creators": { "type": "string" },
+								"date": { "type": "string" },
+								"citationKey": { "type": "string" },
+								"file": {
+									"type": "object",
+									"properties": {
+										"key": { "type": "string" },
+										"contentType": { "type": "string" }
+									},
+									"required": ["key"]
+								},
+								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" },
+								"oldItemType": { "type": "string" },
+								"movedFields": { "type": "object", "description": "Old field → the new type's field its value moved to", "additionalProperties": { "type": "string" } },
+								"removedFields": { "type": "object", "description": "Old field → the value it had, which the item no longer has", "additionalProperties": { "type": "string" } },
+								"changedCreatorTypes": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"properties": {
+											"name": { "type": "string" },
+											"from": { "type": "string" },
+											"to": { "type": "string" }
+										},
+										"required": ["name", "from", "to"]
+									}
+								}
+							},
+							"required": ["key", "itemType", "title", "link", "oldItemType", "movedFields", "removedFields", "changedCreatorTypes"]
 						}
 					}
 				},

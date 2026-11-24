@@ -967,10 +967,82 @@ describe("MCP tools", function () {
 			for (let tool of tools) {
 				findEnums(tool.inputSchema);
 			}
-			assert.lengthOf(enums, 2);
+			assert.lengthOf(enums, 3);
 			for (let itemTypeEnum of enums) {
 				assert.deepEqual([...itemTypeEnum].sort(), expected);
 			}
+		});
+	});
+	
+	describe("zotero_change_item_types", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should change types in one step the user can undo, and say which fields moved or were removed", async function () {
+			let article = await createArticle({ title: 'T' });
+			article.setField('publicationTitle', 'The Book');
+			article.setField('issue', '3');
+			article.setCreators([
+				{ creatorType: 'author', firstName: 'Ann', lastName: 'Lee' },
+				{ creatorType: 'reviewedAuthor', firstName: 'Bo', lastName: 'Ng' },
+			]);
+			await article.saveTx();
+			// book -> bookSection moves the title to bookTitle, which isn't a base field mapping
+			let book = await createDataObject('item', { itemType: 'book', title: 'B' });
+			book.setField('shortTitle', 'S');
+			await book.saveTx();
+			
+			let { items } = await call('zotero_change_item_types', {
+				changes: [{ key: article.key, itemType: 'bookSection' }, { key: book.key, itemType: 'bookSection' }],
+			});
+			assert.equal(article.itemType, 'bookSection');
+			assert.equal(article.getField('bookTitle'), 'The Book');
+			assert.equal(article.getField('title'), 'T');
+			assert.deepInclude(items[0], {
+				key: article.key,
+				itemType: 'bookSection',
+				oldItemType: 'journalArticle',
+				movedFields: { publicationTitle: 'bookTitle' },
+				removedFields: { issue: '3' },
+				changedCreatorTypes: [{ name: 'Bo Ng', from: 'reviewedAuthor', to: 'contributor' }],
+			});
+			assert.equal(book.getField('bookTitle'), 'B');
+			assert.deepInclude(items[1], {
+				movedFields: { title: 'bookTitle' },
+				removedFields: { shortTitle: 'S' },
+				changedCreatorTypes: [],
+			});
+			assert.deepEqual(Zotero.UndoHistory.getUndoAction(), {
+				action: 'undo-action-mcp-changes',
+				actionArgs: { app: 'test-client' },
+			});
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.equal(article.itemType, 'journalArticle');
+			assert.equal(article.getField('publicationTitle'), 'The Book');
+			assert.equal(article.getField('issue'), '3');
+			assert.equal(Zotero.CreatorTypes.getName(article.getCreator(1).creatorTypeID), 'reviewedAuthor');
+			assert.equal(book.itemType, 'book');
+			assert.equal(book.getField('title'), 'B');
+			assert.isFalse(Zotero.UndoHistory.canUndo());
+		});
+		
+		it("should change nothing if any item's type can't be changed", async function () {
+			let article = await createArticle({ title: 'T' });
+			let note = await createDataObject('item', { itemType: 'note' });
+			let error = await callForError('zotero_change_item_types', {
+				changes: [{ key: article.key, itemType: 'book' }, { key: note.key, itemType: 'book' }],
+			});
+			assert.match(error, new RegExp(`${note.key} is a note, whose type can't be changed`));
+			assert.equal(article.itemType, 'journalArticle');
+			
+			error = await callForError('zotero_change_item_types', {
+				changes: [{ key: article.key, itemType: 'note' }],
+			});
+			assert.include(error, 'itemType');
+			assert.equal(article.itemType, 'journalArticle');
 		});
 	});
 	
@@ -1072,7 +1144,10 @@ describe("MCP tools", function () {
 		it("should refuse to merge items of different types", async function () {
 			let a = await createDataObject('item', { itemType: 'book' });
 			let b = await createDataObject('item', { itemType: 'journalArticle' });
-			assert.match(await callForError('zotero_merge_items', { keys: [a.key, b.key] }), /different types/);
+			assert.match(
+				await callForError('zotero_merge_items', { keys: [a.key, b.key] }),
+				/different types.*zotero_change_item_types/
+			);
 		});
 	});
 	

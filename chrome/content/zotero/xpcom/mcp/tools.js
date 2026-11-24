@@ -1157,6 +1157,92 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * Change items' types, as the item pane's Item Type menu does, all or none
+	 */
+	this.changeItemTypes = async function ({ changes, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		let items = [];
+		for (let { key } of changes) {
+			let item = await getItem(libraryID, key);
+			if (!item.isEditable()) {
+				throw new Zotero.MCP.ToolError(`${item.key} can't be edited`);
+			}
+			// Zotero.Item.setType() doesn't change notes, attachments or annotations
+			if (!item.isRegularItem()) {
+				throw new Zotero.MCP.ToolError(
+					`${item.key} is ${item.isNote() ? 'a note' : 'an ' + item.itemType}, whose type can't be changed`
+				);
+			}
+			if (items.includes(item)) {
+				throw new Zotero.MCP.ToolError(`${item.key} is in changes more than once`);
+			}
+			items.push(item);
+		}
+		
+		let fieldValues = item => Object.fromEntries(
+			item.getUsedFields(true).map(field => [field, item.getField(field)])
+		);
+		let changed;
+		try {
+			changed = await edit(clientID, async () => {
+				let changed = [];
+				for (let [i, item] of items.entries()) {
+					let oldItemType = item.itemType;
+					let oldFields = fieldValues(item);
+					let oldCreators = item.getCreators();
+					item.setType(Zotero.ItemTypes.getID(changes[i].itemType));
+					await item.save();
+					
+					// setType() copies values to the new type's fields, by base field and for
+					// book <-> bookSection, so a value that left one field and is now in another moved
+					let newFields = fieldValues(item);
+					let filled = Object.keys(newFields).filter(field => newFields[field] !== oldFields[field]);
+					let movedFields = {};
+					let removedFields = {};
+					for (let [field, value] of Object.entries(oldFields)) {
+						if (newFields[field] === value) {
+							continue;
+						}
+						let to = filled.find(newField => newFields[newField] === value);
+						if (to) {
+							movedFields[field] = to;
+							filled.splice(filled.indexOf(to), 1);
+						}
+						else {
+							removedFields[field] = value;
+						}
+					}
+					let changedCreatorTypes = item.getCreators().flatMap((creator, j) => (
+						creator.creatorTypeID == oldCreators[j].creatorTypeID
+							? []
+							: [{
+								name: [creator.firstName, creator.lastName].filter(Boolean).join(' '),
+								from: Zotero.CreatorTypes.getName(oldCreators[j].creatorTypeID),
+								to: Zotero.CreatorTypes.getName(creator.creatorTypeID),
+							}]
+					));
+					changed.push({ item, oldItemType, movedFields, removedFields, changedCreatorTypes });
+				}
+				return changed;
+			});
+		}
+		catch (e) {
+			// The transaction was rolled back, but the items still have the changes in memory
+			for (let item of items) {
+				await item.reload(null, true);
+			}
+			throw e;
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			items: await Promise.all(changed.map(async ({ item, ...change }) => ({
+				...await summarize(item),
+				...change,
+			}))),
+		});
+	};
+	
+	/**
 	 * Create, rename or move a collection
 	 */
 	this.manageCollections = async function ({ action, key, name, parentKey, libraryID }, { clientID }) {
@@ -1540,7 +1626,7 @@ Zotero.MCP.Tools = new function () {
 		}
 		if (new Set(items.map(item => item.itemTypeID)).size > 1) {
 			throw new Zotero.MCP.ToolError(
-				'Items of different types can\'t be merged. The user can change an item\'s type in Zotero\'s item pane.'
+				'Items of different types can\'t be merged. Change their types with zotero_change_item_types first.'
 			);
 		}
 		// The oldest by default, as in the merge pane
