@@ -997,6 +997,10 @@ describe("MCP tools", function () {
 			assert.equal(note.parentID, older.id);
 			assert.isTrue(older.hasTag('copied'));
 			
+			assert.deepEqual(Zotero.UndoHistory.getUndoAction(), {
+				action: 'undo-action-mcp-changes',
+				actionArgs: { app: 'test-client' },
+			});
 			assert.isTrue(await Zotero.UndoHistory.undo());
 			assert.isFalse(newer.deleted);
 			assert.equal(note.parentID, newer.id);

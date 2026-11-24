@@ -1473,7 +1473,7 @@ Zotero.MCP.Tools = new function () {
 	 * Merge duplicates as Zotero's merge pane does: the master item gets the others' notes,
 	 * attachments, tags, collections and relations, and the others go to the trash
 	 */
-	this.mergeItems = async function ({ keys, masterKey, libraryID }) {
+	this.mergeItems = async function ({ keys, masterKey, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
 		keys = [...new Set(keys)];
 		if (keys.length < 2) {
@@ -1494,7 +1494,7 @@ Zotero.MCP.Tools = new function () {
 		}
 		if (new Set(items.map(item => item.itemTypeID)).size > 1) {
 			throw new Zotero.MCP.ToolError(
-				'Items of different types can\'t be merged. Change their types with zotero_update_items first.'
+				'Items of different types can\'t be merged. The user can change an item\'s type in Zotero\'s item pane.'
 			);
 		}
 		// The oldest by default, as in the merge pane
@@ -1506,7 +1506,10 @@ Zotero.MCP.Tools = new function () {
 		}
 		let others = items.filter(item => item != master);
 		let { mergeItems } = ChromeUtils.importESModule('chrome://zotero/content/mergeItems.mjs');
-		await mergeItems(master, others);
+		await mergeItems(master, others, {
+			undoAction: 'undo-action-mcp-changes',
+			undoActionArgs: { app: Zotero.MCP.Apps.getDisplayName(clientID) },
+		});
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			key: master.key,
