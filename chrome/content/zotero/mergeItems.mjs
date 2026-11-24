@@ -1,12 +1,20 @@
 import { Zotero } from "chrome://zotero/content/zotero.mjs";
 
-export function mergeItems(item, otherItems) {
+/**
+ * @param {Zotero.Item} item - The master item, which the others are merged into
+ * @param {Zotero.Item[]} otherItems
+ * @param {Object} [options]
+ * @param {String} [options.undoAction] - Label of the undo step, a Fluent ID, instead of
+ *     the merge's own
+ * @param {Object} [options.undoActionArgs]
+ */
+export function mergeItems(item, otherItems, { undoAction, undoActionArgs } = {}) {
 	Zotero.debug("Merging items");
 	
 	return Zotero.DB.executeTransaction(async function () {
 		Zotero.UndoHistory.stageAction(
-			'undo-action-merge-items',
-			{ count: otherItems.length + 1 }
+			undoAction || 'undo-action-merge-items',
+			undoAction ? undoActionArgs : { count: otherItems.length + 1 }
 		);
 		var toSave = {};
 		toSave[item.id] = item;
