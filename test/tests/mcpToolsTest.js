@@ -324,8 +324,8 @@ describe("MCP tools", function () {
 			sinon.stub(Zotero.FullText, 'indexItems').returns(indexing.promise);
 			
 			let result = await withBudget(300, () => call('zotero_search_fulltext', { query: 'text' }));
-			assert.deepEqual(result.results.map(file => [file.key, file.textPending]), [[attachment.key, true]]);
-			assert.match(result.notice, /still getting the text of the files with textPending/);
+			assert.deepEqual(result.results.map(file => [file.key, file.pending]), [[attachment.key, true]]);
+			assert.match(result.notice, /still getting the text of the files with pending/);
 			indexing.resolve();
 		});
 	});
@@ -1388,7 +1388,7 @@ describe("MCP tools", function () {
 			assert.isFalse(existing.deleted);
 		});
 		
-		it("should return lookups still running as inProgress, and add their items later as another undo step", async function () {
+		it("should return lookups still running as pending, and add their items later as another undo step", async function () {
 			let collection = await createDataObject('collection');
 			let slowDOI = '10.8888/' + Zotero.Utilities.randomString();
 			let fastDOI = '10.1234/' + Zotero.Utilities.randomString();
@@ -1407,7 +1407,7 @@ describe("MCP tools", function () {
 			}
 			// The slow lookup didn't hold up the one after it
 			assert.deepEqual(result.results.map(result => [result.input, result.status]), [
-				[slowDOI, 'inProgress'],
+				[slowDOI, 'pending'],
 				[fastDOI, 'added'],
 			]);
 			assert.match(result.notice, /still looking up/);
@@ -1479,7 +1479,7 @@ describe("MCP tools", function () {
 				Zotero.MCP.CALL_BUDGET = budget;
 			}
 			assert.isBelow(Date.now() - start, 1500);
-			assert.equal(result.results[0].fileSearch, 'searching');
+			assert.equal(result.results[0].fileSearch, 'pending');
 			assert.match(result.notice, /still looking/);
 		});
 	});
@@ -1523,7 +1523,7 @@ describe("MCP tools", function () {
 			await item.saveTx();
 			sinon.stub(Zotero.Attachments, 'addAvailableFiles').returns(new Promise(() => {}));
 			let { results, notice } = await withBudget(300, () => call('zotero_find_full_text', { keys: [item.key] }));
-			assert.equal(results[0].status, 'searching');
+			assert.equal(results[0].status, 'pending');
 			assert.match(notice, /still looking/);
 		});
 	});
@@ -1704,7 +1704,7 @@ describe("MCP tools", function () {
 			finally {
 				Zotero.MCP.CALL_BUDGET = budget;
 			}
-			assert.equal(result.status, 'downloading');
+			assert.equal(result.status, 'pending');
 			
 			let file = getTestDataDirectory();
 			file.append('test.pdf');

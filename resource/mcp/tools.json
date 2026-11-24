@@ -344,7 +344,7 @@
 								"title": { "type": "string" },
 								"contentType": { "type": "string" },
 								"matchCount": { "type": "integer" },
-								"textPending": { "type": "boolean", "description": "Zotero is still getting the file's text, so its passages are missing" },
+								"pending": { "type": "boolean", "description": "Zotero is still getting the file's text, so its passages are missing" },
 								"passages": {
 									"type": "array",
 									"description": "Passages with the most query terms first",
@@ -533,7 +533,7 @@
 							"properties": {
 								"key": { "type": "string" },
 								"path": { "type": "string" },
-								"status": { "enum": ["rendered", "rendering", "failed"], "description": "rendering: Zotero is still rendering it" }
+								"status": { "enum": ["rendered", "pending", "failed"], "description": "pending: Zotero is still rendering it" }
 							},
 							"required": ["key", "status"]
 						}
@@ -1292,7 +1292,7 @@
 		{
 			"name": "zotero_add_items",
 			"title": "Add items to Zotero",
-			"description": "Add items to a Zotero library, with their metadata looked up, and look for their PDFs. For BibTeX, RIS or another import format, use zotero_import. Ways to add, best first:\n- identifiers: DOIs, ISBNs, arXiv IDs or PubMed IDs, or URLs that contain one (doi.org, a publisher's article page with the DOI in its URL, arxiv.org, pubmed.ncbi.nlm.nih.gov). Zotero doesn't add other web pages: the user saves those with the Zotero Connector in their browser.\n- items: item JSON, for something without an identifier whose metadata you found yourself.\nIf looking up identifiers takes too long, the call returns before they're all done: those still being looked up say inProgress, and Zotero adds them when their lookup finishes. By default Zotero then looks for each new item's PDF or EPUB as its Find Available PDF does, from the user's computer, so access through their institution works. If it finds none, find a copy elsewhere and attach it with zotero_add_attachment; as a last resort, ask the user to save it with the Zotero Connector. The user can undo the call in Zotero with Edit → Undo, which moves the new items to the trash. Zotero asks the user for permission unless it was already granted.",
+			"description": "Add items to a Zotero library, with their metadata looked up, and look for their PDFs. For BibTeX, RIS or another import format, use zotero_import. Ways to add, best first:\n- identifiers: DOIs, ISBNs, arXiv IDs or PubMed IDs, or URLs that contain one (doi.org, a publisher's article page with the DOI in its URL, arxiv.org, pubmed.ncbi.nlm.nih.gov). Zotero doesn't add other web pages: the user saves those with the Zotero Connector in their browser.\n- items: item JSON, for something without an identifier whose metadata you found yourself.\nIf looking up identifiers takes too long, the call returns before they're all done: those still being looked up say pending, and Zotero adds them when their lookup finishes. By default Zotero then looks for each new item's PDF or EPUB as its Find Available PDF does, from the user's computer, so access through their institution works. If it finds none, find a copy elsewhere and attach it with zotero_add_attachment; as a last resort, ask the user to save it with the Zotero Connector. The user can undo the call in Zotero with Edit → Undo, which moves the new items to the trash. Zotero asks the user for permission unless it was already granted.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1331,7 +1331,7 @@
 							"type": "object",
 							"properties": {
 								"input": { "type": "string", "description": "The identifier given, or \"items[i]\"" },
-								"status": { "enum": ["added", "failed", "inProgress"], "description": "inProgress: Zotero is still looking up the identifier, and adds its item when it finds it." },
+								"status": { "enum": ["added", "failed", "pending"], "description": "pending: Zotero is still looking up the identifier, and adds its item when it finds it." },
 								"error": { "type": "string", "description": "Why it failed" },
 								"key": { "type": "string" },
 								"itemType": { "type": "string" },
@@ -1348,7 +1348,7 @@
 									},
 									"required": ["key"]
 								},
-								"fileSearch": { "enum": ["searching", "notFound"], "description": "For a new item without a file: whether Zotero is still looking for one" },
+								"fileSearch": { "enum": ["pending", "notFound"], "description": "For a new item without a file: whether Zotero is still looking for one" },
 								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
 							},
 							"required": ["input", "status"]
@@ -1392,7 +1392,7 @@
 							"properties": {
 								"key": { "type": "string" },
 								"title": { "type": "string" },
-								"status": { "enum": ["found", "notFound", "searching", "skipped"], "description": "searching: Zotero is still looking" },
+								"status": { "enum": ["found", "notFound", "pending", "skipped"], "description": "pending: Zotero is still looking" },
 								"reason": { "type": "string", "description": "Why it was skipped" },
 								"file": {
 									"type": "object",
@@ -1442,7 +1442,7 @@
 				"properties": {
 					"libraryID": { "type": "integer" },
 					"parentKey": { "type": "string" },
-					"status": { "enum": ["attached", "downloading"], "description": "downloading: Zotero is still downloading the file" },
+					"status": { "enum": ["attached", "pending"], "description": "pending: Zotero is still downloading the file" },
 					"identified": { "enum": ["yes", "no", "pending"], "description": "Without parentKey, whether Zotero identified the file and created its parent item. pending: Zotero is still identifying it." },
 					"parent": {
 						"type": "object",
@@ -1481,7 +1481,7 @@
 		{
 			"name": "zotero_import",
 			"title": "Import into Zotero",
-			"description": "Import a file on this computer, or text, in a format Zotero imports: BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, MODS, EndNote XML and others. Like File → Import, the PDFs and other files a file refers to are imported too, and a file's items go into a new collection named after it unless collectionKey is given. If importing takes too long, the call returns inProgress and Zotero finishes in the background. Zotero doesn't check whether the items are already in the library. The user can undo the import in Zotero with Edit → Undo, which moves the new items and collections to the trash. Zotero asks the user for permission unless it was already granted.",
+			"description": "Import a file on this computer, or text, in a format Zotero imports: BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, MODS, EndNote XML and others. Like File → Import, the PDFs and other files a file refers to are imported too, and a file's items go into a new collection named after it unless collectionKey is given. If importing takes too long, the call returns pending and Zotero finishes in the background. Zotero doesn't check whether the items are already in the library. The user can undo the import in Zotero with Edit → Undo, which moves the new items and collections to the trash. Zotero asks the user for permission unless it was already granted.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1498,7 +1498,7 @@
 				"type": "object",
 				"properties": {
 					"libraryID": { "type": "integer" },
-					"status": { "enum": ["imported", "inProgress"] },
+					"status": { "enum": ["imported", "pending"], "description": "pending: Zotero is still importing" },
 					"collectionKey": { "type": "string", "description": "The collection the items went into" },
 					"itemCount": { "type": "integer" },
 					"items": {
@@ -1557,7 +1557,7 @@
 					"output": { "type": "string", "description": "The export, when no path was given" },
 					"path": { "type": "string", "description": "The file written" },
 					"folder": { "type": "string", "description": "The folder with the file and the items' files, for includeFiles" },
-					"status": { "enum": ["written", "writing"], "description": "writing: Zotero is still writing the file" },
+					"status": { "enum": ["written", "pending"], "description": "pending: Zotero is still writing the file" },
 					"citationKeys": { "type": "object", "additionalProperties": { "type": "string" }, "description": "For BibTeX and BibLaTeX, of up to 500 items: the item keys of the regular items exported, each with its citation key in the export" }
 				},
 				"required": ["libraryID", "format"]

@@ -79,9 +79,9 @@ Zotero.MCP.Tools = new function () {
 	const FILES_NOT_FOUND = "Zotero found no PDF or EPUB for items with fileSearch notFound. Find "
 		+ "one elsewhere (e.g. arXiv, PubMed Central or the author's site) and attach it with "
 		+ 'zotero_add_attachment. ' + LAST_RESORT;
-	const FILES_PENDING = 'Zotero is still looking for files for items with fileSearch searching. '
+	const FILES_PENDING = 'Zotero is still looking for files for items with fileSearch pending. '
 		+ 'Call zotero_get_items later to see what it found.';
-	const LOOKUPS_PENDING = 'Zotero is still looking up the identifiers with status inProgress. It '
+	const LOOKUPS_PENDING = 'Zotero is still looking up the identifiers with status pending. It '
 		+ 'adds each item when its lookup finishes, and looks for its file if asked to. To get their '
 		+ 'keys, search for them later with zotero_search in fields mode, by the identifier. If one '
 		+ "doesn't turn up, Zotero couldn't find it: give its metadata as items.";
@@ -349,7 +349,7 @@ Zotero.MCP.Tools = new function () {
 			};
 			if (text === TIMED_OUT) {
 				textPending = true;
-				results.push({ ...summary, textPending: true, passages: [] });
+				results.push({ ...summary, pending: true, passages: [] });
 				continue;
 			}
 			text ??= '';
@@ -396,7 +396,7 @@ Zotero.MCP.Tools = new function () {
 			results,
 			nextOffset: offset + limit < attachments.length ? offset + limit : undefined,
 			notice: [
-				textPending && 'Zotero is still getting the text of the files with textPending, so their '
+				textPending && 'Zotero is still getting the text of the files with pending: true, so their '
 					+ 'passages are missing. Search again shortly.',
 				labelsPending && LABELS_PENDING,
 			].filter(Boolean).join(' ') || undefined,
@@ -648,14 +648,14 @@ Zotero.MCP.Tools = new function () {
 			images.push({
 				key: annotation.key,
 				path: rendered ? Zotero.Annotations.getCacheImagePath(annotation) : undefined,
-				status: rendered ? 'rendered' : pending ? 'rendering' : 'failed',
+				status: rendered ? 'rendered' : pending ? 'pending' : 'failed',
 			});
 		}
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			images,
 			notice: [
-				pending && 'Zotero is still rendering the images with status rendering. Call again shortly.',
+				pending && 'Zotero is still rendering the images with status pending. Call again shortly.',
 				images.some(image => image.status == 'failed')
 					&& "Zotero couldn't render the images with status failed, e.g. because the PDF isn't "
 						+ 'on this computer.',
@@ -1625,7 +1625,7 @@ Zotero.MCP.Tools = new function () {
 	 *
 	 * Identifiers are looked up a few at a time. Lookups still running at the call's deadline
 	 * can't be stopped, as each saves its items when it finishes, so they're reported as
-	 * inProgress and go on in the background, where their items become a later undo step.
+	 * pending and go on in the background, where their items become a later undo step.
 	 */
 	this.addItems = async function ({
 		identifiers = [], items: json = [], collectionKey,
@@ -1674,7 +1674,7 @@ Zotero.MCP.Tools = new function () {
 			if (!lookup) {
 				return [result];
 			}
-			return lookup.results ?? [{ input: lookup.input, status: 'inProgress' }];
+			return lookup.results ?? [{ input: lookup.input, status: 'pending' }];
 		});
 		// Saved by translators
 		let translated = results.filter(result => result.status == 'added').map(result => result.item);
@@ -1725,7 +1725,7 @@ Zotero.MCP.Tools = new function () {
 			}
 			let summary = await summarize(item);
 			if (searched.has(item) && !summary.file) {
-				summary.fileSearch = searching ? 'searching' : 'notFound';
+				summary.fileSearch = searching ? 'pending' : 'notFound';
 				notices.add(searching ? FILES_PENDING : FILES_NOT_FOUND);
 			}
 			output.push({ input, status, ...summary });
@@ -1858,7 +1858,7 @@ Zotero.MCP.Tools = new function () {
 				return Zotero.MCP.jsonResult({
 					libraryID,
 					parentKey: parent.key,
-					status: 'downloading',
+					status: 'pending',
 					notice: 'Zotero is still downloading the file. Call zotero_get_items on the '
 						+ 'parent item later to see whether it was attached.',
 				});
@@ -1958,7 +1958,7 @@ Zotero.MCP.Tools = new function () {
 				result.file = await describeAttachment(attachment);
 			}
 			else {
-				result.status = searching ? 'searching' : 'notFound';
+				result.status = searching ? 'pending' : 'notFound';
 			}
 			return result;
 		}));
@@ -1966,7 +1966,7 @@ Zotero.MCP.Tools = new function () {
 			libraryID,
 			results,
 			notice: [
-				searching && 'Zotero is still looking for files for the items with status searching. '
+				searching && 'Zotero is still looking for files for the items with status pending. '
 					+ 'Call zotero_get_items on them later to see whether it found one.',
 				results.some(result => result.status == 'notFound')
 					&& "Zotero found no PDF or EPUB for items with status notFound. Find one elsewhere "
@@ -2132,7 +2132,7 @@ Zotero.MCP.Tools = new function () {
 		if (items === TIMED_OUT) {
 			return Zotero.MCP.jsonResult({
 				libraryID,
-				status: 'inProgress',
+				status: 'pending',
 				collectionKey: created?.key ?? collectionKey,
 				notice: 'Zotero is still importing. Call zotero_search on the collection later to '
 					+ 'see the items.',
@@ -2236,7 +2236,7 @@ Zotero.MCP.Tools = new function () {
 				format: translator.label,
 				path: file,
 				folder: includeFiles ? path : undefined,
-				status: result === TIMED_OUT ? 'writing' : 'written',
+				status: result === TIMED_OUT ? 'pending' : 'written',
 				citationKeys: result === TIMED_OUT
 					? undefined
 					: getCitationKeys(translator, items, await IOUtils.readUTF8(file)),
