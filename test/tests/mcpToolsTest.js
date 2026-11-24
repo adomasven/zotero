@@ -199,9 +199,9 @@ describe("MCP tools", function () {
 			let { tags, total } = await call('zotero_list_tags', { query: prefix.toLowerCase() });
 			assert.equal(total, 3);
 			assert.deepEqual(tags, [
-				{ name: colored, count: 0, color: '#ff6666' },
-				{ name: two, count: 2 },
-				{ name: one, count: 1 },
+				{ name: colored, itemCount: 0, color: '#ff6666' },
+				{ name: two, itemCount: 2 },
+				{ name: one, itemCount: 1 },
 			]);
 		});
 	});

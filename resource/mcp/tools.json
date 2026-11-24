@@ -242,10 +242,10 @@
 							"type": "object",
 							"properties": {
 								"name": { "type": "string" },
-								"count": { "type": "integer" },
+								"itemCount": { "type": "integer" },
 								"color": { "type": "string" }
 							},
-							"required": ["name", "count"]
+							"required": ["name", "itemCount"]
 						}
 					},
 					"nextOffset": { "type": "integer" }

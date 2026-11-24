@@ -280,7 +280,7 @@ Zotero.MCP.Tools = new function () {
 		let names = new Set([...counts.keys(), ...colors.keys()]);
 		let tags = [...names].map(name => ({
 			name,
-			count: counts.get(name) ?? 0,
+			itemCount: counts.get(name) ?? 0,
 			color: colors.get(name)?.color,
 		}));
 		if (query) {
@@ -289,7 +289,7 @@ Zotero.MCP.Tools = new function () {
 		}
 		let position = name => colors.get(name)?.position ?? Infinity;
 		tags.sort((a, b) => position(a.name) - position(b.name)
-			|| b.count - a.count
+			|| b.itemCount - a.itemCount
 			|| Zotero.localeCompare(a.name, b.name));
 		return Zotero.MCP.jsonResult({
 			libraryID,
