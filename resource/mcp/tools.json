@@ -306,6 +306,64 @@
 			}
 		},
 		{
+			"name": "zotero_get_item_types",
+			"title": "List Zotero item types",
+			"description": "List the item types an item can be (book, journalArticle and so on), with each type's fields and creator types, by the names zotero_add_items and zotero_update_items take. Pass itemTypes for only some types.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"itemTypes": { "type": "array", "items": { "enum": ["artwork", "audioRecording", "bill", "blogPost", "book", "bookSection", "case", "computerProgram", "conferencePaper", "dataset", "dictionaryEntry", "document", "email", "encyclopediaArticle", "film", "forumPost", "hearing", "instantMessage", "interview", "journalArticle", "letter", "magazineArticle", "manuscript", "map", "newspaperArticle", "patent", "podcast", "preprint", "presentation", "radioBroadcast", "report", "standard", "statute", "thesis", "tvBroadcast", "videoRecording", "webpage"] }, "minItems": 1, "description": "Defaults to all" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"itemTypes": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"itemType": { "type": "string" },
+								"label": { "type": "string", "description": "The name Zotero shows the user, in Zotero's language" },
+								"fields": {
+									"type": "array",
+									"description": "In the order the item pane shows them",
+									"items": {
+										"type": "object",
+										"properties": {
+											"field": { "type": "string" },
+											"label": { "type": "string" },
+											"baseField": { "type": "string", "description": "The general field this type's field stands for, e.g. publicationTitle for bookTitle. A type change moves a value between fields with the same base field, and zotero_update_items also takes the base field's name." }
+										},
+										"required": ["field", "label"]
+									}
+								},
+								"creatorTypes": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"properties": {
+											"creatorType": { "type": "string" },
+											"label": { "type": "string" },
+											"primary": { "type": "boolean", "description": "The type's main creator type, e.g. author" }
+										},
+										"required": ["creatorType", "label"]
+									}
+								}
+							},
+							"required": ["itemType", "label", "fields", "creatorTypes"]
+						}
+					}
+				},
+				"required": ["itemTypes"]
+			},
+			"annotations": {
+				"readOnlyHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
 			"name": "zotero_search_fulltext",
 			"title": "Search Zotero full text",
 			"description": "Find where words or phrases occur in the text of PDFs, EPUBs, web page snapshots and other files in a Zotero library, and get the passage around each match, with its page and a link that opens the file there. Matches words, not meaning: every word or \"quoted phrase\" in the query must occur in a file, ignoring case and accents, and a word also matches words it starts (\"archive\" matches \"archives\"). Only files Zotero has indexed are searched, and by default only the first 100 pages of a PDF. Files are listed by when their item was last modified, not by relevance. Use zotero_read_text to read more around a passage, and zotero_search with fulltext: to combine full text with other criteria.",
@@ -898,7 +956,7 @@
 								"key": { "type": "string", "description": "The item's key" },
 								"fields": {
 									"type": "object",
-									"description": "Fields to set, by Zotero field name (as in zotero_get_items), e.g. {\"title\": \"…\", \"date\": \"2020-05\"}. An empty string clears a field.",
+									"description": "Fields to set, by Zotero field name (zotero_get_item_types lists each item type's), e.g. {\"title\": \"…\", \"date\": \"2020-05\"}. An empty string clears a field.",
 									"additionalProperties": { "type": "string" }
 								},
 								"creators": {
@@ -907,7 +965,7 @@
 									"items": {
 										"type": "object",
 										"properties": {
-											"creatorType": { "type": "string", "description": "e.g. \"author\" or \"editor\"" },
+											"creatorType": { "type": "string", "description": "e.g. \"author\" or \"editor\"; zotero_get_item_types lists each item type's" },
 											"firstName": { "type": "string" },
 											"lastName": { "type": "string" },
 											"name": { "type": "string", "description": "Instead of firstName and lastName, for an organization or a one-part name" }
@@ -1305,11 +1363,11 @@
 					"items": {
 						"type": "array",
 						"maxItems": 50,
-						"description": "Item JSON in the Zotero web API format, as zotero_get_items returns, e.g. {\"itemType\": \"report\", \"title\": \"…\", \"creators\": [{\"creatorType\": \"author\", \"firstName\": \"Ann\", \"lastName\": \"Lee\"}], \"date\": \"2024\", \"institution\": \"…\", \"url\": \"…\"}. Only fields of the item type are accepted.",
+						"description": "Item JSON in the Zotero web API format, as zotero_get_items returns, e.g. {\"itemType\": \"report\", \"title\": \"…\", \"creators\": [{\"creatorType\": \"author\", \"firstName\": \"Ann\", \"lastName\": \"Lee\"}], \"date\": \"2024\", \"institution\": \"…\", \"url\": \"…\"}. Only fields of the item type are accepted; zotero_get_item_types lists each type's fields and creator types. Notes and files aren't items here: add them with zotero_add_note and zotero_add_attachment.",
 						"items": {
 							"type": "object",
 							"properties": {
-								"itemType": { "type": "string" }
+								"itemType": { "enum": ["artwork", "audioRecording", "bill", "blogPost", "book", "bookSection", "case", "computerProgram", "conferencePaper", "dataset", "dictionaryEntry", "document", "email", "encyclopediaArticle", "film", "forumPost", "hearing", "instantMessage", "interview", "journalArticle", "letter", "magazineArticle", "manuscript", "map", "newspaperArticle", "patent", "podcast", "preprint", "presentation", "radioBroadcast", "report", "standard", "statute", "thesis", "tvBroadcast", "videoRecording", "webpage"] }
 							},
 							"required": ["itemType"]
 						}

@@ -300,6 +300,39 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * The item types an item can be, with their fields and creator types, as the web API's
+	 * /itemTypes, /itemTypeFields and /itemTypeCreatorTypes give them
+	 */
+	this.getItemTypes = async function ({ itemTypes }) {
+		let types = getRegularItemTypes();
+		if (itemTypes) {
+			types = types.filter(type => itemTypes.includes(type.name));
+		}
+		return Zotero.MCP.jsonResult({
+			itemTypes: types.map(({ id, name }) => {
+				let primaryID = Zotero.CreatorTypes.getPrimaryIDForType(id);
+				return {
+					itemType: name,
+					label: Zotero.ItemTypes.getLocalizedString(id),
+					fields: Zotero.ItemFields.getItemTypeFields(id).map((fieldID) => {
+						let baseID = Zotero.ItemFields.getBaseIDFromTypeAndField(id, fieldID);
+						return {
+							field: Zotero.ItemFields.getName(fieldID),
+							label: Zotero.ItemFields.getLocalizedString(fieldID),
+							baseField: baseID && baseID != fieldID ? Zotero.ItemFields.getName(baseID) : undefined,
+						};
+					}),
+					creatorTypes: Zotero.CreatorTypes.getTypesForItemType(id).map(type => ({
+						creatorType: type.name,
+						label: Zotero.CreatorTypes.getLocalizedString(type.id),
+						primary: type.id == primaryID || undefined,
+					})),
+				};
+			}),
+		});
+	};
+	
+	/**
 	 * Where words or phrases occur in the full text of attachments, with the passage around
 	 * each match. Zotero's full-text index only says which attachments match, so the matches
 	 * are found again in the text the index was built from.
@@ -2324,12 +2357,6 @@ Zotero.MCP.Tools = new function () {
 		for (let property of EXISTING_ITEM_PROPERTIES) {
 			delete json[property];
 		}
-		if (['note', 'attachment', 'annotation'].includes(json.itemType)) {
-			throw new Zotero.MCP.ToolError(
-				`${input}: ${json.itemType}s can't be added as items. Use zotero_add_note or `
-					+ 'zotero_add_attachment.'
-			);
-		}
 		let item = new Zotero.Item();
 		item.libraryID = libraryID;
 		try {
@@ -3017,6 +3044,14 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError(`No item ${key} in library ${libraryID}`);
 		}
 		return item;
+	}
+	
+	/**
+	 * Item types an item can be created as or changed to: not notes, attachments or annotations
+	 */
+	function getRegularItemTypes() {
+		return Zotero.ItemTypes.getAll()
+			.filter(type => !['note', 'attachment', 'annotation'].includes(type.name));
 	}
 	
 	/**

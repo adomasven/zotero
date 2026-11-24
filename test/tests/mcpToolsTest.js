@@ -926,6 +926,54 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("zotero_get_item_types", function () {
+		it("should list each item type's fields and creator types", async function () {
+			let { itemTypes } = await call('zotero_get_item_types', { itemTypes: ['bookSection'] });
+			assert.lengthOf(itemTypes, 1);
+			let [type] = itemTypes;
+			assert.equal(type.itemType, 'bookSection');
+			assert.equal(type.label, 'Book Section');
+			assert.deepInclude(type.fields, { field: 'bookTitle', label: 'Book Title', baseField: 'publicationTitle' });
+			assert.deepInclude(type.fields, { field: 'title', label: 'Title' });
+			assert.notInclude(type.fields.map(field => field.field), 'issue');
+			assert.deepInclude(type.creatorTypes, { creatorType: 'author', label: 'Author', primary: true });
+			assert.deepInclude(type.creatorTypes, { creatorType: 'bookAuthor', label: 'Book Author' });
+			
+			({ itemTypes } = await call('zotero_get_item_types', {}));
+			let names = itemTypes.map(type => type.itemType);
+			assert.includeMembers(names, ['book', 'journalArticle', 'webpage']);
+			assert.notInclude(names, 'note');
+		});
+		
+		it("should be the item types tools.json takes, which should be all of Zotero's but notes, attachments and annotations", async function () {
+			let expected = Zotero.ItemTypes.getAll()
+				.map(type => type.name)
+				.filter(name => !['note', 'attachment', 'annotation'].includes(name))
+				.sort();
+			let { itemTypes } = await call('zotero_get_item_types', {});
+			assert.sameMembers(itemTypes.map(type => type.itemType), expected);
+			
+			// Every list of item types in an input schema, e.g. after a schema update adds a type
+			let enums = [];
+			let findEnums = (schema) => {
+				if (Array.isArray(schema?.enum) && schema.enum.includes('journalArticle')) {
+					enums.push(schema.enum);
+				}
+				else if (schema && typeof schema == 'object') {
+					Object.values(schema).forEach(findEnums);
+				}
+			};
+			let tools = await Zotero.MCP.getTools();
+			for (let tool of tools) {
+				findEnums(tool.inputSchema);
+			}
+			assert.lengthOf(enums, 2);
+			for (let itemTypeEnum of enums) {
+				assert.deepEqual([...itemTypeEnum].sort(), expected);
+			}
+		});
+	});
+	
 	describe("zotero_manage_collections", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');
