@@ -1279,6 +1279,7 @@ Zotero.MCP.Tools = new function () {
 			key: note.key,
 			parentKey: note.parentKey || undefined,
 			title: note.getNoteTitle(),
+			dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
 			link: getSelectLink(note),
 		});
 	};
@@ -1429,8 +1430,17 @@ Zotero.MCP.Tools = new function () {
 				?? [null, '<div data-schema-version="9">', note.getNote()];
 			html = wrapper + content + html.replace(/^<div[^>]*>|<\/div>$/g, '') + '</div>';
 		}
-		note.setNote(html);
-		await edit(clientID, () => note.save({ skipSelect: true }));
+		try {
+			await edit(clientID, () => {
+				note.setNote(html);
+				return note.save({ skipSelect: true });
+			});
+		}
+		catch (e) {
+			// The transaction was rolled back, but the note still has the change in memory
+			await note.reload(null, true);
+			throw e;
+		}
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			key: note.key,

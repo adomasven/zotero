@@ -1167,6 +1167,15 @@ describe("MCP tools", function () {
 			assert.include(note.getNote(), '<p>One</p></div>');
 		});
 		
+		it("should leave the note as it was when saving it fails", async function () {
+			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
+			let dateModified = Zotero.Date.sqlToISO8601(note.dateModified);
+			sinon.stub(note, 'save').rejects(new Error('Save failed'));
+			let { error, result } = await callMCPTool('zotero_edit_note', { key: note.key, markdown: 'New', dateModified });
+			assert.isTrue(error !== undefined || result.isError);
+			assert.equal(note.getNote(), '<p>Old</p>');
+		});
+		
 		it("should refuse to edit a note that changed since it was read", async function () {
 			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
 			let [{ dateModified }] = (await call('zotero_get_notes', { keys: [note.key] })).notes;
@@ -1216,6 +1225,10 @@ describe("MCP tools", function () {
 			assert.include(html, '<pre class="math">$$\\frac{a}{b}$$</pre>');
 			assert.include(html, '<td>1</td>');
 			assert.include(html, '&lt;b&gt;raw&lt;/b&gt;');
+			
+			// Its dateModified is the one zotero_edit_note checks
+			await call('zotero_edit_note', { key: result.key, markdown: 'More', dateModified: result.dateModified });
+			assert.include(note.getNote(), '<p>More</p>');
 		});
 		
 		it("should let the user undo adding a note", async function () {

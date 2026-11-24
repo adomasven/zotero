@@ -1063,9 +1063,10 @@
 					"key": { "type": "string" },
 					"parentKey": { "type": "string" },
 					"title": { "type": "string" },
+					"dateModified": { "type": "string", "description": "For zotero_edit_note" },
 					"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
 				},
-				"required": ["libraryID", "key", "title", "link"]
+				"required": ["libraryID", "key", "title", "dateModified", "link"]
 			},
 			"_meta": {
 				"org.zotero/permission": "editLibrary"
