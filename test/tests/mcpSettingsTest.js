@@ -12,7 +12,7 @@ describe("MCP settings", function () {
 	describe("AI Apps pane", function () {
 		let win, doc, pane, home, installed;
 		
-		beforeEach(async function () {
+		beforeEach("open the pane with a temporary home directory and no installed apps", async function () {
 			home = await getTempDirectory();
 			sinon.stub(Zotero.MCP.Apps, 'getHomeDir').returns(home);
 			installed = new Set();

@@ -154,6 +154,18 @@ describe("Zotero.MCP.Permissions", function () {
 		assert.isTrue(item.hasTag('a') && item.hasTag('b'));
 	});
 	
+	it("should be declared by tools only as known permissions, with a libraryID argument for library ones", async function () {
+		let { EDIT_LIBRARY, DELETE, EDIT_SETTINGS, INSTALL_STYLES } = Zotero.MCP.Permissions;
+		for (let tool of await Zotero.MCP.getTools()) {
+			let permission = tool._meta?.[Zotero.MCP.PERMISSION_META];
+			if (!permission) continue;
+			assert.include([EDIT_LIBRARY, DELETE, EDIT_SETTINGS, INSTALL_STYLES], permission, tool.name);
+			if (permission == EDIT_LIBRARY || permission == DELETE) {
+				assert.equal(tool.inputSchema.properties.libraryID?.type, 'integer', tool.name);
+			}
+		}
+	});
+	
 	describe("dialog", function () {
 		let options;
 		
