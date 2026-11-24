@@ -1261,7 +1261,7 @@
 					"collections": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
 					"savedSearches": { "type": "array", "items": { "type": "string" } }
 				},
-				"required": ["libraryID", "restored", "items", "collections"]
+				"required": ["libraryID", "restored", "items", "collections", "savedSearches"]
 			},
 			"annotations": {
 				"readOnlyHint": false,
