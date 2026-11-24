@@ -1588,7 +1588,7 @@ describe("MCP tools", function () {
 		it("should write a new file, and not replace one", async function () {
 			let path = PathUtils.join(await getTempDirectory(), 'export.ris');
 			let result = await call('zotero_export', { format: 'RIS', keys: [item.key], path });
-			assert.deepEqual(result, { format: 'RIS', path, status: 'written' });
+			assert.deepEqual(result, { libraryID: Zotero.Libraries.userLibraryID, format: 'RIS', path, status: 'written' });
 			assert.include(await Zotero.File.getContentsAsync(path), 'TI  - A study of things');
 			
 			assert.match(await callForError('zotero_export', { format: 'RIS', keys: [item.key], path }), /already exists/);

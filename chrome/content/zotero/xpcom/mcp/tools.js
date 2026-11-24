@@ -414,6 +414,7 @@ Zotero.MCP.Tools = new function () {
 		let text = await getIndexedText(attachment, deadline);
 		let fileExists = await attachment.fileExists();
 		let result = {
+			libraryID,
 			key: attachment.key,
 			parentKey: attachment.parentKey || undefined,
 			title: getTitle(attachment),
@@ -1016,6 +1017,7 @@ Zotero.MCP.Tools = new function () {
 			label: ref.locator ? (ref.label ?? 'page') : undefined,
 		});
 		let result = {
+			libraryID,
 			format,
 			style: style.styleID,
 			styleTitle: style.title,
@@ -1325,6 +1327,7 @@ Zotero.MCP.Tools = new function () {
 			let set = Zotero.Tags.getColor(libraryID, tag);
 			return Zotero.MCP.jsonResult({
 				libraryID,
+				action,
 				tag,
 				color: set ? set.color : undefined,
 				position: set ? set.position + 1 : undefined,
@@ -2229,6 +2232,7 @@ Zotero.MCP.Tools = new function () {
 		}
 		if (path) {
 			return Zotero.MCP.jsonResult({
+				libraryID,
 				format: translator.label,
 				path: file,
 				folder: includeFiles ? path : undefined,
@@ -2244,6 +2248,7 @@ Zotero.MCP.Tools = new function () {
 			);
 		}
 		return Zotero.MCP.jsonResult({
+			libraryID,
 			format: translator.label,
 			output: translation.string,
 			citationKeys: getCitationKeys(translator, items, translation.string),

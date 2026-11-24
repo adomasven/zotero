@@ -405,6 +405,7 @@
 					}
 				},
 				"properties": {
+					"libraryID": { "type": "integer" },
 					"key": { "type": "string", "description": "The attachment's key" },
 					"parentKey": { "type": "string" },
 					"title": { "type": "string" },
@@ -431,7 +432,7 @@
 					"nextOffset": { "type": "integer", "description": "Present when there's more text" },
 					"notice": { "type": "string" }
 				},
-				"required": ["key", "title", "link"]
+				"required": ["libraryID", "key", "title", "link"]
 			},
 			"annotations": {
 				"readOnlyHint": true,
@@ -865,6 +866,7 @@
 			"outputSchema": {
 				"type": "object",
 				"properties": {
+					"libraryID": { "type": "integer" },
 					"format": { "type": "string" },
 					"style": { "type": "string" },
 					"styleTitle": { "type": "string" },
@@ -874,7 +876,7 @@
 					"bibliography": { "type": "string", "description": "For format document. Empty for a style without one." },
 					"noteStyle": { "type": "boolean", "description": "For format document: whether the style puts citations in footnotes, one footnote per citation" }
 				},
-				"required": ["format"]
+				"required": ["libraryID", "format"]
 			},
 			"annotations": {
 				"readOnlyHint": true,
@@ -1120,7 +1122,7 @@
 					"color": { "type": "string", "description": "For setColor; absent if removed" },
 					"position": { "type": "integer" }
 				},
-				"required": ["libraryID"]
+				"required": ["libraryID", "action"]
 			},
 			"_meta": {
 				"org.zotero/permission": "editLibrary"
@@ -1550,6 +1552,7 @@
 			"outputSchema": {
 				"type": "object",
 				"properties": {
+					"libraryID": { "type": "integer" },
 					"format": { "type": "string" },
 					"output": { "type": "string", "description": "The export, when no path was given" },
 					"path": { "type": "string", "description": "The file written" },
@@ -1557,7 +1560,7 @@
 					"status": { "enum": ["written", "writing"], "description": "writing: Zotero is still writing the file" },
 					"citationKeys": { "type": "object", "additionalProperties": { "type": "string" }, "description": "For BibTeX and BibLaTeX, of up to 500 items: the item keys of the regular items exported, each with its citation key in the export" }
 				},
-				"required": ["format"]
+				"required": ["libraryID", "format"]
 			},
 			"annotations": {
 				"readOnlyHint": false,
