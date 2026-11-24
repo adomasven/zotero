@@ -423,7 +423,7 @@
 						}
 					},
 					"nextOffset": { "type": "integer", "description": "Present when there are more files" },
-					"notice": { "type": "string" }
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "total", "results"]
 			},
@@ -488,7 +488,7 @@
 					"offset": { "type": "integer" },
 					"text": { "type": "string" },
 					"nextOffset": { "type": "integer", "description": "Present when there's more text" },
-					"notice": { "type": "string" }
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "key", "title", "link"]
 			},
@@ -596,7 +596,7 @@
 							"required": ["key", "status"]
 						}
 					},
-					"notice": { "type": "string" }
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "images"]
 			},
@@ -1496,7 +1496,7 @@
 							"required": ["input", "status"]
 						}
 					},
-					"notice": { "type": "string", "description": "What to do about files Zotero didn't find, and identifiers it's still looking up" }
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "results"]
 			},
@@ -1548,7 +1548,7 @@
 							"required": ["key", "title", "status"]
 						}
 					},
-					"notice": { "type": "string" }
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "results"]
 			},
@@ -1606,7 +1606,7 @@
 					"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
 					"annotationCount": { "type": "integer" },
 					"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" },
-					"notice": { "type": "string" }
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "status"]
 			},
@@ -1659,7 +1659,7 @@
 							"required": ["key", "itemType", "title", "link"]
 						}
 					},
-					"notice": { "type": "string" }
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "status"]
 			},
