@@ -43,7 +43,8 @@
 				"required": ["zoteroVersion", "client", "libraries", "permissions"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -103,7 +104,8 @@
 				"required": ["libraryID", "total", "items"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -174,7 +176,8 @@
 				"required": ["libraryID", "items"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -210,7 +213,8 @@
 				"required": ["libraryID", "collections"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -249,7 +253,8 @@
 				"required": ["libraryID", "total", "tags"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -296,7 +301,8 @@
 				"required": ["libraryID", "savedSearches"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -364,7 +370,8 @@
 				"required": ["libraryID", "total", "results"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -427,7 +434,8 @@
 				"required": ["key", "title", "link"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -496,7 +504,8 @@
 				"required": ["libraryID", "notes", "annotations"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -533,7 +542,8 @@
 				"required": ["libraryID", "images"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -686,7 +696,8 @@
 				"required": ["window", "windows"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -866,7 +877,8 @@
 				"required": ["format"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": true
 			}
 		},
 		{
@@ -961,7 +973,8 @@
 			"annotations": {
 				"readOnlyHint": false,
 				"destructiveHint": true,
-				"idempotentHint": true
+				"idempotentHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -1000,7 +1013,8 @@
 			"annotations": {
 				"readOnlyHint": false,
 				"destructiveHint": false,
-				"idempotentHint": false
+				"idempotentHint": false,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -1075,7 +1089,8 @@
 			"annotations": {
 				"readOnlyHint": false,
 				"destructiveHint": false,
-				"idempotentHint": false
+				"idempotentHint": false,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -1201,7 +1216,8 @@
 				"required": ["libraryID", "total", "sets"]
 			},
 			"annotations": {
-				"readOnlyHint": true
+				"readOnlyHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -1267,7 +1283,8 @@
 			"annotations": {
 				"readOnlyHint": false,
 				"destructiveHint": true,
-				"idempotentHint": true
+				"idempotentHint": true,
+				"openWorldHint": false
 			}
 		},
 		{
@@ -1544,7 +1561,7 @@
 			},
 			"annotations": {
 				"readOnlyHint": false,
-				"destructiveHint": false,
+				"destructiveHint": true,
 				"idempotentHint": false,
 				"openWorldHint": false
 			}
