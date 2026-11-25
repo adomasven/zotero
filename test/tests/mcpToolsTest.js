@@ -2015,7 +2015,7 @@ describe("MCP tools", function () {
 			let file = getTestDataDirectory();
 			file.append('test.pdf');
 			let result = await call('zotero_add_attachment', { path: file.path, collectionKey: collection.key });
-			assert.equal(result.identified, 'yes');
+			assert.isTrue(result.identified);
 			assert.equal(result.parentKey, recognized.key);
 			assert.equal(result.parent.title, 'Recognized paper');
 			let attachment = Zotero.Items.getByLibraryAndKey(recognized.libraryID, result.key);
@@ -2033,7 +2033,7 @@ describe("MCP tools", function () {
 			let file = getTestDataDirectory();
 			file.append('test.pdf');
 			let result = await call('zotero_add_attachment', { path: file.path, linkFile: true });
-			assert.equal(result.identified, 'no');
+			assert.isFalse(result.identified);
 			assert.equal(result.linkMode, 'linked_file');
 			assert.notProperty(result, 'parentKey');
 			assert.match(result.notice, /couldn't identify/);

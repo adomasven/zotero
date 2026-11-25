@@ -1596,7 +1596,7 @@
 					"libraryID": { "type": "integer" },
 					"parentKey": { "type": "string" },
 					"status": { "enum": ["attached", "pending"], "description": "pending: Zotero is still downloading the file" },
-					"identified": { "enum": ["yes", "no", "pending"], "description": "Without parentKey, whether Zotero identified the file and created its parent item. pending: Zotero is still identifying it." },
+					"identified": { "type": "boolean", "description": "Without parentKey, whether Zotero identified the file and created its parent item. Absent while Zotero is still identifying it." },
 					"parent": {
 						"type": "object",
 						"description": "The item Zotero created for the file",

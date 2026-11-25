@@ -2186,17 +2186,16 @@ Zotero.MCP.Tools = new function () {
 			link: getOpenLink(attachment),
 		};
 		if (parent) {
-			result.identified = 'yes';
+			result.identified = true;
 			result.parent = await summarize(parent);
 			result.parentKey = parent.key;
 		}
 		else if (parent === null) {
-			result.identified = 'pending';
 			result.notice = 'Zotero is still identifying the file. Call zotero_get_items on the '
 				+ 'attachment later to see whether it has a parent item.';
 		}
 		else {
-			result.identified = 'no';
+			result.identified = false;
 			result.notice = Zotero.RecognizeDocument.canRecognize(attachment)
 				? "Zotero couldn't identify the file, so it's a standalone attachment. If you know "
 					+ 'what it is, add the item with zotero_add_items and attach the file to it.'
