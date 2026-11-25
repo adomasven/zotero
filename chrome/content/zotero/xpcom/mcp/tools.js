@@ -2288,7 +2288,8 @@ Zotero.MCP.Tools = new function () {
 	 * the item's files beside it if asked
 	 */
 	this.export = async function ({
-		format, keys, collectionKey, path, includeFiles = false, overwrite = false, libraryID,
+		format, keys, collectionKey, includeSubcollectionItems = false, path, includeFiles = false,
+		overwrite = false, libraryID,
 	}, { deadline }) {
 		libraryID = getLibraryID(libraryID);
 		if (keys && collectionKey) {
@@ -2311,14 +2312,24 @@ Zotero.MCP.Tools = new function () {
 				}
 				items.push(item);
 			}
-			translation.setItems(items);
+			// A copy, as Zotero.Translate.ItemGetter takes items off the array it gets
+			translation.setItems([...items]);
 		}
 		else if (collectionKey) {
 			let collection = getCollection(libraryID, collectionKey);
-			translation.setCollection(collection);
-			// With its subcollections' items, as Zotero.Translate.ItemGetter.setCollections() gets them
-			items = [...new Set([collection, ...Zotero.Collections.getByParent(collection.id, true)]
-				.flatMap(each => each.getChildItems()))];
+			let collections = includeSubcollectionItems
+				? [collection, ...Zotero.Collections.getByParent(collection.id, true)]
+				: [collection];
+			items = [...new Set(collections.flatMap(each => each.getChildItems()))];
+			// Zotero.Translate.ItemGetter.setCollections() adds the subcollections, with their
+			// items, only for formats that keep collections (configOptions.getCollections), so
+			// those are given the collection, and other formats its items
+			if (includeSubcollectionItems && translator.configOptions?.getCollections) {
+				translation.setCollection(collection);
+			}
+			else {
+				translation.setItems([...items]);
+			}
 		}
 		else {
 			translation.setLibraryID(libraryID);

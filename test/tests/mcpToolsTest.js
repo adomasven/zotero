@@ -1755,8 +1755,9 @@ describe("MCP tools", function () {
 		});
 		
 		it("should export items as text in a format given by name", async function () {
-			let { format, output } = await call('zotero_export', { format: 'bibtex', keys: [item.key] });
+			let { format, output, citationKeys } = await call('zotero_export', { format: 'bibtex', keys: [item.key] });
 			assert.equal(format, 'BibTeX');
+			assert.match(output, new RegExp(`^\\s*@article\\{${citationKeys[item.key]},`));
 			assert.match(output, /^\s*@article\{/);
 			assert.include(output, 'title = {A study of things}');
 			
@@ -1799,7 +1800,19 @@ describe("MCP tools", function () {
 			});
 			await createDataObject('item', { itemType: 'note', collections: [collection.id] });
 			
-			let { output, citationKeys } = await call('zotero_export', { format: 'BibTeX', collectionKey: collection.key });
+			let { citationKeys } = await call('zotero_export', { format: 'BibTeX', collectionKey: collection.key });
+			assert.sameMembers(Object.keys(citationKeys), [first.key, own.key]);
+			
+			// With subcollections in any format, not only those that keep collections
+			let { output: json } = await call('zotero_export', {
+				format: 'CSL JSON', collectionKey: collection.key, includeSubcollectionItems: true,
+			});
+			assert.includeMembers(JSON.parse(json).map(entry => entry.title), ['Zeta', 'Alpha', 'Own']);
+			
+			let output;
+			({ output, citationKeys } = await call('zotero_export', {
+				format: 'BibTeX', collectionKey: collection.key, includeSubcollectionItems: true,
+			}));
 			assert.sameMembers(Object.keys(citationKeys), [first.key, second.key, own.key]);
 			assert.equal(citationKeys[own.key], 'bell-own');
 			assert.notEqual(citationKeys[first.key], citationKeys[second.key]);

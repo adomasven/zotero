@@ -1680,13 +1680,14 @@
 		{
 			"name": "zotero_export",
 			"title": "Export from Zotero",
-			"description": "Export items, a collection with its subcollections, or a whole library, in an export format, as text or to a new file on this computer. Formats include BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, CSV, MODS, EndNote XML and Markdown or HTML for notes; an unknown format gives the full list. Large exports must be written to a file. An existing file is replaced only with overwrite. BibTeX and BibLaTeX exports also give the citation key of each item, to cite them by in Markdown for Pandoc.",
+			"description": "Export items, a collection, or a whole library, in an export format, as text or to a new file on this computer. Formats include BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, CSV, MODS, EndNote XML and Markdown or HTML for notes; an unknown format gives the full list. Large exports must be written to a file. An existing file is replaced only with overwrite. BibTeX and BibLaTeX exports also give the citation key of each item, to cite them by in Markdown for Pandoc.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"format": { "type": "string", "description": "An export format's name, e.g. \"BibTeX\" or \"CSL JSON\"" },
 					"keys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Items to export. Defaults to the whole library." },
 					"collectionKey": { "type": "string" },
+					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also the items in the collection's subcollections, at any depth. Formats that keep collections, such as Zotero RDF, then also export the subcollections." },
 					"path": { "type": "string", "description": "An absolute path to write to, where nothing exists yet. Without it, the export is returned as text." },
 					"includeFiles": { "type": "boolean", "default": false, "description": "Also copy the items' files, with their annotations. path is then a new folder, with the export file inside it." },
 					"overwrite": { "type": "boolean", "default": false, "description": "Replace a file already at path. A folder, or an export with includeFiles, is never replaced." },
