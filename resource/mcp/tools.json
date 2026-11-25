@@ -1516,7 +1516,7 @@
 			}
 		},
 		{
-			"name": "zotero_find_full_text",
+			"name": "zotero_find_fulltext_attachments",
 			"title": "Find full text in Zotero",
 			"description": "Look for a PDF or EPUB of items that have none, as Zotero's Find Full Text menu command does: by DOI, URL or PMCID, from open-access sources and from the publisher's site, through the user's institution where they have access. Use it for items added without files, e.g. by zotero_import. Items that already have a PDF or EPUB, or have no DOI, URL or PMCID, are skipped. If the search takes too long, the call returns and Zotero goes on in the background. The user can undo it in Zotero with Edit → Undo, which moves the files found to the trash. Zotero asks the user for permission unless it was already granted.",
 			"inputSchema": {

@@ -2048,7 +2048,7 @@ Zotero.MCP.Tools = new function () {
 	 * The files found become one undo step once the search ends, which can be after the
 	 * call's deadline.
 	 */
-	this.findFullText = async function ({ itemKeys, libraryID }, { clientID, deadline }) {
+	this.findFulltextAttachments = async function ({ itemKeys, libraryID }, { clientID, deadline }) {
 		libraryID = getLibraryID(libraryID);
 		let library = Zotero.Libraries.get(libraryID);
 		if (!library.editable || !library.filesEditable) {

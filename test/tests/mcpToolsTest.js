@@ -1679,7 +1679,7 @@ describe("MCP tools", function () {
 		});
 	});
 	
-	describe("zotero_find_full_text", function () {
+	describe("zotero_find_fulltext_attachments", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');
 			Zotero.UndoHistory.clear();
@@ -1699,7 +1699,7 @@ describe("MCP tools", function () {
 				attachment = await importFileAttachment('test.pdf', { parentID: found.id });
 			});
 			
-			let { results, notice } = await call('zotero_find_full_text', {
+			let { results, notice } = await call('zotero_find_fulltext_attachments', {
 				itemKeys: [found.key, notFound.key, noIdentifier.key],
 			});
 			assert.isTrue(search.calledOnce);
@@ -1717,7 +1717,7 @@ describe("MCP tools", function () {
 			item.setField('DOI', '10.1234/' + Zotero.Utilities.randomString());
 			await item.saveTx();
 			sinon.stub(Zotero.Attachments, 'addAvailableFiles').returns(new Promise(() => {}));
-			let { results, notice } = await withBudget(300, () => call('zotero_find_full_text', { itemKeys: [item.key] }));
+			let { results, notice } = await withBudget(300, () => call('zotero_find_fulltext_attachments', { itemKeys: [item.key] }));
 			assert.equal(results[0].status, 'pending');
 			assert.match(notice, /still looking/);
 		});
