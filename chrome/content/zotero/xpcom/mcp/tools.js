@@ -2293,8 +2293,10 @@ Zotero.MCP.Tools = new function () {
 				libraryID,
 				status: 'pending',
 				collectionKey: created?.key ?? collectionKey,
-				notice: 'Zotero is still importing. Call zotero_search on the collection later to '
-					+ 'see the items.',
+				notice: created || collectionKey
+					? 'Zotero is still importing. Call zotero_search on the collection later to see the items.'
+					: 'Zotero is still importing. Call zotero_search with sortField dateAdded later to see '
+						+ 'the items.',
 			});
 		}
 		return Zotero.MCP.jsonResult({
