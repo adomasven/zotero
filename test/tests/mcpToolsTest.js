@@ -769,6 +769,14 @@ describe("MCP tools", function () {
 			assert.match(await callForError('zotero_open', { key: item.key }), /has no PDF, EPUB or snapshot/);
 			assert.match(await callForError('zotero_close', { tabIDs: ['nope'] }), /No tab nope/);
 		});
+		
+		it("should say when a file is still opening at the deadline", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			sinon.stub(Zotero.Reader, 'open').resolves();
+			let opened = await withBudget(300, () => call('zotero_open', { key: attachment.key }));
+			assert.notProperty(opened, 'tabID');
+			assert.match(opened.notice, /still opening/);
+		});
 	});
 	
 	describe("zotero_generate_citation", function () {

@@ -831,7 +831,8 @@
 					"key": { "type": "string", "description": "The file or note opened" },
 					"title": { "type": "string" },
 					"windowID": { "type": "string" },
-					"tabID": { "type": "string" }
+					"tabID": { "type": "string" },
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "key"]
 			},

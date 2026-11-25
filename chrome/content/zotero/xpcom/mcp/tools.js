@@ -980,6 +980,7 @@ Zotero.MCP.Tools = new function () {
 			title: item.isNote() ? item.getNoteTitle() : getTitle(item),
 			windowID: win?.Zotero_Tabs.windowID,
 			tabID,
+			notice: win ? undefined : 'Zotero is still opening it. Call zotero_get_context later for its tab.',
 		});
 	};
 	
