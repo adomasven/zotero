@@ -192,7 +192,7 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			total: items.length,
-			items: await Promise.all(page.map(summarize)),
+			items: await Promise.all(page.map(describeItem)),
 			nextOffset: offset + limit < items.length ? offset + limit : undefined,
 		});
 	};
@@ -639,8 +639,7 @@ Zotero.MCP.Tools = new function () {
 				dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
 				content: format == 'html'
 					? note.getNote()
-					: (await exportItems([note], Zotero.Translators.TRANSLATOR_ID_NOTE_MARKDOWN))
-						.replace(/\r\n/g, '\n').trim(),
+					: await noteToMarkdown(note),
 				images: images.length ? images : undefined,
 				link: getSelectLink(note),
 			});
@@ -757,7 +756,7 @@ Zotero.MCP.Tools = new function () {
 					name: search.name,
 				})),
 				selectedItemCount: items.length,
-				selectedItems: await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(summarize)),
+				selectedItems: await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(describeItem)),
 			});
 		}
 		
@@ -831,7 +830,7 @@ Zotero.MCP.Tools = new function () {
 		let state = { collections: [rowID], focusedCollection: rowID, items: items.map(item => item.id) };
 		
 		// By default, the most recently used window, or a new one if there's none
-		let win = newWindow ? null : getMainWindow(windowID, tabID) ?? Zotero.getMainWindow();
+		let win = newWindow ? null : getWindowByID(windowID, tabID) ?? Zotero.getMainWindow();
 		let view;
 		if (!win) {
 			win = Zotero.openMainWindow({ libraryTabState: state });
@@ -923,7 +922,7 @@ Zotero.MCP.Tools = new function () {
 			openInWindow: newWindow || !Zotero.getMainWindow(),
 			allowDuplicate: newTab,
 			// By default, where the file or note is already open, or else the most recent window
-			window: getMainWindow(windowID)
+			window: getWindowByID(windowID)
 				?? (newTab ? null : Zotero.getMainWindows().find(win => getTabIDs(win, item).length))
 				?? Zotero.getMainWindow(),
 		};
@@ -995,11 +994,11 @@ Zotero.MCP.Tools = new function () {
 		if (!tabIDs.length && !windowIDs.length) {
 			throw new Zotero.MCP.ToolError('Give tabIDs or windowIDs');
 		}
-		let windows = new Set(windowIDs.map(id => getMainWindow(id)));
+		let windows = new Set(windowIDs.map(id => getWindowByID(id)));
 		// Tabs to close, by window
 		let tabs = new Map();
 		for (let tabID of new Set(tabIDs)) {
-			let win = getMainWindow(windowID, tabID);
+			let win = getWindowByID(windowID, tabID);
 			if (windows.has(win)) {
 				continue;
 			}
@@ -1178,7 +1177,7 @@ Zotero.MCP.Tools = new function () {
 		}
 		return Zotero.MCP.jsonResult({
 			libraryID,
-			items: await Promise.all(items.map(summarize)),
+			items: await Promise.all(items.map(describeItem)),
 		});
 	};
 	
@@ -1262,7 +1261,7 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			items: await Promise.all(changed.map(async ({ item, ...change }) => ({
-				...await summarize(item),
+				...await describeItem(item),
 				...change,
 			}))),
 		});
@@ -1614,7 +1613,7 @@ Zotero.MCP.Tools = new function () {
 			libraryID,
 			total: sets.length,
 			sets: await Promise.all(page.map(set => Promise.all(set.map(async item => ({
-				...await summarize(item),
+				...await describeItem(item),
 				DOI: item.getField('DOI') || undefined,
 				ISBN: item.getField('ISBN') || undefined,
 				dateAdded: Zotero.Date.sqlToISO8601(item.dateAdded),
@@ -1868,7 +1867,7 @@ Zotero.MCP.Tools = new function () {
 			let {
 				bestAttachment: _bestAttachment, attachmentCount: _attachmentCount, noteCount: _noteCount,
 				annotationCount: _annotationCount, ...summary
-			} = await summarize(item);
+			} = await describeItem(item);
 			summary.attachments = Zotero.Items.get(item.getAttachments()).map(attachment => ({
 				key: attachment.key,
 				title: attachment.getField('title'),
@@ -2179,7 +2178,7 @@ Zotero.MCP.Tools = new function () {
 		};
 		if (parent) {
 			result.identified = true;
-			result.parent = await summarize(parent);
+			result.parent = await describeItem(parent);
 			result.parentKey = parent.key;
 		}
 		else if (parent === null) {
@@ -2295,7 +2294,7 @@ Zotero.MCP.Tools = new function () {
 			status: 'imported',
 			collectionKey: created?.key ?? collectionKey,
 			itemCount: items.length,
-			items: await Promise.all(items.slice(0, MAX_LISTED_ITEMS).map(summarize)),
+			items: await Promise.all(items.slice(0, MAX_LISTED_ITEMS).map(describeItem)),
 		});
 	};
 	
@@ -2570,15 +2569,16 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.Styles.get(installed.styleID);
 	}
 	
-	function exportItems(items, translatorID) {
-		return new Promise((resolve, reject) => {
+	async function noteToMarkdown(note) {
+		let markdown = await new Promise((resolve, reject) => {
 			let translation = new Zotero.Translate.Export();
-			translation.setItems(items);
-			translation.setTranslator(translatorID);
+			translation.setItems([note]);
+			translation.setTranslator(Zotero.Translators.TRANSLATOR_ID_NOTE_MARKDOWN);
 			translation.setHandler('done', () => resolve(translation.string));
 			translation.setHandler('error', (_, error) => reject(error));
 			translation.translate();
 		});
+		return markdown.replace(/\r\n/g, '\n').trim();
 	}
 	
 	/**
@@ -2957,7 +2957,7 @@ Zotero.MCP.Tools = new function () {
 	 * @param {String} [tabID]
 	 * @return {ChromeWindow|null} Null if neither is given
 	 */
-	function getMainWindow(windowID, tabID) {
+	function getWindowByID(windowID, tabID) {
 		let windows = Zotero.getMainWindows().filter(win => win.Zotero_Tabs);
 		if (windowID) {
 			let win = windows.find(win => win.Zotero_Tabs.windowID == windowID);
@@ -3173,7 +3173,7 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * An item as a search result
 	 */
-	async function summarize(item) {
+	async function describeItem(item) {
 		let summary = {
 			key: item.key,
 			itemType: item.itemType,
