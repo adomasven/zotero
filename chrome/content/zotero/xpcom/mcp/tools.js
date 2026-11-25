@@ -195,11 +195,11 @@ Zotero.MCP.Tools = new function () {
 	 * Items, notes and attachments as Zotero item JSON, with a regular item's attachments and
 	 * notes, and an attachment's file
 	 */
-	this.getItems = async function ({ keys, includeTrashed = false, libraryID }) {
+	this.getItems = async function ({ itemKeys, includeTrashed = false, libraryID }) {
 		libraryID = getLibraryID(libraryID);
 		let items = [];
 		let missing = [];
-		for (let key of new Set(keys)) {
+		for (let key of new Set(itemKeys)) {
 			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
 			if (!item || item.deleted && !includeTrashed) {
 				missing.push(key);
@@ -350,7 +350,7 @@ Zotero.MCP.Tools = new function () {
 	 * are found again in the text the index was built from.
 	 */
 	this.searchFulltext = async function ({
-		query, keys, collectionKey, includeSubcollectionItems = false, libraryID, limit = 10, offset = 0,
+		query, itemKeys, collectionKey, includeSubcollectionItems = false, libraryID, limit = 10, offset = 0,
 		passagesPerFile = 3,
 	}, { deadline }) {
 		let structureDeadline = Math.min(deadline, Date.now() + Zotero.MCP.Tools._structureWait);
@@ -364,7 +364,7 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError('query has no words to search for');
 		}
 		// Attachments with every term, as in the search box
-		let ids = await getScopeAttachmentIDs(libraryID, { keys, collectionKey, includeSubcollectionItems });
+		let ids = await getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems });
 		for (let term of terms) {
 			if (ids && !ids.length) {
 				break;
@@ -583,12 +583,12 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * Notes and annotations, as Markdown or HTML
 	 */
-	this.getNotes = async function ({ keys, format = 'markdown', libraryID }) {
+	this.getNotes = async function ({ itemKeys, format = 'markdown', libraryID }) {
 		libraryID = getLibraryID(libraryID);
 		let notes = new Set();
 		let annotations = new Set();
 		let missing = [];
-		for (let key of new Set(keys)) {
+		for (let key of new Set(itemKeys)) {
 			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
 			if (!item || item.deleted) {
 				missing.push(key);
@@ -783,15 +783,15 @@ Zotero.MCP.Tools = new function () {
 	 * The window stays behind other apps' windows unless focus is given.
 	 */
 	this.select = async function ({
-		libraryID, collectionKey, savedSearchKey, keys = [], allItems = false, windowID, tabID,
+		libraryID, collectionKey, savedSearchKey, itemKeys = [], allItems = false, windowID, tabID,
 		newWindow = false, newTab = false, focus = false,
 	}, { deadline }) {
 		libraryID = getLibraryID(libraryID);
 		if (collectionKey && savedSearchKey) {
 			throw new Zotero.MCP.ToolError('Give collectionKey or savedSearchKey, not both');
 		}
-		if (keys.length && allItems) {
-			throw new Zotero.MCP.ToolError('Give keys or allItems, not both');
+		if (itemKeys.length && allItems) {
+			throw new Zotero.MCP.ToolError('Give itemKeys or allItems, not both');
 		}
 		checkWhere({ windowID, tabID, newWindow, newTab });
 		let rowID = 'L' + libraryID;
@@ -803,7 +803,7 @@ Zotero.MCP.Tools = new function () {
 		}
 		let items = [];
 		let missing = [];
-		for (let key of new Set(keys)) {
+		for (let key of new Set(itemKeys)) {
 			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
 			if (!item || item.deleted) {
 				missing.push(key);
@@ -1622,14 +1622,14 @@ Zotero.MCP.Tools = new function () {
 	 * Merge duplicates as Zotero's merge pane does: the master item gets the others' notes,
 	 * attachments, tags, collections and relations, and the others go to the trash
 	 */
-	this.mergeItems = async function ({ keys, masterKey, libraryID }, { clientID }) {
+	this.mergeItems = async function ({ itemKeys, masterKey, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
-		keys = [...new Set(keys)];
-		if (keys.length < 2) {
+		itemKeys = [...new Set(itemKeys)];
+		if (itemKeys.length < 2) {
 			throw new Zotero.MCP.ToolError('Give at least two items to merge');
 		}
 		let items = [];
-		for (let key of keys) {
+		for (let key of itemKeys) {
 			let item = await getItem(libraryID, key);
 			if (!item.isRegularItem()) {
 				throw new Zotero.MCP.ToolError(
@@ -1651,7 +1651,7 @@ Zotero.MCP.Tools = new function () {
 			? items.find(item => item.key == masterKey)
 			: items.reduce((oldest, item) => (item.dateAdded < oldest.dateAdded ? item : oldest));
 		if (!master) {
-			throw new Zotero.MCP.ToolError('masterKey must be one of keys');
+			throw new Zotero.MCP.ToolError('masterKey must be one of itemKeys');
 		}
 		let others = items.filter(item => item != master);
 		let { mergeItems } = ChromeUtils.importESModule('chrome://zotero/content/mergeItems.mjs');
@@ -1673,14 +1673,14 @@ Zotero.MCP.Tools = new function () {
 	 * Trashing needs DELETE, but restoring only EDIT_LIBRARY, so this asks for the permission
 	 * itself instead of declaring one in tools.json.
 	 */
-	this.trash = async function ({ keys = [], collectionKeys = [], savedSearchKeys = [], restore = false, libraryID }, call) {
+	this.trash = async function ({ itemKeys = [], collectionKeys = [], savedSearchKeys = [], restore = false, libraryID }, call) {
 		libraryID = getLibraryID(libraryID);
 		let library = Zotero.Libraries.get(libraryID);
 		if (!library.editable || !library.hasTrash) {
 			throw new Zotero.MCP.ToolError(`${library.name} is read-only`);
 		}
-		if (!keys.length && !collectionKeys.length && !savedSearchKeys.length) {
-			throw new Zotero.MCP.ToolError('Give keys, collectionKeys or savedSearchKeys');
+		if (!itemKeys.length && !collectionKeys.length && !savedSearchKeys.length) {
+			throw new Zotero.MCP.ToolError('Give itemKeys, collectionKeys or savedSearchKeys');
 		}
 		let check = (object, type, key) => {
 			if (!object) {
@@ -1697,7 +1697,7 @@ Zotero.MCP.Tools = new function () {
 			return object;
 		};
 		let items = [];
-		for (let key of new Set(keys)) {
+		for (let key of new Set(itemKeys)) {
 			let item = check(await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key), 'item', key);
 			if (item.isAnnotation()) {
 				throw new Zotero.MCP.ToolError(`${key} is an annotation, which can't be moved to the trash`);
@@ -2048,14 +2048,14 @@ Zotero.MCP.Tools = new function () {
 	 * The files found become one undo step once the search ends, which can be after the
 	 * call's deadline.
 	 */
-	this.findFullText = async function ({ keys, libraryID }, { clientID, deadline }) {
+	this.findFullText = async function ({ itemKeys, libraryID }, { clientID, deadline }) {
 		libraryID = getLibraryID(libraryID);
 		let library = Zotero.Libraries.get(libraryID);
 		if (!library.editable || !library.filesEditable) {
 			throw new Zotero.MCP.ToolError(`Files can't be added to ${library.name}`);
 		}
 		let items = [];
-		for (let key of new Set(keys)) {
+		for (let key of new Set(itemKeys)) {
 			items.push(await getItem(libraryID, key));
 		}
 		let eligible = items.filter(item => Zotero.Attachments.canFindFileForItem(item));
@@ -2288,12 +2288,12 @@ Zotero.MCP.Tools = new function () {
 	 * the item's files beside it if asked
 	 */
 	this.export = async function ({
-		format, keys, collectionKey, includeSubcollectionItems = false, path, includeFiles = false,
+		format, itemKeys, collectionKey, includeSubcollectionItems = false, path, includeFiles = false,
 		overwrite = false, libraryID,
 	}, { deadline }) {
 		libraryID = getLibraryID(libraryID);
-		if (keys && collectionKey) {
-			throw new Zotero.MCP.ToolError('Give keys or collectionKey, not both');
+		if (itemKeys && collectionKey) {
+			throw new Zotero.MCP.ToolError('Give itemKeys or collectionKey, not both');
 		}
 		if (includeFiles && !path) {
 			throw new Zotero.MCP.ToolError('includeFiles needs a path to write the files to');
@@ -2301,9 +2301,9 @@ Zotero.MCP.Tools = new function () {
 		let translator = await getExportTranslator(format);
 		let translation = new Zotero.Translate.Export();
 		let items;
-		if (keys) {
+		if (itemKeys) {
 			items = [];
-			for (let key of new Set(keys)) {
+			for (let key of new Set(itemKeys)) {
 				let item = await getItem(libraryID, key);
 				if (item.isAnnotation()) {
 					throw new Zotero.MCP.ToolError(
@@ -2565,13 +2565,13 @@ Zotero.MCP.Tools = new function () {
 	 * The attachments of the items given by keys or in a collection, or null for the whole
 	 * library
 	 */
-	async function getScopeAttachmentIDs(libraryID, { keys, collectionKey, includeSubcollectionItems }) {
-		if (keys && collectionKey) {
-			throw new Zotero.MCP.ToolError('Give keys or collectionKey, not both');
+	async function getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems }) {
+		if (itemKeys && collectionKey) {
+			throw new Zotero.MCP.ToolError('Give itemKeys or collectionKey, not both');
 		}
 		let items = [];
-		if (keys) {
-			for (let key of keys) {
+		if (itemKeys) {
+			for (let key of itemKeys) {
 				let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
 				if (!item || item.deleted) {
 					throw new Zotero.MCP.ToolError(`No item ${key} in library ${libraryID}`);

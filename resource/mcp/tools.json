@@ -118,7 +118,7 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"keys": {
+					"itemKeys": {
 						"type": "array",
 						"items": { "type": "string" },
 						"minItems": 1,
@@ -127,7 +127,7 @@
 					"includeTrashed": { "type": "boolean", "default": false, "description": "Also get items in the trash, which have deleted: true" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["keys"],
+				"required": ["itemKeys"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -374,7 +374,7 @@
 				"type": "object",
 				"properties": {
 					"query": { "type": "string", "minLength": 1, "description": "Words and \"quoted phrases\", e.g. 'carbon \"soil organic matter\"'" },
-					"keys": {
+					"itemKeys": {
 						"type": "array",
 						"items": { "type": "string" },
 						"minItems": 1,
@@ -508,7 +508,7 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"keys": {
+					"itemKeys": {
 						"type": "array",
 						"items": { "type": "string" },
 						"minItems": 1,
@@ -518,7 +518,7 @@
 					"format": { "enum": ["markdown", "html"], "default": "markdown", "description": "For notes" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["keys"],
+				"required": ["itemKeys"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -772,7 +772,7 @@
 				"properties": {
 					"collectionKey": { "type": "string", "description": "Defaults to the whole library" },
 					"savedSearchKey": { "type": "string" },
-					"keys": { "type": "array", "items": { "type": "string" }, "maxItems": 500, "description": "Items to select. Only items in the collection or saved search can be selected." },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 500, "description": "Items to select. Only items in the collection or saved search can be selected." },
 					"allItems": { "type": "boolean", "default": false, "description": "Select every item shown" },
 					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
 					"tabID": { "type": "string", "description": "A library tab from zotero_get_context. Defaults to the window's library tab used last. Tab IDs are unique only within a window: each window's first library tab is zotero-pane. If the ID is in several windows, give windowID too." },
@@ -1376,11 +1376,11 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"keys": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 20 },
-					"masterKey": { "type": "string", "description": "The item to keep, one of keys. Defaults to the oldest." },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 20 },
+					"masterKey": { "type": "string", "description": "The item to keep, one of itemKeys. Defaults to the oldest." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["keys"],
+				"required": ["itemKeys"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -1410,7 +1410,7 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"keys": { "type": "array", "items": { "type": "string" }, "maxItems": 100, "description": "Items, notes or attachments" },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100, "description": "Items, notes or attachments" },
 					"collectionKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100 },
 					"savedSearchKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100 },
 					"restore": { "type": "boolean", "default": false, "description": "Restore from the trash instead" },
@@ -1522,10 +1522,10 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"keys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50 },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50 },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["keys"],
+				"required": ["itemKeys"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -1686,7 +1686,7 @@
 				"type": "object",
 				"properties": {
 					"format": { "type": "string", "description": "An export format's name, e.g. \"BibTeX\" or \"CSL JSON\"" },
-					"keys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Items to export. Defaults to the whole library." },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Items to export. Defaults to the whole library." },
 					"collectionKey": { "type": "string" },
 					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also the items in the collection's subcollections, at any depth. Formats that keep collections, such as Zotero RDF, then also export the subcollections." },
 					"path": { "type": "string", "description": "An absolute path to write to, where nothing exists yet. Without it, the export is returned as text." },

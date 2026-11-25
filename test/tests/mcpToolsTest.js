@@ -131,7 +131,7 @@ describe("MCP tools", function () {
 			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
 			let note = await createDataObject('item', { itemType: 'note', parentID: item.id, note: '<p>My note</p>' });
 			
-			let { items, missing } = await call('zotero_get_items', { keys: [item.key, 'AAAAAAAA'] });
+			let { items, missing } = await call('zotero_get_items', { itemKeys: [item.key, 'AAAAAAAA'] });
 			assert.deepEqual(missing, ['AAAAAAAA']);
 			assert.lengthOf(items, 1);
 			assert.equal(items[0].title, item.getField('title'));
@@ -153,11 +153,11 @@ describe("MCP tools", function () {
 			item.deleted = true;
 			await item.saveTx();
 			
-			let { items, missing } = await call('zotero_get_items', { keys: [item.key] });
+			let { items, missing } = await call('zotero_get_items', { itemKeys: [item.key] });
 			assert.lengthOf(items, 0);
 			assert.deepEqual(missing, [item.key]);
 			
-			({ items, missing } = await call('zotero_get_items', { keys: [item.key], includeTrashed: true }));
+			({ items, missing } = await call('zotero_get_items', { itemKeys: [item.key], includeTrashed: true }));
 			assert.equal(items[0].key, item.key);
 			assert.isTrue(items[0].deleted);
 			assert.isUndefined(missing);
@@ -324,7 +324,7 @@ describe("MCP tools", function () {
 			}
 			
 			assert.equal((await call('zotero_search_fulltext', { query: word })).total, 2);
-			let { results } = await call('zotero_search_fulltext', { query: word, keys: [items[1].key] });
+			let { results } = await call('zotero_search_fulltext', { query: word, itemKeys: [items[1].key] });
 			assert.deepEqual(results.map(result => result.parentKey), [items[1].key]);
 		});
 	});
@@ -513,7 +513,7 @@ describe("MCP tools", function () {
 			}
 			let [last, first, middle] = annotations;
 			
-			let result = await call('zotero_get_notes', { keys: [item.key, 'AAAAAAAA'] });
+			let result = await call('zotero_get_notes', { itemKeys: [item.key, 'AAAAAAAA'] });
 			assert.deepEqual(result.missing, ['AAAAAAAA']);
 			assert.lengthOf(result.notes, 1);
 			assert.equal(result.notes[0].key, note.key);
@@ -533,7 +533,7 @@ describe("MCP tools", function () {
 				link: `zotero://open/library/items/${attachment.key}?annotation=${last.key}`,
 			});
 			
-			result = await call('zotero_get_notes', { keys: [note.key], format: 'html' });
+			result = await call('zotero_get_notes', { itemKeys: [note.key], format: 'html' });
 			assert.include(result.notes[0].content, '<strong>bold</strong>');
 			assert.lengthOf(result.annotations, 0);
 		});
@@ -657,7 +657,7 @@ describe("MCP tools", function () {
 			
 			let result = await call('zotero_select', {
 				collectionKey: collection.key,
-				keys: [items[0].key, items[2].key, elsewhere.key],
+				itemKeys: [items[0].key, items[2].key, elsewhere.key],
 			});
 			assert.equal(result.windowID, win.Zotero_Tabs.windowID);
 			assert.equal(result.selectedCount, 2);
@@ -668,7 +668,7 @@ describe("MCP tools", function () {
 			result = await call('zotero_select', { collectionKey: collection.key, allItems: true });
 			assert.equal(result.selectedCount, 3);
 			
-			result = await call('zotero_select', { collectionKey: collection.key, keys: [items[1].key], newWindow: true });
+			result = await call('zotero_select', { collectionKey: collection.key, itemKeys: [items[1].key], newWindow: true });
 			assert.notEqual(result.windowID, win.Zotero_Tabs.windowID);
 			let newWin = Zotero.getMainWindows().find(other => other.Zotero_Tabs?.windowID == result.windowID);
 			assert.deepEqual(selectedKeys(newWin.ZoteroPane.getLibraryView(result.tabID)), [items[1].key]);
@@ -678,7 +678,7 @@ describe("MCP tools", function () {
 			
 			// Both windows' first library tab is zotero-pane, so it needs a window
 			assert.match(
-				await callForError('zotero_select', { tabID: 'zotero-pane', keys: [items[0].key] }),
+				await callForError('zotero_select', { tabID: 'zotero-pane', itemKeys: [items[0].key] }),
 				/zotero-pane is a tab in 2 windows\. Give windowID too/
 			);
 			assert.match(
@@ -686,7 +686,7 @@ describe("MCP tools", function () {
 				/zotero-pane is a tab in 2 windows/
 			);
 			result = await call('zotero_select', {
-				windowID: result.windowID, tabID: 'zotero-pane', collectionKey: collection.key, keys: [items[0].key],
+				windowID: result.windowID, tabID: 'zotero-pane', collectionKey: collection.key, itemKeys: [items[0].key],
 			});
 			assert.deepEqual(selectedKeys(newWin.ZoteroPane.getLibraryView('zotero-pane')), [items[0].key]);
 			assert.lengthOf(selectedKeys(view), 3);
@@ -1185,7 +1185,7 @@ describe("MCP tools", function () {
 			assert.equal(set[0].DOI, DOI);
 			assert.equal(set[1].noteCount, 1);
 			
-			let result = await call('zotero_merge_items', { keys: [newer.key, older.key] });
+			let result = await call('zotero_merge_items', { itemKeys: [newer.key, older.key] });
 			assert.equal(result.key, older.key);
 			assert.deepEqual(result.trashed, [newer.key]);
 			assert.isTrue(newer.deleted);
@@ -1205,7 +1205,7 @@ describe("MCP tools", function () {
 			let a = await createDataObject('item', { itemType: 'book' });
 			let b = await createDataObject('item', { itemType: 'journalArticle' });
 			assert.match(
-				await callForError('zotero_merge_items', { keys: [a.key, b.key] }),
+				await callForError('zotero_merge_items', { itemKeys: [a.key, b.key] }),
 				/different types.*zotero_change_item_types/
 			);
 		});
@@ -1319,7 +1319,7 @@ describe("MCP tools", function () {
 				return 1;
 			});
 			try {
-				let { annotations } = await call('zotero_get_notes', { keys: [attachment.key] });
+				let { annotations } = await call('zotero_get_notes', { itemKeys: [attachment.key] });
 				let byKey = Object.fromEntries(annotations.map(annotation => [annotation.key, annotation]));
 				assert.equal(byKey[rendered.key].imagePath, Zotero.Annotations.getCacheImagePath(rendered));
 				assert.notProperty(byKey[unrendered.key], 'imagePath');
@@ -1346,7 +1346,7 @@ describe("MCP tools", function () {
 			note.setNote(`<div data-schema-version="9"><p>A</p><img data-attachment-key="${second.key}"/>`
 				+ `<p>B</p><img data-attachment-key="${first.key}"/></div>`);
 			await note.saveTx();
-			let { notes } = await call('zotero_get_notes', { keys: [note.key] });
+			let { notes } = await call('zotero_get_notes', { itemKeys: [note.key] });
 			assert.deepEqual(notes[0].images, [
 				{ key: second.key, path: await second.getFilePathAsync() },
 				{ key: first.key, path: await first.getFilePathAsync() },
@@ -1366,7 +1366,7 @@ describe("MCP tools", function () {
 			let citationItems = 'data-citation-items="%5B%5D"';
 			note.setNote(`<div ${citationItems} data-schema-version="8"><h1>Notes</h1><p>One</p></div>`);
 			await note.saveTx();
-			let [{ dateModified }] = (await call('zotero_get_notes', { keys: [note.key] })).notes;
+			let [{ dateModified }] = (await call('zotero_get_notes', { itemKeys: [note.key] })).notes;
 			let result = await call('zotero_edit_note', { key: note.key, markdown: 'Two **more**', dateModified });
 			assert.equal(result.title, 'Notes');
 			assert.equal(
@@ -1388,7 +1388,7 @@ describe("MCP tools", function () {
 		
 		it("should refuse to edit a note that changed since it was read", async function () {
 			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
-			let [{ dateModified }] = (await call('zotero_get_notes', { keys: [note.key] })).notes;
+			let [{ dateModified }] = (await call('zotero_get_notes', { itemKeys: [note.key] })).notes;
 			note.setNote('<p>The user\'s edit</p>');
 			note.setField('dateModified', '2099-01-01 00:00:00');
 			await note.saveTx({ skipDateModifiedUpdate: true });
@@ -1475,7 +1475,7 @@ describe("MCP tools", function () {
 			let item = await createArticle();
 			let note = await createDataObject('item', { itemType: 'note', parentID: item.id });
 			
-			await call('zotero_trash', { keys: [item.key] });
+			await call('zotero_trash', { itemKeys: [item.key] });
 			assert.isTrue(ask.calledOnceWith('test-client', Permissions.DELETE, item.libraryID));
 			assert.isTrue(item.deleted);
 			assert.equal(Zotero.UndoHistory.getUndoAction().action, 'undo-action-mcp-changes');
@@ -1483,13 +1483,13 @@ describe("MCP tools", function () {
 			// Restoring an item restores its trashed children
 			note.deleted = true;
 			await note.saveTx();
-			let { restored } = await call('zotero_trash', { keys: [item.key], restore: true });
+			let { restored } = await call('zotero_trash', { itemKeys: [item.key], restore: true });
 			assert.isTrue(restored);
 			assert.isTrue(ask.secondCall.calledWith('test-client', Permissions.EDIT_LIBRARY, item.libraryID));
 			assert.isFalse(item.deleted);
 			assert.isFalse(note.deleted);
 			
-			let error = await callForError('zotero_trash', { keys: [item.key], restore: true });
+			let error = await callForError('zotero_trash', { itemKeys: [item.key], restore: true });
 			assert.match(error, /isn't in the trash/);
 		});
 		
@@ -1513,7 +1513,7 @@ describe("MCP tools", function () {
 		it("should trash nothing if the user denies it", async function () {
 			sinon.stub(Permissions, '_ask').resolves('deny');
 			let item = await createArticle();
-			let error = await callForError('zotero_trash', { keys: [item.key] });
+			let error = await callForError('zotero_trash', { itemKeys: [item.key] });
 			assert.match(error, /denied/);
 			assert.isFalse(item.deleted);
 		});
@@ -1700,7 +1700,7 @@ describe("MCP tools", function () {
 			});
 			
 			let { results, notice } = await call('zotero_find_full_text', {
-				keys: [found.key, notFound.key, noIdentifier.key],
+				itemKeys: [found.key, notFound.key, noIdentifier.key],
 			});
 			assert.isTrue(search.calledOnce);
 			assert.deepEqual(results.map(result => result.status), ['found', 'notFound', 'skipped']);
@@ -1717,7 +1717,7 @@ describe("MCP tools", function () {
 			item.setField('DOI', '10.1234/' + Zotero.Utilities.randomString());
 			await item.saveTx();
 			sinon.stub(Zotero.Attachments, 'addAvailableFiles').returns(new Promise(() => {}));
-			let { results, notice } = await withBudget(300, () => call('zotero_find_full_text', { keys: [item.key] }));
+			let { results, notice } = await withBudget(300, () => call('zotero_find_full_text', { itemKeys: [item.key] }));
 			assert.equal(results[0].status, 'pending');
 			assert.match(notice, /still looking/);
 		});
@@ -1771,29 +1771,29 @@ describe("MCP tools", function () {
 		});
 		
 		it("should export items as text in a format given by name", async function () {
-			let { format, output, citationKeys } = await call('zotero_export', { format: 'bibtex', keys: [item.key] });
+			let { format, output, citationKeys } = await call('zotero_export', { format: 'bibtex', itemKeys: [item.key] });
 			assert.equal(format, 'BibTeX');
 			assert.match(output, new RegExp(`^\\s*@article\\{${citationKeys[item.key]},`));
 			assert.match(output, /^\s*@article\{/);
 			assert.include(output, 'title = {A study of things}');
 			
-			({ output } = await call('zotero_export', { format: 'CSL JSON', keys: [item.key] }));
+			({ output } = await call('zotero_export', { format: 'CSL JSON', itemKeys: [item.key] }));
 			assert.equal(JSON.parse(output)[0].title, 'A study of things');
 		});
 		
 		it("should write a new file, and not replace one", async function () {
 			let path = PathUtils.join(await getTempDirectory(), 'export.ris');
-			let result = await call('zotero_export', { format: 'RIS', keys: [item.key], path });
+			let result = await call('zotero_export', { format: 'RIS', itemKeys: [item.key], path });
 			assert.deepEqual(result, { libraryID: Zotero.Libraries.userLibraryID, format: 'RIS', path, status: 'written' });
 			assert.include(await Zotero.File.getContentsAsync(path), 'TI  - A study of things');
 			
-			assert.match(await callForError('zotero_export', { format: 'RIS', keys: [item.key], path }), /already exists/);
+			assert.match(await callForError('zotero_export', { format: 'RIS', itemKeys: [item.key], path }), /already exists/);
 			
-			result = await call('zotero_export', { format: 'CSL JSON', keys: [item.key], path, overwrite: true });
+			result = await call('zotero_export', { format: 'CSL JSON', itemKeys: [item.key], path, overwrite: true });
 			assert.equal(result.status, 'written');
 			assert.equal(JSON.parse(await Zotero.File.getContentsAsync(path))[0].title, 'A study of things');
 			assert.match(
-				await callForError('zotero_export', { format: 'RIS', keys: [item.key], path: PathUtils.parent(path), overwrite: true }),
+				await callForError('zotero_export', { format: 'RIS', itemKeys: [item.key], path: PathUtils.parent(path), overwrite: true }),
 				/only a file can be overwritten/
 			);
 		});
@@ -1845,7 +1845,7 @@ describe("MCP tools", function () {
 		it("should write a folder with the items' files", async function () {
 			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
 			let path = PathUtils.join(await getTempDirectory(), 'With files');
-			let result = await call('zotero_export', { format: 'Zotero RDF', keys: [item.key], path, includeFiles: true });
+			let result = await call('zotero_export', { format: 'Zotero RDF', itemKeys: [item.key], path, includeFiles: true });
 			assert.equal(result.folder, path);
 			assert.equal(result.path, PathUtils.join(path, 'With files.rdf'));
 			assert.isTrue(await IOUtils.exists(result.path));
@@ -1854,7 +1854,7 @@ describe("MCP tools", function () {
 		});
 		
 		it("should list the formats when it doesn't know one", async function () {
-			let error = await callForError('zotero_export', { format: 'nope', keys: [item.key] });
+			let error = await callForError('zotero_export', { format: 'nope', itemKeys: [item.key] });
 			assert.match(error, /Zotero has no export format nope\. Its formats are .*BibTeX/);
 		});
 	});
