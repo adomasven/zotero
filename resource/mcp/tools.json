@@ -800,7 +800,7 @@
 			"annotations": {
 				"readOnlyHint": false,
 				"destructiveHint": false,
-				"idempotentHint": true,
+				"idempotentHint": false,
 				"openWorldHint": false
 			}
 		},
@@ -839,7 +839,7 @@
 			"annotations": {
 				"readOnlyHint": false,
 				"destructiveHint": false,
-				"idempotentHint": true,
+				"idempotentHint": false,
 				"openWorldHint": false
 			}
 		},
@@ -945,7 +945,9 @@
 				"required": ["libraryID", "format"]
 			},
 			"annotations": {
-				"readOnlyHint": true,
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": true,
 				"openWorldHint": true
 			}
 		},
@@ -1164,7 +1166,7 @@
 			},
 			"annotations": {
 				"readOnlyHint": false,
-				"destructiveHint": false,
+				"destructiveHint": true,
 				"idempotentHint": false,
 				"openWorldHint": false
 			}
@@ -1203,7 +1205,7 @@
 			},
 			"annotations": {
 				"readOnlyHint": false,
-				"destructiveHint": false,
+				"destructiveHint": true,
 				"idempotentHint": false,
 				"openWorldHint": false
 			}
