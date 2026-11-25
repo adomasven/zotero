@@ -263,6 +263,7 @@ Zotero.MCP.Tools = new function () {
 					? new Set([collection, ...Zotero.Collections.getByParent(collection.id, true)]
 						.flatMap(c => c.getChildItems(true))).size
 					: collection.getChildItems(true).length,
+				link: `zotero://select/${Zotero.API.getLibraryPrefix(libraryID)}/collections/${collection.key}`,
 			})),
 		});
 	};

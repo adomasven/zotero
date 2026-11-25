@@ -208,9 +208,10 @@
 								"key": { "type": "string" },
 								"name": { "type": "string" },
 								"parentKey": { "type": "string" },
-								"itemCount": { "type": "integer", "description": "Top-level items in the collection, and in its subcollections with includeSubcollectionItems" }
+								"itemCount": { "type": "integer", "description": "Top-level items in the collection, and in its subcollections with includeSubcollectionItems" },
+								"link": { "type": "string", "description": "zotero:// link that shows the collection in Zotero" }
 							},
-							"required": ["key", "name", "itemCount"]
+							"required": ["key", "name", "itemCount", "link"]
 						}
 					}
 				},

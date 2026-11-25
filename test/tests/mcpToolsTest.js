@@ -199,8 +199,8 @@ describe("MCP tools", function () {
 			
 			let { collections } = await call('zotero_list_collections', { collectionKey: parent.key });
 			assert.sameDeepMembers(collections, [
-				{ key: child.key, name: child.name, parentKey: parent.key, itemCount: 0 },
-				{ key: grandchild.key, name: grandchild.name, parentKey: child.key, itemCount: 1 },
+				{ key: child.key, name: child.name, parentKey: parent.key, itemCount: 0, link: `zotero://select/library/collections/${child.key}` },
+				{ key: grandchild.key, name: grandchild.name, parentKey: child.key, itemCount: 1, link: `zotero://select/library/collections/${grandchild.key}` },
 			]);
 			
 			// Whatever the user's setting for showing items from subcollections
