@@ -327,7 +327,7 @@ Zotero.MCP.Tools = new function () {
 	 * The item types an item can be, with their fields and creator types, as the web API's
 	 * /itemTypes, /itemTypeFields and /itemTypeCreatorTypes give them
 	 */
-	this.getItemTypes = async function ({ itemTypes }) {
+	this.listItemTypes = async function ({ itemTypes }) {
 		let types = getRegularItemTypes();
 		if (itemTypes?.length) {
 			types = types.filter(type => itemTypes.includes(type.name));

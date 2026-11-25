@@ -309,7 +309,7 @@
 			}
 		},
 		{
-			"name": "zotero_get_item_types",
+			"name": "zotero_list_item_types",
 			"title": "List Zotero item types",
 			"description": "List the item types an item can be (book, journalArticle and so on), with each type's fields and creator types, by the names zotero_add_items, zotero_update_items and zotero_change_item_types take. Pass itemTypes for only some types.",
 			"inputSchema": {
@@ -967,7 +967,7 @@
 								"key": { "type": "string", "description": "The item's key" },
 								"fields": {
 									"type": "object",
-									"description": "Fields to set, by Zotero field name (zotero_get_item_types lists each item type's), e.g. {\"title\": \"…\", \"date\": \"2020-05\"}. An empty string clears a field.",
+									"description": "Fields to set, by Zotero field name (zotero_list_item_types lists each item type's), e.g. {\"title\": \"…\", \"date\": \"2020-05\"}. An empty string clears a field.",
 									"additionalProperties": { "type": "string" }
 								},
 								"creators": {
@@ -976,7 +976,7 @@
 									"items": {
 										"type": "object",
 										"properties": {
-											"creatorType": { "type": "string", "description": "e.g. \"author\" or \"editor\"; zotero_get_item_types lists each item type's" },
+											"creatorType": { "type": "string", "description": "e.g. \"author\" or \"editor\"; zotero_list_item_types lists each item type's" },
 											"firstName": { "type": "string" },
 											"lastName": { "type": "string" },
 											"name": { "type": "string", "description": "Instead of firstName and lastName, for an organization or a one-part name" }
@@ -1051,7 +1051,7 @@
 		{
 			"name": "zotero_change_item_types",
 			"title": "Change Zotero item types",
-			"description": "Change items' types, e.g. from journalArticle to bookSection, as the Item Type menu in Zotero's item pane does. Fields the new type also has keep their values. A field with a counterpart in the new type moves to it (e.g. publicationTitle becomes bookTitle; zotero_get_item_types lists each field's baseField). Fields the new type doesn't have are removed, and the result gives their values, so you can tell the user or put them elsewhere. Creators of the old type's main type (e.g. author) get the new type's main type, and other creators whose type the new type doesn't have become contributors. Use zotero_update_items afterwards to fill the new type's fields. Notes, attachments and annotations can't change type. Up to 50 items per call. The whole call succeeds or changes nothing, and the user can undo it in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
+			"description": "Change items' types, e.g. from journalArticle to bookSection, as the Item Type menu in Zotero's item pane does. Fields the new type also has keep their values. A field with a counterpart in the new type moves to it (e.g. publicationTitle becomes bookTitle; zotero_list_item_types lists each field's baseField). Fields the new type doesn't have are removed, and the result gives their values, so you can tell the user or put them elsewhere. Creators of the old type's main type (e.g. author) get the new type's main type, and other creators whose type the new type doesn't have become contributors. Use zotero_update_items afterwards to fill the new type's fields. Notes, attachments and annotations can't change type. Up to 50 items per call. The whole call succeeds or changes nothing, and the user can undo it in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1458,7 +1458,7 @@
 					"items": {
 						"type": "array",
 						"maxItems": 50,
-						"description": "Item JSON in the Zotero web API format, as zotero_get_items returns, e.g. {\"itemType\": \"report\", \"title\": \"…\", \"creators\": [{\"creatorType\": \"author\", \"firstName\": \"Ann\", \"lastName\": \"Lee\"}], \"date\": \"2024\", \"institution\": \"…\", \"url\": \"…\"}. Only fields of the item type are accepted; zotero_get_item_types lists each type's fields and creator types. Notes and files aren't items here: add them with zotero_add_note and zotero_add_attachment.",
+						"description": "Item JSON in the Zotero web API format, as zotero_get_items returns, e.g. {\"itemType\": \"report\", \"title\": \"…\", \"creators\": [{\"creatorType\": \"author\", \"firstName\": \"Ann\", \"lastName\": \"Lee\"}], \"date\": \"2024\", \"institution\": \"…\", \"url\": \"…\"}. Only fields of the item type are accepted; zotero_list_item_types lists each type's fields and creator types. Notes and files aren't items here: add them with zotero_add_note and zotero_add_attachment.",
 						"items": {
 							"type": "object",
 							"properties": {

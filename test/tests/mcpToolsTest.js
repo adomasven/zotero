@@ -1027,9 +1027,9 @@ describe("MCP tools", function () {
 		});
 	});
 	
-	describe("zotero_get_item_types", function () {
+	describe("zotero_list_item_types", function () {
 		it("should list each item type's fields and creator types", async function () {
-			let { itemTypes } = await call('zotero_get_item_types', { itemTypes: ['bookSection'] });
+			let { itemTypes } = await call('zotero_list_item_types', { itemTypes: ['bookSection'] });
 			assert.lengthOf(itemTypes, 1);
 			let [type] = itemTypes;
 			assert.equal(type.itemType, 'bookSection');
@@ -1040,7 +1040,7 @@ describe("MCP tools", function () {
 			assert.deepInclude(type.creatorTypes, { creatorType: 'author', label: 'Author', primary: true });
 			assert.deepInclude(type.creatorTypes, { creatorType: 'bookAuthor', label: 'Book Author' });
 			
-			({ itemTypes } = await call('zotero_get_item_types', {}));
+			({ itemTypes } = await call('zotero_list_item_types', {}));
 			let names = itemTypes.map(type => type.itemType);
 			assert.includeMembers(names, ['book', 'journalArticle', 'webpage']);
 			assert.notInclude(names, 'note');
@@ -1051,7 +1051,7 @@ describe("MCP tools", function () {
 				.map(type => type.name)
 				.filter(name => !['note', 'attachment', 'annotation'].includes(name))
 				.sort();
-			let { itemTypes } = await call('zotero_get_item_types', {});
+			let { itemTypes } = await call('zotero_list_item_types', {});
 			assert.sameMembers(itemTypes.map(type => type.itemType), expected);
 			
 			// Every list of item types in an input schema, e.g. after a schema update adds a type
