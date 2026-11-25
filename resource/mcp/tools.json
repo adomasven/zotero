@@ -1,5 +1,5 @@
 {
-	"instructions": "Zotero is the user's reference manager: their library of papers, books and other sources, with PDFs and other files, annotations, notes, collections and tags. Use these tools to find and read the user's sources, cite them in a citation style, add or organize items in their library, import and export them, and show them to the user in Zotero's windows. They work on the Zotero app on the user's computer, which is started if it isn't running.",
+	"instructions": "Zotero is the user's reference manager: their library of papers, books and other sources, with PDFs and other files, annotations, notes, collections and tags. Use these tools to find and read the user's sources, cite them in a citation style, add or organize items in their library, import and export them, and show them to the user in Zotero's windows. They work on the Zotero app on the user's computer, which is started if it isn't running. Tools that change the library ask the user for permission in Zotero unless they already granted it, and each such call is one step the user can undo with Edit → Undo, which moves anything added to the trash.",
 	"tools": [
 		{
 			"name": "zotero_status",
@@ -61,9 +61,9 @@
 						"description": "What free text matches: title, creators and year; all fields, tags and notes; or those and attachment full text"
 					},
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
-					"collectionKey": { "type": "string", "description": "Only items in this collection" },
+					"collectionKey": { "type": "string", "description": "Only items in this collection. Not with savedSearchKey." },
 					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also items in the collection's subcollections, at any depth" },
-					"savedSearchKey": { "type": "string", "description": "Only items this saved search finds. total is how many it finds." },
+					"savedSearchKey": { "type": "string", "description": "Only items this saved search finds. Not with collectionKey." },
 					"sortField": { "enum": ["dateModified", "dateAdded", "date", "title", "creator"], "default": "dateModified", "description": "What to order items by" },
 					"sortDirection": { "enum": ["asc", "desc"], "description": "Defaults to newest first for dates, A to Z otherwise" },
 					"limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 25 },
@@ -122,7 +122,8 @@
 						"type": "array",
 						"items": { "type": "string" },
 						"minItems": 1,
-						"maxItems": 50
+						"maxItems": 50,
+						"description": "Also notes, attachments and annotations"
 					},
 					"includeTrashed": { "type": "boolean", "default": false, "description": "Also get items in the trash, which have deleted: true" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
@@ -186,7 +187,7 @@
 		{
 			"name": "zotero_list_collections",
 			"title": "List Zotero collections",
-			"description": "List a library's collections, or a collection's subcollections at any depth, with how many items each has. zotero_search with the collectionKey lists them.",
+			"description": "List a library's collections, or a collection's subcollections at any depth, with how many items each has. To list a collection's items, use zotero_search with collectionKey.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -312,7 +313,7 @@
 		{
 			"name": "zotero_list_item_types",
 			"title": "List Zotero item types",
-			"description": "List the item types an item can be (book, journalArticle and so on), with each type's fields and creator types, by the names zotero_add_items, zotero_update_items and zotero_change_item_types take. Pass itemTypes for only some types.",
+			"description": "List the item types an item can be (book, journalArticle and so on), with each type's fields and creator types, by the names zotero_add_items, zotero_update_items and zotero_change_item_types take.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -380,7 +381,7 @@
 						"items": { "type": "string" },
 						"minItems": 1,
 						"maxItems": 100,
-						"description": "Only these items' files, given by item or attachment keys"
+						"description": "Only these items' files, given by item or attachment keys. Not with collectionKey."
 					},
 					"collectionKey": { "type": "string", "description": "Only the files of items in this collection" },
 					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also items in the collection's subcollections, at any depth" },
@@ -404,7 +405,7 @@
 							"properties": {
 								"key": { "type": "string", "description": "The attachment's key" },
 								"parentKey": { "type": "string", "description": "The key of the item it belongs to" },
-								"title": { "type": "string" },
+								"title": { "type": "string", "description": "The parent item's title" },
 								"contentType": { "type": "string" },
 								"matchCount": { "type": "integer" },
 								"pending": { "type": "boolean", "description": "Zotero is still getting the file's text, so its passages are missing" },
@@ -441,7 +442,7 @@
 		{
 			"name": "zotero_read_text",
 			"title": "Read text from a Zotero file",
-			"description": "Read the text of a PDF, EPUB, web page snapshot or text file in Zotero. PDFs are read by page, with page labels (the page numbers printed on the pages, for citing) and the outline when Zotero has them; other files by character offset. Give an attachment key, or an item key to read its best file. Returns about maxChars characters per call, and nextPage or nextOffset to continue.",
+			"description": "Read the text of a PDF, EPUB, web page snapshot or text file in Zotero. PDFs are read by page, with page labels (the page numbers printed on the pages, for citing) and the outline when Zotero has them; other files by character offset. Returns about maxChars characters per call, and nextPage or nextOffset to continue.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -472,7 +473,7 @@
 					"libraryID": { "type": "integer" },
 					"key": { "type": "string", "description": "The attachment's key" },
 					"parentKey": { "type": "string" },
-					"title": { "type": "string" },
+					"title": { "type": "string", "description": "The parent item's title" },
 					"contentType": { "type": "string" },
 					"link": { "type": "string", "description": "zotero:// link that opens the file" },
 					"totalPages": { "type": "integer" },
@@ -506,7 +507,7 @@
 		{
 			"name": "zotero_get_notes",
 			"title": "Get Zotero notes and annotations",
-			"description": "Get notes and annotations (highlights, underlines, comments and so on made in Zotero's reader). For an item, returns its notes and the annotations in its files; for an attachment, its annotations; or give note or annotation keys. Notes come as Markdown by default. Annotations are in the order they're in the file, with the page label for citing and a link that opens the file at the annotation. Image and ink annotations (areas or drawings the user marked) have an imagePath once Zotero has rendered them; get the others' with zotero_render_annotation_images. Images in notes show as [image] in Markdown, and come in images in the same order, with their files.",
+			"description": "Get notes and annotations (highlights, underlines, comments and so on made in Zotero's reader). For an item, returns its notes and the annotations in its files; for an attachment, its annotations; or give note or annotation keys. Image and ink annotations (areas or drawings the user marked) have an imagePath once Zotero has rendered them; get the others' with zotero_render_annotation_images. Images in notes show as [image] in Markdown, and come in images in the same order, with their files.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -576,7 +577,7 @@
 		{
 			"name": "zotero_render_annotation_images",
 			"title": "Render Zotero annotation images",
-			"description": "Get PNG files of image and ink annotations in PDFs (areas or drawings the user marked), rendering the ones Zotero hasn't rendered yet. Use it for annotations zotero_get_notes gives no imagePath for, e.g. to see a figure the user marked. Zotero renders all of a PDF's missing images at once, in the background, so a PDF with many can take a while; images not ready yet come back pending. Read the files now rather than keep the paths: Zotero replaces a file when its annotation changes.",
+			"description": "Get PNG files of image and ink annotations in PDFs (areas or drawings the user marked), rendering the ones Zotero hasn't rendered yet. Use it for annotations zotero_get_notes gives no imagePath for, e.g. to see a figure the user marked. Rendering can outlast the call.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -596,7 +597,7 @@
 							"type": "object",
 							"properties": {
 								"key": { "type": "string" },
-								"path": { "type": "string" },
+								"path": { "type": "string", "description": "A PNG. Read it now rather than keep the path: Zotero replaces it when the annotation changes." },
 								"status": { "enum": ["rendered", "pending", "failed"], "description": "pending: Zotero is still rendering it" }
 							},
 							"required": ["key", "status"]
@@ -615,7 +616,7 @@
 		{
 			"name": "zotero_get_context",
 			"title": "Get what the user is looking at in Zotero",
-			"description": "Get what the user has open and selected in Zotero's main window, so requests like \"summarize this paper\", \"the page I'm on\", \"the passage I selected\" or \"the papers I selected\" can be answered. Returns the selected library, collections and items in the library tab, and which tab is active. If it's a PDF, EPUB or web page snapshot in Zotero's reader, it also returns the file, the page the user is on, the text they've selected and the annotations they've selected; if it's a note, the note. It also lists the tabs of all of Zotero's windows, with the IDs zotero_select, zotero_open and zotero_close take. A tab ID is unique only within its window: each window's first library tab is zotero-pane. To use one that's in several windows, give its windowID too. Returns window: false when no Zotero window is open.",
+			"description": "Get the active window's selection and reader or note, plus tab IDs for all windows. A tab ID is unique only within its window (each window's first library tab is zotero-pane): give its windowID too when it's in several.",
 			"inputSchema": {
 				"type": "object",
 				"additionalProperties": false
@@ -680,7 +681,7 @@
 							"libraryID": { "type": "integer" },
 							"key": { "type": "string", "description": "The attachment's key, for zotero_read_text" },
 							"parentKey": { "type": "string" },
-							"title": { "type": "string" },
+							"title": { "type": "string", "description": "The parent item's title" },
 							"contentType": { "type": "string" },
 							"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
 							"type": { "enum": ["pdf", "epub", "snapshot"] },
@@ -776,12 +777,12 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"collectionKey": { "type": "string", "description": "Defaults to the whole library" },
+					"collectionKey": { "type": "string", "description": "Defaults to the whole library. Not with savedSearchKey." },
 					"savedSearchKey": { "type": "string" },
 					"itemKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 500, "description": "Items to select. Only items in the collection or saved search can be selected. Without itemKeys or allItems, nothing is selected, even if the collection was already shown with a selection." },
-					"allItems": { "type": "boolean", "default": false, "description": "Select every item shown" },
+					"allItems": { "type": "boolean", "default": false, "description": "Select every item shown. Not with itemKeys." },
 					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
-					"tabID": { "type": "string", "description": "A library tab from zotero_get_context. Defaults to the window's library tab used last. Tab IDs are unique only within a window: each window's first library tab is zotero-pane. If the ID is in several windows, give windowID too." },
+					"tabID": { "type": "string", "description": "A library tab from zotero_get_context. Defaults to the window's library tab used last." },
 					"newTab": { "type": "boolean", "default": false, "description": "Show them in a new library tab" },
 					"newWindow": { "type": "boolean", "default": false, "description": "Show them in a new window" },
 					"focus": { "type": "boolean", "default": false, "description": "Bring Zotero to the front. By default it stays behind the app the user is in." },
@@ -811,12 +812,12 @@
 		{
 			"name": "zotero_open",
 			"title": "Open a file or note in Zotero",
-			"description": "Open a PDF, EPUB or web page snapshot in Zotero's reader, or a note, for the user to see, and scroll the reader to a page or an annotation. Give an item's key to open its best file. If it's already open, its tab is selected and scrolled instead, unless newTab is given. Changes only what Zotero shows, not the library.",
+			"description": "Open a PDF, EPUB or web page snapshot in Zotero's reader, or a note, for the user to see, and scroll the reader to a page or an annotation. If it's already open, its tab is selected and scrolled instead, unless newTab is given. Changes only what Zotero shows, not the library.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"itemKey": { "type": "string", "description": "An attachment, a note, or a regular item to open its PDF, EPUB or snapshot" },
-					"page": { "type": "integer", "minimum": 1, "description": "PDF page to scroll to, from 1, as zotero_read_text and zotero_search_fulltext give" },
+					"page": { "type": "integer", "minimum": 1, "description": "PDF page to scroll to, from 1, as zotero_read_text and zotero_search_fulltext give. Only one of page, pageLabel and annotationKey." },
 					"pageLabel": { "type": "string", "description": "The page number printed on the page, for a PDF or an EPUB with page numbers" },
 					"annotationKey": { "type": "string", "description": "An annotation of the file to scroll to and select" },
 					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
@@ -833,7 +834,7 @@
 				"properties": {
 					"libraryID": { "type": "integer" },
 					"key": { "type": "string", "description": "The file or note opened" },
-					"title": { "type": "string" },
+					"title": { "type": "string", "description": "The parent item's title" },
 					"windowID": { "type": "string" },
 					"tabID": { "type": "string" },
 					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
@@ -855,7 +856,7 @@
 				"type": "object",
 				"properties": {
 					"tabIDs": { "type": "array", "items": { "type": "string" }, "description": "Tabs to close" },
-					"windowID": { "type": "string", "description": "The window of tabIDs. Tab IDs are unique only within a window: each window's first library tab is zotero-pane. Needed when one of tabIDs is in several windows." },
+					"windowID": { "type": "string", "description": "The window of tabIDs, needed when one of them is in several windows" },
 					"windowIDs": { "type": "array", "items": { "type": "string" }, "description": "Windows to close, with all their tabs" }
 				},
 				"additionalProperties": false
@@ -878,7 +879,7 @@
 		{
 			"name": "zotero_generate_citation",
 			"title": "Generate Zotero citations",
-			"description": "Format items in a citation style: as one citation (with page or other locators), as a bibliography, or, with format document, all of a document's citations at once. Use format document when writing a document with several citations: give its citations in the order they appear, and get each one formatted and the bibliography, with numbering, disambiguation (Smith 2020a, 2020b) and ibid. or short forms worked out across the document, as Zotero's word processor plugins do. A citation formatted on its own always starts at [1] in a numeric style. For BibTeX, RIS and other export formats, use zotero_export. Defaults to APA, in the language Zotero is in. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",
+			"description": "Format items in a citation style: as one citation (with page or other locators), as a bibliography, or, with format document, all of a document's citations at once. Use format document when writing a document with several citations: give its citations in the order they appear, and get each one formatted and the bibliography, with numbering, disambiguation (Smith 2020a, 2020b) and ibid. or short forms worked out across the document. A citation formatted on its own always starts at [1] in a numeric style. For BibTeX, RIS and other export formats, use zotero_export. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -958,7 +959,7 @@
 		{
 			"name": "zotero_update_items",
 			"title": "Edit Zotero items",
-			"description": "Change items' metadata, tags and collections: set or clear fields (title, date, DOI, abstractNote and so on), replace creators, add or remove tags, and add items to or remove them from collections. Use it to tag, retitle, correct or file items; to change an item's type, use zotero_change_item_types. Up to 50 items per call. The whole call succeeds or changes nothing: if any change is invalid (an unknown key, or a field the item's type doesn't have), the error says why and nothing is changed. The user can undo the whole call in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
+			"description": "Change items' metadata, tags and collections: set or clear fields (title, date, DOI, abstractNote and so on), replace creators, add or remove tags, and add items to or remove them from collections. To change an item's type, use zotero_change_item_types. All or nothing: one invalid change fails the call.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1054,7 +1055,7 @@
 		{
 			"name": "zotero_change_item_types",
 			"title": "Change Zotero item types",
-			"description": "Change items' types, e.g. from journalArticle to bookSection, as the Item Type menu in Zotero's item pane does. Fields the new type also has keep their values. A field with a counterpart in the new type moves to it (e.g. publicationTitle becomes bookTitle; zotero_list_item_types lists each field's baseField). Fields the new type doesn't have are removed, and the result gives their values, so you can tell the user or put them elsewhere. Creators of the old type's main type (e.g. author) get the new type's main type, and other creators whose type the new type doesn't have become contributors. Use zotero_update_items afterwards to fill the new type's fields. Notes, attachments and annotations can't change type. Up to 50 items per call. The whole call succeeds or changes nothing, and the user can undo it in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
+			"description": "Change items' types, e.g. from journalArticle to bookSection. Fields the new type also has keep their values. A field with a counterpart in the new type moves to it (e.g. publicationTitle becomes bookTitle; zotero_list_item_types lists each field's baseField). Fields the new type doesn't have are removed, and the result gives their values, so you can tell the user or put them elsewhere. Use zotero_update_items afterwards to fill the new type's fields. Notes, attachments and annotations can't change type. All or nothing: one invalid change fails the call.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1138,7 +1139,7 @@
 		{
 			"name": "zotero_manage_collections",
 			"title": "Create, rename or move a Zotero collection",
-			"description": "Create a collection, rename one, or move one into another collection or to the top level. To put items in a collection, use zotero_update_items. The user can undo the call in Zotero with Edit → Undo, which moves a new collection to the trash. Zotero asks the user for permission unless it was already granted.",
+			"description": "Create a collection, rename one, or move one into another collection or to the top level. To put items in a collection, use zotero_update_items. To delete one, use zotero_trash.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1178,14 +1179,14 @@
 		{
 			"name": "zotero_manage_saved_searches",
 			"title": "Manage Zotero saved searches",
-			"description": "Create a saved search, which shows in Zotero's collection pane and keeps finding matching items as the library changes, or rename one or change its query. The query uses zotero_search's syntax. To delete one, use zotero_trash. The user can undo it in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
+			"description": "Create a saved search, or rename one or change its query. The query uses zotero_search's syntax. To delete one, use zotero_trash.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"action": { "enum": ["create", "update"] },
 					"savedSearchKey": { "type": "string", "description": "For update" },
-					"name": { "type": "string" },
-					"query": { "type": "string", "description": "As for zotero_search, e.g. `tag:\"to read\" no notes`" },
+					"name": { "type": "string", "description": "Needed for create" },
+					"query": { "type": "string", "description": "Needed for create. As for zotero_search, e.g. `tag:\"to read\" no notes`" },
 					"mode": { "enum": ["titleCreatorYear", "fields", "everything"], "default": "titleCreatorYear", "description": "How free text in the query matches, as for zotero_search" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
@@ -1217,7 +1218,7 @@
 		{
 			"name": "zotero_add_note",
 			"title": "Add a Zotero note",
-			"description": "Add a note, written in Markdown, under an item (a child note) or as a standalone note, optionally in a collection. Supports CommonMark with tables, ~~strikethrough~~ and TeX math: $…$ inline, and display math between lines of just $$. As when Markdown is pasted into a Zotero note, dollar signs only become math around something that looks like math (a TeX command, braces or an operator), so $x$ alone or $5 stays text. Raw HTML is shown as text, and images become links. The user can undo it in Zotero with Edit → Undo, which moves the note to the trash. Zotero asks the user for permission unless it was already granted.",
+			"description": "Add a note, written in Markdown, under an item (a child note) or as a standalone note, optionally in a collection. Supports CommonMark with tables, ~~strikethrough~~ and TeX math: $…$ inline, and display math between lines of just $$. As when Markdown is pasted into a Zotero note, dollar signs only become math around something that looks like math (a TeX command, braces or an operator), so $x$ alone or $5 stays text. Raw HTML is shown as text, and images become links.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1254,7 +1255,7 @@
 		{
 			"name": "zotero_manage_tags",
 			"title": "Manage Zotero tags",
-			"description": "Change tags across a whole library: rename a tag, merge several into one by renaming them all to the same name (which may be an existing tag), delete tags from every item that has them, or set or remove a tag's color. Tag names match exactly, including case, as zotero_list_tags lists them. To change the tags of particular items, use zotero_update_items. The user can undo renaming and deleting in Zotero with Edit → Undo, though not color changes. Zotero asks the user for permission unless it was already granted.",
+			"description": "Change tags across a whole library: rename a tag, merge several into one by renaming them all to the same name (which may be an existing tag), delete tags from every item that has them, or set or remove a tag's color. Tag names match exactly, including case, as zotero_list_tags lists them. To change the tags of particular items, use zotero_update_items. Color changes can't be undone.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1293,7 +1294,7 @@
 		{
 			"name": "zotero_edit_note",
 			"title": "Edit a Zotero note",
-			"description": "Add Markdown to the end of a note, or replace its content, with the same Markdown as zotero_add_note. Give the note's dateModified from zotero_get_notes: if the note changed since, e.g. because the user edited it, nothing is changed and you get it again first. Replacing works only on notes without highlights, citations or images, which Markdown can't hold; append to the others. The user can undo it in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
+			"description": "Add Markdown to the end of a note, or replace its content, with the same Markdown as zotero_add_note. Give the note's dateModified from zotero_get_notes: if the note changed since, e.g. because the user edited it, nothing is changed and you get it again first. Replacing works only on notes without highlights, citations or images, which Markdown can't hold; append to the others.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1381,7 +1382,7 @@
 		{
 			"name": "zotero_merge_items",
 			"title": "Merge duplicate Zotero items",
-			"description": "Merge items that are the same work, as Zotero's merge button does: the master item keeps its own fields and gets the others' notes, files, annotations, tags, collections and related items, and the others go to the trash. Duplicate PDFs are combined, keeping the annotations of each. To use a field value from another copy, set it on the master with zotero_update_items. The items must be regular items of the same type. The user can undo it in Zotero with Edit → Undo. Zotero asks the user for permission unless it was already granted.",
+			"description": "Merge items that are the same work, as Zotero's merge button does: the master item keeps its own fields and gets the others' notes, files, annotations, tags, collections and related items, and the others go to the trash. Duplicate PDFs are combined, keeping the annotations of each. To use a field value from another copy, set it on the master with zotero_update_items. The items must be regular items of the same type.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1415,7 +1416,7 @@
 		{
 			"name": "zotero_trash",
 			"title": "Move to or restore from the Zotero trash",
-			"description": "Move items (with their notes and attachments), collections (with their subcollections) or saved searches to the trash, or restore them from it. Items in a trashed collection stay in the library. The user can restore trashed things from the trash, or undo the whole call in Zotero with Edit → Undo, until the trash is emptied. Zotero asks the user for permission unless it was already granted: to trash, for an hour at most.",
+			"description": "Move items (with their notes and attachments), collections (with their subcollections) or saved searches to the trash, or restore them from it. Items in a trashed collection stay in the library. The user can restore them from the trash until it's emptied.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1448,7 +1449,7 @@
 		{
 			"name": "zotero_add_items",
 			"title": "Add items to Zotero",
-			"description": "Add items to a Zotero library, with their metadata looked up, and look for their PDFs. For BibTeX, RIS or another import format, use zotero_import. Ways to add, best first:\n- identifiers: DOIs, ISBNs, arXiv IDs or PubMed IDs, or URLs that contain one (doi.org, a publisher's article page with the DOI in its URL, arxiv.org, pubmed.ncbi.nlm.nih.gov). Zotero doesn't add other web pages: the user saves those with the Zotero Connector in their browser.\n- items: item JSON, for something without an identifier whose metadata you found yourself.\nIf looking up identifiers takes too long, the call returns before they're all done: those still being looked up say pending, and Zotero adds them when their lookup finishes. By default Zotero then looks for each new item's PDF or EPUB as its Find Full Text does, from the user's computer, so access through their institution works. If it finds none, find a copy elsewhere and attach it with zotero_add_attachment; as a last resort, ask the user to save it with the Zotero Connector. The user can undo the call in Zotero with Edit → Undo, which moves the new items to the trash. Zotero asks the user for permission unless it was already granted.",
+			"description": "Add items to a Zotero library, with their metadata looked up, and look for their PDFs. For BibTeX, RIS or another import format, use zotero_import. Ways to add, best first:\n- identifiers: DOIs, ISBNs, arXiv IDs or PubMed IDs, or URLs that contain one (doi.org, a publisher's article page with the DOI in its URL, arxiv.org, pubmed.ncbi.nlm.nih.gov). Zotero doesn't add other web pages: the user saves those with the Zotero Connector in their browser.\n- items: item JSON, for something without an identifier whose metadata you found yourself.\nBy default Zotero then looks for each new item's PDF or EPUB as its Find Full Text does, from the user's computer, so access through their institution works.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1482,7 +1483,7 @@
 					"libraryID": { "type": "integer" },
 					"results": {
 						"type": "array",
-						"description": "One per item, in the order given. An identifier or text can give several.",
+						"description": "One per item, in the order given. An identifier can give several.",
 						"items": {
 							"type": "object",
 							"properties": {
@@ -1526,7 +1527,7 @@
 		{
 			"name": "zotero_find_fulltext_attachments",
 			"title": "Find full text in Zotero",
-			"description": "Look for a PDF or EPUB of items that have none, as Zotero's Find Full Text menu command does: by DOI, URL or PMCID, from open-access sources and from the publisher's site, through the user's institution where they have access. Use it for items added without files, e.g. by zotero_import. Items that already have a PDF or EPUB, or have no DOI, URL or PMCID, are skipped. If the search takes too long, the call returns and Zotero goes on in the background. The user can undo it in Zotero with Edit → Undo, which moves the files found to the trash. Zotero asks the user for permission unless it was already granted.",
+			"description": "Look for a PDF or EPUB of items that have none, as Zotero's Find Full Text menu command does: by DOI, URL or PMCID, from open-access sources and from the publisher's site, through the user's institution where they have access. Use it for items added without files, e.g. by zotero_import. Items that already have a PDF or EPUB, or have no DOI, URL or PMCID, are skipped.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1579,12 +1580,12 @@
 		{
 			"name": "zotero_add_attachment",
 			"title": "Attach a file in Zotero",
-			"description": "Attach a PDF, EPUB or other file to an item: from a URL, which Zotero downloads, or from a file on this computer, e.g. one you downloaded or one in the user's Downloads folder. Without parentKey, adds a file on this computer as a standalone attachment and has Zotero identify it from its contents (a PDF's or EPUB's DOI, ISBN or title page), creating its parent item, as Zotero does when the user adds a file on its own; use this to bring the user's existing PDFs into Zotero, one call per file. Attach to an item when zotero_add_items finds no PDF and you've found a copy elsewhere, such as on arXiv, PubMed Central or the author's site. A URL can be a link to a PDF or EPUB, or a page that links to one; it's downloaded from the user's computer, so access through their institution works. If Zotero can't get the file, as a last resort ask the user to save it with the Zotero Connector from a browser where they're signed in. The user can undo it in Zotero with Edit → Undo, which moves the attachment, and a parent item Zotero created, to the trash. Zotero asks the user for permission unless it was already granted.",
+			"description": "Attach a local file, or download a PDF/EPUB to a parent item. Without a parent, Zotero adds a local file on its own and tries to identify it.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"parentKey": { "type": "string", "description": "The regular item (e.g. a journal article) to attach the file to. Omit to add a file from path as a standalone attachment that Zotero identifies." },
-					"url": { "type": "string", "description": "http or https, with parentKey. Only PDFs and EPUBs are attached from URLs." },
+					"url": { "type": "string", "description": "http or https, with parentKey: a PDF or EPUB, or a page that links to one. Downloaded from the user's computer, so their institution's access applies. Not with path." },
 					"path": { "type": "string", "description": "The absolute path of a file on this computer" },
 					"linkFile": { "type": "boolean", "default": false, "description": "Link to the file at path where it is, instead of copying it into Zotero" },
 					"collectionKey": { "type": "string", "description": "Without parentKey, a collection to add the file and the item Zotero creates for it to" },
@@ -1637,11 +1638,11 @@
 		{
 			"name": "zotero_import",
 			"title": "Import into Zotero",
-			"description": "Import a file on this computer, or text, in a format Zotero imports: BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, MODS, EndNote XML and others. Like File → Import, the PDFs and other files a file refers to are imported too, and a file's items go into a new collection named after it unless collectionKey is given. If importing takes too long, the call returns pending and Zotero finishes in the background. Zotero doesn't check whether the items are already in the library. The user can undo the import in Zotero with Edit → Undo, which moves the new items and collections to the trash. Zotero asks the user for permission unless it was already granted.",
+			"description": "Import a file on this computer, or text, in a format Zotero imports: BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, MODS, EndNote XML and others. Like File → Import, the PDFs and other files a file refers to are imported too, and a file's items go into a new collection named after it unless collectionKey is given. Zotero doesn't check whether the items are already in the library.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"path": { "type": "string", "description": "The file's absolute path" },
+					"path": { "type": "string", "description": "The file's absolute path. Not with text." },
 					"text": { "type": "string" },
 					"collectionKey": { "type": "string", "description": "A collection to add the items to" },
 					"newCollection": { "type": "boolean", "description": "Put the items in a new collection. Defaults to true for a file and false for text." },
@@ -1690,12 +1691,12 @@
 		{
 			"name": "zotero_export",
 			"title": "Export from Zotero",
-			"description": "Export items, a collection, or a whole library, in an export format, as text or to a new file on this computer. Formats include BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, CSV, MODS, EndNote XML and Markdown or HTML for notes; an unknown format gives the full list. Large exports must be written to a file. An existing file is replaced only with overwrite. BibTeX and BibLaTeX exports also give the citation key of each item, to cite them by in Markdown for Pandoc.",
+			"description": "Export items, a collection, or a whole library, in an export format, as text or to a new file on this computer. Formats include BibTeX, BibLaTeX, RIS, Zotero RDF, CSL JSON, CSV, MODS, EndNote XML and Markdown or HTML for notes; an unknown format gives the full list. Large exports must be written to a file.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"format": { "type": "string", "description": "An export format's name, e.g. \"BibTeX\" or \"CSL JSON\"" },
-					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Items to export. Defaults to the whole library." },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Items to export. Not with collectionKey. Without either, the whole library." },
 					"collectionKey": { "type": "string" },
 					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also the items in the collection's subcollections, at any depth. Formats that keep collections, such as Zotero RDF, then also export the subcollections." },
 					"path": { "type": "string", "description": "An absolute path to write to, where nothing exists yet. Without it, the export is returned as text." },

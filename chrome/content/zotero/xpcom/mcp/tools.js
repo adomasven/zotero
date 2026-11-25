@@ -30,7 +30,7 @@ camelCase without "zotero_", e.g. getItems for zotero_get_items.
 
 Each takes the tool's arguments, already checked against its inputSchema, and the call's
 context ({ clientID, signal, deadline }), and returns an MCP CallToolResult by the deadline (see
-Zotero.MCP.CALL_BUDGET): waits for slow work end then, and the work can go on in the
+Zotero.MCP.CALL_BUDGET). It stops waiting for slow work then, and leaves it to finish in the
 background. Tools with an outputSchema return Zotero.MCP.jsonResult() of a value matching it.
 Permissions declared in tools.json are checked before the handler runs (see mcp.js); a handler
 that needs one only sometimes asks for it with Zotero.MCP.Permissions.require(). Throw
