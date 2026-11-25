@@ -975,7 +975,7 @@ Zotero.MCP.Tools = new function () {
 	 * Close tabs and main windows. Zotero's last main window, or its last tab, stays open except
 	 * on macOS, since closing it quits Zotero.
 	 */
-	this.close = async function ({ tabIDs = [], windowIDs = [] }) {
+	this.close = async function ({ tabIDs = [], windowID, windowIDs = [] }) {
 		if (!tabIDs.length && !windowIDs.length) {
 			throw new Zotero.MCP.ToolError('Give tabIDs or windowIDs');
 		}
@@ -983,7 +983,7 @@ Zotero.MCP.Tools = new function () {
 		// Tabs to close, by window
 		let tabs = new Map();
 		for (let tabID of new Set(tabIDs)) {
-			let win = getMainWindow(null, tabID);
+			let win = getMainWindow(windowID, tabID);
 			if (windows.has(win)) {
 				continue;
 			}
@@ -2951,11 +2951,17 @@ Zotero.MCP.Tools = new function () {
 			return win;
 		}
 		if (tabID) {
-			let win = windows.find(win => getTabIDs(win).includes(tabID));
-			if (!win) {
+			let found = windows.filter(win => getTabIDs(win).includes(tabID));
+			if (!found.length) {
 				throw new Zotero.MCP.ToolError(`No tab ${tabID}. zotero_get_context lists Zotero's tabs.`);
 			}
-			return win;
+			// Tab IDs are only unique in a window: each window's first library tab is zotero-pane
+			if (found.length > 1) {
+				throw new Zotero.MCP.ToolError(
+					`${tabID} is a tab in ${found.length} windows. Give windowID too.`
+				);
+			}
+			return found[0];
 		}
 		return null;
 	}

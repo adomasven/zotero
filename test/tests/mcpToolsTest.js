@@ -675,6 +675,22 @@ describe("MCP tools", function () {
 			// The original window keeps its selection
 			assert.lengthOf(selectedKeys(view), 3);
 			
+			
+			// Both windows' first library tab is zotero-pane, so it needs a window
+			assert.match(
+				await callForError('zotero_select', { tabID: 'zotero-pane', keys: [items[0].key] }),
+				/zotero-pane is a tab in 2 windows\. Give windowID too/
+			);
+			assert.match(
+				await callForError('zotero_close', { tabIDs: ['zotero-pane'] }),
+				/zotero-pane is a tab in 2 windows/
+			);
+			result = await call('zotero_select', {
+				windowID: result.windowID, tabID: 'zotero-pane', collectionKey: collection.key, keys: [items[0].key],
+			});
+			assert.deepEqual(selectedKeys(newWin.ZoteroPane.getLibraryView('zotero-pane')), [items[0].key]);
+			assert.lengthOf(selectedKeys(view), 3);
+			
 			await call('zotero_close', { windowIDs: [result.windowID] });
 			await waitForCallback(() => newWin.closed);
 		});

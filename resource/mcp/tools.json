@@ -612,7 +612,7 @@
 		{
 			"name": "zotero_get_context",
 			"title": "Get what the user is looking at in Zotero",
-			"description": "Get what the user has open and selected in Zotero's main window, so requests like \"summarize this paper\", \"the page I'm on\", \"the passage I selected\" or \"the papers I selected\" can be answered. Returns the selected library, collections and items in the library tab, and which tab is active. If it's a PDF, EPUB or web page snapshot in Zotero's reader, it also returns the file, the page the user is on, the text they've selected and the annotations they've selected; if it's a note, the note. It also lists the tabs of all of Zotero's windows, with the IDs zotero_select, zotero_open and zotero_close take. Returns window: false when no Zotero window is open.",
+			"description": "Get what the user has open and selected in Zotero's main window, so requests like \"summarize this paper\", \"the page I'm on\", \"the passage I selected\" or \"the papers I selected\" can be answered. Returns the selected library, collections and items in the library tab, and which tab is active. If it's a PDF, EPUB or web page snapshot in Zotero's reader, it also returns the file, the page the user is on, the text they've selected and the annotations they've selected; if it's a note, the note. It also lists the tabs of all of Zotero's windows, with the IDs zotero_select, zotero_open and zotero_close take. A tab ID is unique only within its window: each window's first library tab is zotero-pane. To use one that's in several windows, give its windowID too. Returns window: false when no Zotero window is open.",
 			"inputSchema": {
 				"type": "object",
 				"additionalProperties": false
@@ -775,7 +775,7 @@
 					"keys": { "type": "array", "items": { "type": "string" }, "maxItems": 500, "description": "Items to select. Only items in the collection or saved search can be selected." },
 					"allItems": { "type": "boolean", "default": false, "description": "Select every item shown" },
 					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
-					"tabID": { "type": "string", "description": "A library tab from zotero_get_context. Defaults to the window's library tab used last." },
+					"tabID": { "type": "string", "description": "A library tab from zotero_get_context. Defaults to the window's library tab used last. Tab IDs are unique only within a window: each window's first library tab is zotero-pane. If the ID is in several windows, give windowID too." },
 					"newTab": { "type": "boolean", "default": false, "description": "Show them in a new library tab" },
 					"newWindow": { "type": "boolean", "default": false, "description": "Show them in a new window" },
 					"focus": { "type": "boolean", "default": false, "description": "Bring Zotero to the front. By default it stays behind the app the user is in." },
@@ -847,8 +847,9 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"tabIDs": { "type": "array", "items": { "type": "string" } },
-					"windowIDs": { "type": "array", "items": { "type": "string" } }
+					"tabIDs": { "type": "array", "items": { "type": "string" }, "description": "Tabs to close" },
+					"windowID": { "type": "string", "description": "The window of tabIDs. Tab IDs are unique only within a window: each window's first library tab is zotero-pane. Needed when one of tabIDs is in several windows." },
+					"windowIDs": { "type": "array", "items": { "type": "string" }, "description": "Windows to close, with all their tabs" }
 				},
 				"additionalProperties": false
 			},
