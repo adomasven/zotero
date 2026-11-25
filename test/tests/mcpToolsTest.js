@@ -1160,11 +1160,11 @@ describe("MCP tools", function () {
 			assert.equal(collection.parentKey, parent.key);
 			assert.equal(created.link, `zotero://select/library/collections/${created.key}`);
 			
-			await call('zotero_manage_collections', { action: 'rename', collectionKey: created.key, name: 'Read' });
+			await call('zotero_manage_collections', { action: 'update', collectionKey: created.key, name: 'Read' });
 			assert.equal(collection.name, 'Read');
 			assert.equal(collection.parentKey, parent.key);
 			
-			await call('zotero_manage_collections', { action: 'move', collectionKey: created.key, parentKey: null });
+			await call('zotero_manage_collections', { action: 'update', collectionKey: created.key, parentKey: null });
 			assert.isFalse(collection.parentKey);
 			assert.equal(collection.name, 'Read');
 		});
@@ -1172,7 +1172,7 @@ describe("MCP tools", function () {
 		it("shouldn't move a collection into its own subcollection", async function () {
 			let parent = await createDataObject('collection');
 			let child = await createDataObject('collection', { parentID: parent.id });
-			let error = await callForError('zotero_manage_collections', { action: 'move', collectionKey: parent.key, parentKey: child.key });
+			let error = await callForError('zotero_manage_collections', { action: 'update', collectionKey: parent.key, parentKey: child.key });
 			assert.match(error, /can't be moved into itself or a subcollection/);
 			assert.isFalse(parent.parentKey);
 		});
@@ -1183,8 +1183,8 @@ describe("MCP tools", function () {
 			// Hold a transaction, so both calls queue for theirs
 			let release = Zotero.Promise.defer();
 			let held = Zotero.DB.executeTransaction(() => release.promise);
-			let first = call('zotero_manage_collections', { action: 'rename', collectionKey: collection.key, name: 'First' });
-			let second = call('zotero_manage_collections', { action: 'rename', collectionKey: collection.key, name: 'Second' });
+			let first = call('zotero_manage_collections', { action: 'update', collectionKey: collection.key, name: 'First' });
+			let second = call('zotero_manage_collections', { action: 'update', collectionKey: collection.key, name: 'Second' });
 			await Zotero.Promise.delay(100);
 			release.resolve();
 			await held;

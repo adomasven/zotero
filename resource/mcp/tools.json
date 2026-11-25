@@ -1139,12 +1139,12 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"action": { "enum": ["create", "rename", "move"] },
-					"collectionKey": { "type": "string", "description": "The collection to rename or move" },
-					"name": { "type": "string", "minLength": 1, "description": "For create and rename" },
+					"action": { "enum": ["create", "update"] },
+					"collectionKey": { "type": "string", "description": "For update" },
+					"name": { "type": "string", "minLength": 1, "description": "Needed for create" },
 					"parentKey": {
 						"type": ["string", "null"],
-						"description": "For create, the collection to create it in (top level if omitted). For move, where to move it, or null for the top level."
+						"description": "The collection to create or move it in, or null to move it to the top level. For create, defaults to the top level; for update, to where it is."
 					},
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},

@@ -1266,16 +1266,16 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
-	 * Create, rename or move a collection
+	 * Create a collection, or rename or move one
 	 */
 	this.manageCollections = async function ({ action, collectionKey, name, parentKey, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
 		name = name?.trim();
-		if (action != 'move' && !name) {
-			throw new Zotero.MCP.ToolError(`${action} needs a name`);
+		if (action == 'create' && !name) {
+			throw new Zotero.MCP.ToolError('create needs a name');
 		}
-		if (action == 'move' && parentKey === undefined) {
-			throw new Zotero.MCP.ToolError('move needs a parentKey, or null to move to the top level');
+		if (action == 'update' && !name && parentKey === undefined) {
+			throw new Zotero.MCP.ToolError('update needs a name, or a parentKey to move it (null for the top level)');
 		}
 		let collection;
 		if (action == 'create') {
@@ -1297,10 +1297,10 @@ Zotero.MCP.Tools = new function () {
 						&& (parent.id == collection.id || collection.hasDescendent('collection', parent.id))) {
 					throw new Zotero.MCP.ToolError(`${collection.key} can't be moved into itself or a subcollection`);
 				}
-				if (action != 'move') {
+				if (name) {
 					collection.name = name;
 				}
-				if (action != 'rename') {
+				if (parentKey !== undefined) {
 					collection.parentKey = parent?.key ?? false;
 				}
 				// New collections aren't selected, so as not to disturb the user
