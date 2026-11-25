@@ -51,6 +51,87 @@ describe("MCP tools", function () {
 		});
 	}
 	
+	/**
+	 * Give an attachment known full text, as if it had been indexed, with PDF pages
+	 * separated as the PDF worker separates them
+	 */
+	async function setText(attachment, pages, { indexedPages = pages.length, totalPages = indexedPages } = {}) {
+		await Zotero.FullText.setItemContent(attachment.libraryID, attachment.key, {
+			content: pages.join('\n\n\f').trim(),
+			indexedPages,
+			totalPages,
+		}, 1);
+		assert.isTrue(await Zotero.FullText.indexSyncedContent(attachment.id));
+	}
+	
+	/**
+	 * Make tool calls with a shorter time budget
+	 */
+	async function withBudget(budget, fn) {
+		let saved = Zotero.MCP.CALL_BUDGET;
+		Zotero.MCP.CALL_BUDGET = budget;
+		try {
+			return await fn();
+		}
+		finally {
+			Zotero.MCP.CALL_BUDGET = saved;
+		}
+	}
+	
+	function stubStructure(catalog) {
+		return sinon.stub(Zotero.SDT, 'getReader').resolves({ getCatalog: async () => catalog });
+	}
+	
+	let randomWord = () => Zotero.Utilities.randomString(12, 'abcdefghijklmnopqrstuvwxyz');
+	
+	describe("zotero_list_item_types", function () {
+		it("should list each item type's fields and creator types", async function () {
+			let { itemTypes } = await call('zotero_list_item_types', { itemTypes: ['bookSection'] });
+			assert.lengthOf(itemTypes, 1);
+			let [type] = itemTypes;
+			assert.equal(type.itemType, 'bookSection');
+			assert.equal(type.label, 'Book Section');
+			assert.deepInclude(type.fields, { field: 'bookTitle', label: 'Book Title', baseField: 'publicationTitle' });
+			assert.deepInclude(type.fields, { field: 'title', label: 'Title' });
+			assert.notInclude(type.fields.map(field => field.field), 'issue');
+			assert.deepInclude(type.creatorTypes, { creatorType: 'author', label: 'Author', primary: true });
+			assert.deepInclude(type.creatorTypes, { creatorType: 'bookAuthor', label: 'Book Author' });
+			
+			({ itemTypes } = await call('zotero_list_item_types', {}));
+			let names = itemTypes.map(type => type.itemType);
+			assert.includeMembers(names, ['book', 'journalArticle', 'webpage']);
+			assert.notInclude(names, 'note');
+		});
+		
+		it("should be the item types tools.json takes, which should be all of Zotero's but notes, attachments and annotations", async function () {
+			let expected = Zotero.ItemTypes.getAll()
+				.map(type => type.name)
+				.filter(name => !['note', 'attachment', 'annotation'].includes(name))
+				.sort();
+			let { itemTypes } = await call('zotero_list_item_types', {});
+			assert.sameMembers(itemTypes.map(type => type.itemType), expected);
+			
+			// Every list of item types in an input schema, e.g. after a schema update adds a type
+			let enums = [];
+			let findEnums = (schema) => {
+				if (Array.isArray(schema?.enum) && schema.enum.includes('journalArticle')) {
+					enums.push(schema.enum);
+				}
+				else if (schema && typeof schema == 'object') {
+					Object.values(schema).forEach(findEnums);
+				}
+			};
+			let tools = await Zotero.MCP.getTools();
+			for (let tool of tools) {
+				findEnums(tool.inputSchema);
+			}
+			assert.lengthOf(enums, 3);
+			for (let itemTypeEnum of enums) {
+				assert.deepEqual([...itemTypeEnum].sort(), expected);
+			}
+		});
+	});
+	
 	describe("zotero_search", function () {
 		it("should give each item's best attachment, and how many attachments, notes and annotations it has", async function () {
 			let collection = await createDataObject('collection');
@@ -243,6 +324,371 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("duplicates", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should list duplicates and merge them into the oldest, and undo", async function () {
+			let DOI = '10.1234/' + Zotero.Utilities.randomString();
+			let older = await createDataObject('item', { title: 'Merge me', dateAdded: '2020-01-01 00:00:00' });
+			older.setField('DOI', DOI);
+			await older.saveTx();
+			let newer = await createDataObject('item', { title: 'Merge me (copy)' });
+			newer.setField('DOI', DOI);
+			newer.addTag('copied');
+			await newer.saveTx();
+			let note = await createDataObject('item', { itemType: 'note', parentID: newer.id });
+			
+			let sets = [];
+			for (let offset = 0; offset !== undefined;) {
+				let result = await call('zotero_list_duplicates', { offset, limit: 100 });
+				sets.push(...result.sets);
+				offset = result.nextOffset;
+			}
+			let set = sets.find(set => set.some(item => item.key == older.key));
+			assert.deepEqual(set.map(item => item.key), [older.key, newer.key]);
+			assert.equal(set[0].DOI, DOI);
+			assert.equal(set[1].noteCount, 1);
+			
+			let result = await call('zotero_merge_items', { itemKeys: [newer.key, older.key] });
+			assert.equal(result.key, older.key);
+			assert.deepEqual(result.trashed, [newer.key]);
+			assert.isTrue(newer.deleted);
+			assert.equal(note.parentID, older.id);
+			assert.isTrue(older.hasTag('copied'));
+			
+			assert.deepEqual(Zotero.UndoHistory.getUndoAction(), {
+				action: 'undo-action-mcp-changes',
+				actionArgs: { app: 'test-client' },
+			});
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isFalse(newer.deleted);
+			assert.equal(note.parentID, newer.id);
+		});
+		
+		it("should refuse to merge items of different types", async function () {
+			let a = await createDataObject('item', { itemType: 'book' });
+			let b = await createDataObject('item', { itemType: 'journalArticle' });
+			assert.match(
+				await callForError('zotero_merge_items', { itemKeys: [a.key, b.key] }),
+				/different types.*zotero_change_item_types/
+			);
+		});
+	});
+	
+	describe("zotero_add_items", function () {
+		let lookups;
+		// Lookups of 10.8888/ DOIs wait for it
+		let slowLookups;
+		
+		beforeEach(function () {
+			slowLookups = Promise.withResolvers();
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+			// Lookups need the network, so they make an item from the identifier instead
+			lookups = [];
+			sinon.stub(Zotero.Translate.Search.prototype, 'setIdentifier').callsFake(function (identifier) {
+				this._testIdentifier = identifier;
+			});
+			sinon.stub(Zotero.Translate.Search.prototype, 'getTranslators').resolves([]);
+			sinon.stub(Zotero.Translate.Search.prototype, 'translate').callsFake(async function ({ libraryID, collections }) {
+				let identifier = this._testIdentifier;
+				lookups.push(identifier);
+				if (identifier.DOI?.startsWith('10.9999/')) {
+					throw new Error('Not found');
+				}
+				if (identifier.DOI?.startsWith('10.8888/')) {
+					await slowLookups.promise;
+				}
+				let item = createUnsavedDataObject('item', { itemType: 'journalArticle', libraryID, collections: collections || [] });
+				item.setField('title', 'Looked Up');
+				if (identifier.DOI) {
+					item.setField('DOI', identifier.DOI);
+				}
+				await item.saveTx();
+				return [item];
+			});
+		});
+		
+		it("should add items by identifier, in one undo step", async function () {
+			let collection = await createDataObject('collection');
+			let doi = '10.1234/' + Zotero.Utilities.randomString();
+			let existing = await createArticle();
+			existing.setField('DOI', doi);
+			await existing.saveTx();
+			let newDOI = '10.1234/' + Zotero.Utilities.randomString();
+			
+			let { results } = await call('zotero_add_items', {
+				identifiers: [`https://doi.org/${newDOI}`, doi, '10.9999/missing', 'https://example.com/page'],
+				collectionKey: collection.key,
+				findFiles: false,
+			});
+			assert.deepEqual(results.map(result => result.status), ['added', 'added', 'failed', 'failed']);
+			assert.match(results[2].error, /couldn't find DOI 10\.9999\/missing/);
+			assert.match(results[3].error, /Zotero Connector/);
+			// An item already in the library is added again, as when the user adds it
+			assert.deepEqual(lookups, [{ DOI: newDOI }, { DOI: doi }, { DOI: '10.9999/missing' }]);
+			assert.notEqual(results[1].key, existing.key);
+			
+			let added = results.slice(0, 2).map(result => Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.key));
+			assert.deepEqual(added.map(item => item.getField('DOI')), [newDOI, doi]);
+			assert.isTrue(added.every(item => collection.hasItem(item.id)));
+			assert.isFalse(collection.hasItem(existing.id));
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(added.every(item => item.deleted));
+			assert.isFalse(existing.deleted);
+		});
+		
+		it("should return lookups still running as pending, and add their items later as another undo step", async function () {
+			let collection = await createDataObject('collection');
+			let slowDOI = '10.8888/' + Zotero.Utilities.randomString();
+			let fastDOI = '10.1234/' + Zotero.Utilities.randomString();
+			let budget = Zotero.MCP.CALL_BUDGET;
+			Zotero.MCP.CALL_BUDGET = 500;
+			let result;
+			try {
+				result = await call('zotero_add_items', {
+					identifiers: [slowDOI, fastDOI],
+					collectionKey: collection.key,
+					findFiles: false,
+				});
+			}
+			finally {
+				Zotero.MCP.CALL_BUDGET = budget;
+			}
+			// The slow lookup didn't hold up the one after it
+			assert.deepEqual(result.results.map(result => [result.input, result.status]), [
+				[slowDOI, 'pending'],
+				[fastDOI, 'added'],
+			]);
+			assert.match(result.notice, /still looking up/);
+			let fast = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.results[1].key);
+			
+			slowLookups.resolve();
+			await waitForCallback(() => Zotero.UndoHistory._undoStack.length == 2);
+			let slow = (await Zotero.Items.getAll(Zotero.Libraries.userLibraryID))
+				.find(item => item.getField('DOI') == slowDOI);
+			assert.isTrue(collection.hasItem(slow.id));
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(slow.deleted);
+			assert.isFalse(fast.deleted);
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(fast.deleted);
+		});
+		
+		it("should add items from item JSON", async function () {
+			let title = Zotero.Utilities.randomString();
+			let { results } = await call('zotero_add_items', {
+				items: [{
+					itemType: 'report',
+					title: `${title} Report`,
+					creators: [{ creatorType: 'author', name: 'Org' }],
+					institution: 'Inst',
+					key: 'ABCD2345',
+					dateAdded: '2020-01-01T00:00:00Z',
+				}],
+				findFiles: false,
+			});
+			assert.deepEqual(results.map(result => [result.input, result.status, result.itemType, result.title]), [
+				['items[0]', 'added', 'report', `${title} Report`],
+			]);
+			let report = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, results[0].key);
+			assert.notEqual(report.key, 'ABCD2345');
+			assert.equal(report.getField('institution'), 'Inst');
+		});
+		
+		it("should add nothing if item JSON is invalid", async function () {
+			let error = await callForError('zotero_add_items', {
+				identifiers: ['10.1234/abc'],
+				items: [{ itemType: 'book', title: 'A' }, { itemType: 'book', publicationTitle: 'Journal' }],
+			});
+			assert.match(error, /^items\[1\]: Invalid field 'publicationTitle' for type book/);
+			assert.lengthOf(lookups, 0);
+		});
+		
+		it("should say when Zotero found no file, or is still looking", async function () {
+			let search = sinon.stub(Zotero.Attachments, 'addAvailableFiles').resolves();
+			let item = { itemType: 'webpage', title: 'Page', url: 'https://example.com/' + Zotero.Utilities.randomString() };
+			let result = await call('zotero_add_items', { items: [item], findFiles: true });
+			assert.equal(search.firstCall.args[0][0].key, result.results[0].key);
+			assert.equal(result.results[0].fileSearch, 'notFound');
+			assert.deepEqual(result.results[0].attachments, []);
+			assert.notProperty(result.results[0], 'bestAttachment');
+			assert.match(result.notice, /zotero_add_attachment/);
+			
+			// The time the user takes to answer the permission dialog comes out of the call's
+			// budget, so the file search is waited for only for what's left of it
+			let budget = Zotero.MCP.CALL_BUDGET;
+			Zotero.MCP.CALL_BUDGET = 1000;
+			Permissions._ask.callsFake(() => Zotero.Promise.delay(800).then(() => 'allow'));
+			search.returns(new Promise(() => {}));
+			let start = Date.now();
+			try {
+				item.url += '2';
+				result = await call('zotero_add_items', { items: [item], findFiles: true });
+			}
+			finally {
+				Zotero.MCP.CALL_BUDGET = budget;
+			}
+			assert.isBelow(Date.now() - start, 1500);
+			assert.equal(result.results[0].fileSearch, 'pending');
+			assert.match(result.notice, /still looking/);
+		});
+	});
+	
+	describe("zotero_update_items", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should change several items in one step the user can undo", async function () {
+			let collection = await createDataObject('collection');
+			let a = await createArticle({ title: 'Old A' });
+			let b = await createArticle({ title: 'Old B', tags: [{ tag: 'old' }] });
+			
+			let { items } = await call('zotero_update_items', {
+				changes: [
+					{ key: a.key, fields: { title: 'New A', DOI: '10.1/x' }, addToCollections: [collection.key] },
+					{
+						key: b.key,
+						creators: [{ creatorType: 'author', name: 'Org' }, { creatorType: 'editor', firstName: 'Bo', lastName: 'Ng' }],
+						addTags: ['new'],
+						removeTags: ['old'],
+					},
+				],
+			});
+			assert.deepEqual(items.map(item => item.key), [a.key, b.key]);
+			assert.equal(items[0].title, 'New A');
+			assert.equal(a.getField('DOI'), '10.1/x');
+			assert.isTrue(collection.hasItem(a.id));
+			assert.deepEqual(b.getTags(), [{ tag: 'new' }]);
+			assert.deepEqual(b.getCreators().map(c => [c.lastName, c.fieldMode]), [['Org', 1], ['Ng', 0]]);
+			assert.deepEqual(Zotero.UndoHistory.getUndoAction(), {
+				action: 'undo-action-mcp-changes',
+				actionArgs: { app: 'test-client' },
+			});
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.equal(a.getField('title'), 'Old A');
+			assert.equal(a.getField('DOI'), '');
+			assert.isFalse(collection.hasItem(a.id));
+			assert.deepEqual(b.getTags(), [{ tag: 'old' }]);
+			assert.lengthOf(b.getCreators(), 0);
+			assert.isFalse(Zotero.UndoHistory.canUndo());
+		});
+		
+		it("should change nothing if any change is invalid", async function () {
+			let a = await createArticle({ title: 'A' });
+			let book = await createDataObject('item', { itemType: 'book', title: 'B' });
+			let error = await callForError('zotero_update_items', {
+				changes: [
+					{ key: a.key, fields: { title: 'Changed' }, addTags: ['t'] },
+					{ key: book.key, fields: { issue: '3' } },
+				],
+			});
+			assert.match(error, new RegExp(`${book.key}: issue isn't a field of item type book`));
+			assert.include(error, 'numPages');
+			assert.equal(a.getField('title'), 'A');
+			assert.isFalse(a.hasTag('t'));
+			
+			error = await callForError('zotero_update_items', {
+				changes: [{ key: a.key, fields: { title: 'Changed' } }, { key: 'AAAAAAAA' }],
+			});
+			assert.match(error, /No item AAAAAAAA/);
+			assert.equal(a.getField('title'), 'A');
+			
+			error = await callForError('zotero_update_items', {
+				changes: [{ key: book.key, creators: [{ creatorType: 'director', lastName: 'X' }] }],
+			});
+			assert.match(error, /director isn't a creator type of item type book/);
+		});
+		
+		it("should set a base field by the item type's own name for it", async function () {
+			let section = await createDataObject('item', { itemType: 'bookSection' });
+			await call('zotero_update_items', {
+				changes: [{ key: section.key, fields: { publicationTitle: 'The Book' } }],
+			});
+			assert.equal(section.getField('bookTitle'), 'The Book');
+		});
+	});
+	
+	describe("zotero_change_item_types", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should change types in one step the user can undo, and say which fields moved or were removed", async function () {
+			let article = await createArticle({ title: 'T' });
+			article.setField('publicationTitle', 'The Book');
+			article.setField('issue', '3');
+			article.setCreators([
+				{ creatorType: 'author', firstName: 'Ann', lastName: 'Lee' },
+				{ creatorType: 'reviewedAuthor', firstName: 'Bo', lastName: 'Ng' },
+			]);
+			await article.saveTx();
+			// book -> bookSection moves the title to bookTitle, which isn't a base field mapping
+			let book = await createDataObject('item', { itemType: 'book', title: 'B' });
+			book.setField('shortTitle', 'S');
+			await book.saveTx();
+			
+			let { items } = await call('zotero_change_item_types', {
+				changes: [{ key: article.key, itemType: 'bookSection' }, { key: book.key, itemType: 'bookSection' }],
+			});
+			assert.equal(article.itemType, 'bookSection');
+			assert.equal(article.getField('bookTitle'), 'The Book');
+			assert.equal(article.getField('title'), 'T');
+			assert.deepInclude(items[0], {
+				key: article.key,
+				itemType: 'bookSection',
+				oldItemType: 'journalArticle',
+				movedFields: { publicationTitle: 'bookTitle' },
+				removedFields: { issue: '3' },
+				changedCreatorTypes: [{ name: 'Bo Ng', from: 'reviewedAuthor', to: 'contributor' }],
+			});
+			assert.equal(book.getField('bookTitle'), 'B');
+			assert.deepInclude(items[1], {
+				movedFields: { title: 'bookTitle' },
+				removedFields: { shortTitle: 'S' },
+				changedCreatorTypes: [],
+			});
+			assert.deepEqual(Zotero.UndoHistory.getUndoAction(), {
+				action: 'undo-action-mcp-changes',
+				actionArgs: { app: 'test-client' },
+			});
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.equal(article.itemType, 'journalArticle');
+			assert.equal(article.getField('publicationTitle'), 'The Book');
+			assert.equal(article.getField('issue'), '3');
+			assert.equal(Zotero.CreatorTypes.getName(article.getCreator(1).creatorTypeID), 'reviewedAuthor');
+			assert.equal(book.itemType, 'book');
+			assert.equal(book.getField('title'), 'B');
+			assert.isFalse(Zotero.UndoHistory.canUndo());
+		});
+		
+		it("should change nothing if any item's type can't be changed", async function () {
+			let article = await createArticle({ title: 'T' });
+			let note = await createDataObject('item', { itemType: 'note' });
+			let error = await callForError('zotero_change_item_types', {
+				changes: [{ key: article.key, itemType: 'book' }, { key: note.key, itemType: 'book' }],
+			});
+			assert.match(error, new RegExp(`${note.key} is a note, whose type can't be changed`));
+			assert.equal(article.itemType, 'journalArticle');
+			
+			error = await callForError('zotero_change_item_types', {
+				changes: [{ key: article.key, itemType: 'note' }],
+			});
+			assert.include(error, 'itemType');
+			assert.equal(article.itemType, 'journalArticle');
+		});
+	});
+	
 	describe("zotero_list_collections", function () {
 		it("should list a collection's subcollections at any depth, with item counts", async function () {
 			let parent = await createDataObject('collection');
@@ -275,6 +721,57 @@ describe("MCP tools", function () {
 		});
 	});
 	
+	describe("zotero_manage_collections", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+		});
+		
+		it("should create, rename and move collections", async function () {
+			let parent = await createDataObject('collection');
+			let created = await call('zotero_manage_collections', { action: 'create', name: 'Reading', parentKey: parent.key });
+			let collection = Zotero.Collections.getByLibraryAndKey(Zotero.Libraries.userLibraryID, created.key);
+			assert.equal(collection.name, 'Reading');
+			assert.equal(collection.parentKey, parent.key);
+			assert.equal(created.link, `zotero://select/library/collections/${created.key}`);
+			
+			await call('zotero_manage_collections', { action: 'update', collectionKey: created.key, name: 'Read' });
+			assert.equal(collection.name, 'Read');
+			assert.equal(collection.parentKey, parent.key);
+			
+			await call('zotero_manage_collections', { action: 'update', collectionKey: created.key, parentKey: null });
+			assert.isFalse(collection.parentKey);
+			assert.equal(collection.name, 'Read');
+		});
+		
+		it("shouldn't move a collection into its own subcollection", async function () {
+			let parent = await createDataObject('collection');
+			let child = await createDataObject('collection', { parentID: parent.id });
+			let error = await callForError('zotero_manage_collections', { action: 'update', collectionKey: parent.key, parentKey: child.key });
+			assert.match(error, /can't be moved into itself or a subcollection/);
+			assert.isFalse(parent.parentKey);
+		});
+		
+		it("should apply concurrent changes one after another, each its own undo step", async function () {
+			let collection = await createDataObject('collection', { name: 'Original' });
+			Zotero.UndoHistory.clear();
+			// Hold a transaction, so both calls queue for theirs
+			let release = Zotero.Promise.defer();
+			let held = Zotero.DB.executeTransaction(() => release.promise);
+			let first = call('zotero_manage_collections', { action: 'update', collectionKey: collection.key, name: 'First' });
+			let second = call('zotero_manage_collections', { action: 'update', collectionKey: collection.key, name: 'Second' });
+			await Zotero.Promise.delay(100);
+			release.resolve();
+			await held;
+			assert.deepEqual((await Promise.all([first, second])).map(result => result.name), ['First', 'Second']);
+			assert.equal(collection.name, 'Second');
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.equal(collection.name, 'First');
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.equal(collection.name, 'Original');
+		});
+	});
+	
 	describe("zotero_list_tags", function () {
 		let colored;
 		
@@ -301,38 +798,320 @@ describe("MCP tools", function () {
 		});
 	});
 	
-	/**
-	 * Give an attachment known full text, as if it had been indexed, with PDF pages
-	 * separated as the PDF worker separates them
-	 */
-	async function setText(attachment, pages, { indexedPages = pages.length, totalPages = indexedPages } = {}) {
-		await Zotero.FullText.setItemContent(attachment.libraryID, attachment.key, {
-			content: pages.join('\n\n\f').trim(),
-			indexedPages,
-			totalPages,
-		}, 1);
-		assert.isTrue(await Zotero.FullText.indexSyncedContent(attachment.id));
-	}
+	describe("zotero_manage_tags", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should merge tags into one, keeping a color, and undo", async function () {
+			let [a, b, c] = ['ML', 'machine-learning', 'Machine Learning'].map(() => Zotero.Utilities.randomString());
+			let one = await createDataObject('item', { tags: [{ tag: a }] });
+			let two = await createDataObject('item', { tags: [{ tag: b }, { tag: c }] });
+			let libraryID = Zotero.Libraries.userLibraryID;
+			await Zotero.Tags.setColor(libraryID, a, '#ff6666', 0);
+			try {
+				let result = await call('zotero_manage_tags', { action: 'rename', tags: [a, b], newName: c });
+				assert.equal(result.itemCount, 2);
+				assert.deepEqual(one.getTags(), [{ tag: c }]);
+				assert.deepEqual(two.getTags(), [{ tag: c }]);
+				assert.equal(Zotero.Tags.getColor(libraryID, c).color, '#ff6666');
+				assert.isFalse(Zotero.Tags.getColor(libraryID, a));
+				
+				assert.isTrue(await Zotero.UndoHistory.undo());
+				assert.deepEqual(one.getTags(), [{ tag: a }]);
+				assert.sameDeepMembers(two.getTags(), [{ tag: b }, { tag: c }]);
+				
+				assert.match(
+					await callForError('zotero_manage_tags', { action: 'rename', tags: ['no such tag'], newName: c }),
+					/No items in .* have the tags "no such tag"/
+				);
+				assert.match(
+					await callForError('zotero_manage_tags', { action: 'rename', tags: [c] }),
+					/Give newName to rename/
+				);
+			}
+			finally {
+				await Zotero.Tags.setColor(libraryID, a, false);
+				await Zotero.Tags.setColor(libraryID, c, false);
+			}
+		});
+		
+		it("should delete tags and set colors", async function () {
+			let tag = Zotero.Utilities.randomString();
+			let item = await createDataObject('item', { tags: [{ tag }, { tag: 'kept' }] });
+			let libraryID = Zotero.Libraries.userLibraryID;
+			let result = await call('zotero_manage_tags', { action: 'setColor', tags: [tag], color: 'green' });
+			assert.equal(result.color, 'green');
+			assert.equal(Zotero.Tags.getColor(libraryID, tag).color, '#5FB236');
+			assert.isAbove(result.position, 0);
+			
+			// A position alone moves the color to another number key and keeps it
+			let position = result.position == 9 ? 8 : 9;
+			result = await call('zotero_manage_tags', { action: 'setColor', tags: [tag], position });
+			assert.equal(result.color, 'green');
+			assert.equal(Zotero.Tags.getColor(libraryID, tag).color, '#5FB236');
+			assert.match(
+				await callForError('zotero_manage_tags', { action: 'setColor', tags: ['kept'], position: 1 }),
+				/kept has no color/
+			);
+			// Only the colors Zotero offers, by name
+			await callForError('zotero_manage_tags', { action: 'setColor', tags: [tag], color: '#5fb236' });
+			
+			await call('zotero_manage_tags', { action: 'delete', tags: [tag] });
+			assert.deepEqual(item.getTags(), [{ tag: 'kept' }]);
+			assert.isFalse(Zotero.Tags.getColor(libraryID, tag));
+		});
+	});
 	
-	/**
-	 * Make tool calls with a shorter time budget
-	 */
-	async function withBudget(budget, fn) {
-		let saved = Zotero.MCP.CALL_BUDGET;
-		Zotero.MCP.CALL_BUDGET = budget;
-		try {
-			return await fn();
-		}
-		finally {
-			Zotero.MCP.CALL_BUDGET = saved;
-		}
-	}
+	describe("saved searches", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should create a saved search from conditions, list it, change it and trash it", async function () {
+			let tag = Zotero.Utilities.randomString();
+			let title = Zotero.Utilities.randomString();
+			await createDataObject('item', { title, tags: [{ tag }] });
+			await createDataObject('item', { tags: [{ tag }] });
+			let name = Zotero.Utilities.randomString();
+			let tagged = { condition: 'tag', operator: 'is', value: tag };
+			let created = await call('zotero_manage_saved_searches', {
+				action: 'create',
+				name,
+				conditions: [tagged, { condition: 'numNotes', operator: 'is', value: '0' }],
+			});
+			assert.equal(created.itemCount, 2);
+			let { savedSearches } = await call('zotero_list_saved_searches', {});
+			let listed = savedSearches.find(search => search.key == created.key);
+			assert.equal(listed.name, name);
+			assert.notProperty(listed, 'itemCount');
+			let found = await call('zotero_search', { savedSearchKey: created.key });
+			assert.equal(found.total, 2);
+			assert.deepInclude(listed.conditions, { condition: 'tag', operator: 'is', value: tag });
+			
+			let updated = await call('zotero_manage_saved_searches', {
+				action: 'update',
+				savedSearchKey: created.key,
+				conditions: [tagged, { condition: 'title', operator: 'contains', value: title }],
+			});
+			assert.equal(updated.name, name);
+			assert.equal(updated.itemCount, 1);
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			let search = Zotero.Searches.getByLibraryAndKey(Zotero.Libraries.userLibraryID, created.key);
+			assert.equal((await search.search()).length, 2);
+			
+			let result = await call('zotero_trash', { savedSearchKeys: [created.key] });
+			assert.deepEqual(result.savedSearchKeys, [created.key]);
+			assert.isTrue(search.deleted);
+		});
+	});
 	
-	function stubStructure(catalog) {
-		return sinon.stub(Zotero.SDT, 'getReader').resolves({ getCatalog: async () => catalog });
-	}
+	describe("zotero_get_notes", function () {
+		it("should return an item's notes as Markdown and its annotations in file order", async function () {
+			let item = await createArticle();
+			let note = await createDataObject('item', {
+				itemType: 'note',
+				parentID: item.id,
+				note: '<h1>Findings</h1><p>Some <strong>bold</strong> text</p>',
+			});
+			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
+			let annotations = [];
+			for (let [pageIndex, position] of [[4, '000500'], [0, '000100'], [4, '000200']]) {
+				let annotation = await createAnnotation('highlight', attachment);
+				annotation.annotationSortIndex = `${String(pageIndex).padStart(5, '0')}|${position}|00000`;
+				annotation.annotationPosition = JSON.stringify({ pageIndex, rects: [[0, 0, 1, 1]] });
+				annotation.addTag('important');
+				await annotation.saveTx();
+				annotations.push(annotation);
+			}
+			let [last, first, middle] = annotations;
+			
+			let result = await call('zotero_get_notes', { itemKeys: [item.key, 'AAAAAAAA'] });
+			assert.deepEqual(result.missing, ['AAAAAAAA']);
+			assert.lengthOf(result.notes, 1);
+			assert.equal(result.notes[0].key, note.key);
+			assert.equal(result.notes[0].title, 'Findings');
+			assert.match(result.notes[0].content, /^# Findings\n\nSome \*\*bold\*\* text$/);
+			assert.deepEqual(result.annotations.map(annotation => annotation.key), [first.key, middle.key, last.key]);
+			assert.deepEqual(result.annotations[2], {
+				key: last.key,
+				attachmentKey: attachment.key,
+				type: 'highlight',
+				text: last.annotationText,
+				comment: last.annotationComment,
+				color: '#ffd400',
+				page: 5,
+				pageLabel: last.annotationPageLabel,
+				tags: ['important'],
+				link: `zotero://open/library/items/${attachment.key}?annotation=${last.key}`,
+			});
+			
+			result = await call('zotero_get_notes', { itemKeys: [note.key], format: 'html' });
+			assert.include(result.notes[0].content, '<strong>bold</strong>');
+			assert.lengthOf(result.annotations, 0);
+		});
+	});
 	
-	let randomWord = () => Zotero.Utilities.randomString(12, 'abcdefghijklmnopqrstuvwxyz');
+	describe("annotation and note images", function () {
+		it("should give rendered images' paths, and render the others on request", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			let rendered = await createAnnotation('image', attachment);
+			let unrendered = await createAnnotation('image', attachment);
+			let png = await File.createFromFileName(getTestDataDirectory().path + '/test.png');
+			await Zotero.Annotations.saveCacheImage(rendered, png);
+			let render = sinon.stub(Zotero.PDFWorker, 'renderAttachmentAnnotations').callsFake(async () => {
+				await Zotero.Annotations.saveCacheImage(unrendered, png);
+				return 1;
+			});
+			try {
+				let { annotations } = await call('zotero_get_notes', { itemKeys: [attachment.key] });
+				let byKey = Object.fromEntries(annotations.map(annotation => [annotation.key, annotation]));
+				assert.equal(byKey[rendered.key].imagePath, Zotero.Annotations.getCacheImagePath(rendered));
+				assert.notProperty(byKey[unrendered.key], 'imagePath');
+				assert.isFalse(render.called);
+				
+				let { images, missing } = await call('zotero_render_annotation_images', { itemKeys: [unrendered.key, 'AAAAAAAA'] });
+				assert.deepEqual(missing, ['AAAAAAAA']);
+				assert.isTrue(render.calledOnceWith(attachment.id));
+				assert.deepEqual(images, [{
+					key: unrendered.key,
+					path: Zotero.Annotations.getCacheImagePath(unrendered),
+					status: 'rendered',
+				}]);
+				assert.isTrue(await IOUtils.exists(images[0].path));
+			}
+			finally {
+				render.restore();
+			}
+		});
+		
+		it("should list a note's images in order with their files", async function () {
+			let note = await createDataObject('item', { itemType: 'note' });
+			let first = await createEmbeddedImage(note);
+			let second = await createEmbeddedImage(note);
+			note.setNote(`<div data-schema-version="9"><p>A</p><img data-attachment-key="${second.key}"/>`
+				+ `<p>B</p><img data-attachment-key="${first.key}"/></div>`);
+			await note.saveTx();
+			let { notes } = await call('zotero_get_notes', { itemKeys: [note.key] });
+			assert.deepEqual(notes[0].images, [
+				{ key: second.key, path: await second.getFilePathAsync() },
+				{ key: first.key, path: await first.getFilePathAsync() },
+			]);
+			assert.match(notes[0].content, /\[image\][\s\S]*\[image\]/);
+		});
+	});
+	
+	describe("zotero_add_note", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+		});
+		
+		it("should add a child note from Markdown as the note editor stores it", async function () {
+			let item = await createArticle();
+			let markdown = '# Summary\n\nCosts $5 and $10, energy $E = mc^2$ for $m$, ~~not~~ see https://example.com\n\n'
+				+ '$$\n\\frac{a}{b}\n$$\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n<b>raw</b>';
+			let result = await call('zotero_add_note', { markdown, parentKey: item.key });
+			assert.equal(result.parentKey, item.key);
+			assert.equal(result.title, 'Summary');
+			let note = Zotero.Items.getByLibraryAndKey(item.libraryID, result.key);
+			assert.equal(note.parentID, item.id);
+			let html = note.getNote();
+			assert.match(html, /^<div data-schema-version="9"><h1>Summary<\/h1>/);
+			assert.include(html, 'Costs $5 and $10, energy <span class="math">$E = mc^2$</span> for $m$');
+			assert.include(html, '<s>not</s>');
+			assert.include(html, '<a href="https://example.com">https://example.com</a>');
+			assert.include(html, '<pre class="math">$$\\frac{a}{b}$$</pre>');
+			assert.include(html, '<td>1</td>');
+			assert.include(html, '&lt;b&gt;raw&lt;/b&gt;');
+			
+			// Its dateModified is the one zotero_edit_note checks
+			await call('zotero_edit_note', { itemKey: result.key, markdown: 'More', dateModified: result.dateModified });
+			assert.include(note.getNote(), '<p>More</p>');
+		});
+		
+		it("should let the user undo adding a note", async function () {
+			Zotero.UndoHistory.clear();
+			let { key } = await call('zotero_add_note', { markdown: 'Ideas' });
+			let note = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, key);
+			assert.deepEqual(Zotero.UndoHistory.getUndoAction(), {
+				action: 'undo-action-mcp-changes',
+				actionArgs: { app: 'test-client' },
+			});
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(note.deleted);
+		});
+		
+		it("should add a standalone note to a collection, but not under a note", async function () {
+			let collection = await createDataObject('collection');
+			let { key } = await call('zotero_add_note', { markdown: 'Ideas', collectionKey: collection.key });
+			let note = Zotero.Items.getByLibraryAndKey(collection.libraryID, key);
+			assert.isTrue(note.isTopLevelItem());
+			assert.isTrue(collection.hasItem(note.id));
+			
+			let error = await callForError('zotero_add_note', { markdown: 'x', parentKey: key });
+			assert.match(error, /is a note/);
+		});
+	});
+	
+	describe("zotero_edit_note", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should append inside the note's wrapper, and undo", async function () {
+			let note = new Zotero.Item('note');
+			let citationItems = 'data-citation-items="%5B%5D"';
+			note.setNote(`<div ${citationItems} data-schema-version="8"><h1>Notes</h1><p>One</p></div>`);
+			await note.saveTx();
+			let [{ dateModified }] = (await call('zotero_get_notes', { itemKeys: [note.key] })).notes;
+			let result = await call('zotero_edit_note', { itemKey: note.key, markdown: 'Two **more**', dateModified });
+			assert.equal(result.title, 'Notes');
+			assert.equal(
+				note.getNote(),
+				`<div ${citationItems} data-schema-version="8"><h1>Notes</h1><p>One</p><p>Two <strong>more</strong></p>\n</div>`
+			);
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.include(note.getNote(), '<p>One</p></div>');
+		});
+		
+		it("should leave the note as it was when saving it fails", async function () {
+			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
+			let dateModified = Zotero.Date.sqlToISO8601(note.dateModified);
+			sinon.stub(note, 'save').rejects(new Error('Save failed'));
+			let { error, result } = await callMCPTool('zotero_edit_note', { itemKey: note.key, markdown: 'New', dateModified });
+			assert.isTrue(error !== undefined || result.isError);
+			assert.equal(note.getNote(), '<p>Old</p>');
+		});
+		
+		it("should refuse to edit a note that changed since it was read", async function () {
+			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
+			let [{ dateModified }] = (await call('zotero_get_notes', { itemKeys: [note.key] })).notes;
+			note.setNote('<p>The user\'s edit</p>');
+			note.setField('dateModified', '2099-01-01 00:00:00');
+			await note.saveTx({ skipDateModifiedUpdate: true });
+			let error = await callForError('zotero_edit_note', { itemKey: note.key, markdown: 'New', mode: 'replace', dateModified });
+			assert.match(error, /has changed since/);
+			assert.equal(note.getNote(), '<p>The user\'s edit</p>');
+		});
+		
+		it("should replace a note, but not one with highlights", async function () {
+			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
+			let dateModified = Zotero.Date.sqlToISO8601(note.dateModified);
+			let result = await call('zotero_edit_note', { itemKey: note.key, markdown: '# New', mode: 'replace', dateModified });
+			assert.equal(note.getNote(), '<div data-schema-version="9"><h1>New</h1>\n</div>');
+			
+			note.setNote('<div data-schema-version="9"><p><span class="highlight" data-annotation="%7B%7D">Quote</span></p></div>');
+			await note.saveTx();
+			let error = await callForError('zotero_edit_note', {
+				itemKey: note.key, markdown: 'New', mode: 'replace', dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
+			});
+			assert.match(error, /can't hold/);
+			assert.notEqual(result.dateModified, undefined);
+		});
+	});
 	
 	describe("zotero_search_fulltext", function () {
 		it("should return passages by page, with every term's passages first and the original text", async function () {
@@ -573,49 +1352,232 @@ describe("MCP tools", function () {
 		});
 	});
 	
-	describe("zotero_get_notes", function () {
-		it("should return an item's notes as Markdown and its annotations in file order", async function () {
+	describe("zotero_find_fulltext_attachments", function () {
+		beforeEach(function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should report what it found for each item, and undo the files it added", async function () {
+			let found = await createArticle();
+			found.setField('DOI', '10.1234/' + Zotero.Utilities.randomString());
+			await found.saveTx();
+			let notFound = await createArticle();
+			notFound.setField('url', 'https://example.com/' + Zotero.Utilities.randomString());
+			await notFound.saveTx();
+			let noIdentifier = await createArticle();
+			let attachment;
+			let usersFile;
+			let search = sinon.stub(Zotero.Attachments, 'addAvailableFiles').callsFake(async (items) => {
+				assert.sameMembers(items, [found, notFound]);
+				attachment = await importFileAttachment('test.pdf', { parentID: found.id });
+				// One the user adds meanwhile isn't the search's
+				usersFile = await importFileAttachment('test.pdf', { parentID: notFound.id });
+				return new Map([[found, attachment], [notFound, false]]);
+			});
+			
+			let { results, notice } = await call('zotero_find_fulltext_attachments', {
+				itemKeys: [found.key, notFound.key, noIdentifier.key],
+			});
+			assert.isTrue(search.calledOnce);
+			assert.deepEqual(results.map(result => result.status), ['found', 'notFound', 'skipped']);
+			assert.equal(results[0].attachment.key, attachment.key);
+			assert.match(results[2].reason, /no DOI, URL or PMCID/);
+			assert.match(notice, /zotero_add_attachment/);
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(attachment.deleted);
+			assert.isFalse(usersFile.deleted);
+		});
+		
+		it("should say which items it's still searching for at the deadline", async function () {
 			let item = await createArticle();
-			let note = await createDataObject('item', {
-				itemType: 'note',
-				parentID: item.id,
-				note: '<h1>Findings</h1><p>Some <strong>bold</strong> text</p>',
-			});
-			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
-			let annotations = [];
-			for (let [pageIndex, position] of [[4, '000500'], [0, '000100'], [4, '000200']]) {
-				let annotation = await createAnnotation('highlight', attachment);
-				annotation.annotationSortIndex = `${String(pageIndex).padStart(5, '0')}|${position}|00000`;
-				annotation.annotationPosition = JSON.stringify({ pageIndex, rects: [[0, 0, 1, 1]] });
-				annotation.addTag('important');
-				await annotation.saveTx();
-				annotations.push(annotation);
+			item.setField('DOI', '10.1234/' + Zotero.Utilities.randomString());
+			await item.saveTx();
+			sinon.stub(Zotero.Attachments, 'addAvailableFiles').returns(new Promise(() => {}));
+			let { results, notice } = await withBudget(300, () => call('zotero_find_fulltext_attachments', { itemKeys: [item.key] }));
+			assert.equal(results[0].status, 'pending');
+			assert.match(notice, /still looking/);
+		});
+	});
+	
+	describe("zotero_add_attachment", function () {
+		let parent;
+		
+		beforeEach(async function () {
+			Zotero.UndoHistory.clear();
+			parent = await createArticle();
+		});
+		
+		it("should attach a PDF from a URL", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			let { httpd, baseURL } = await startHTTPServer();
+			let prefix = Zotero.Utilities.randomString();
+			let file = getTestDataDirectory();
+			file.append('test.pdf');
+			httpd.registerFile(`/${prefix}/paper.pdf`, file);
+			try {
+				let result = await call('zotero_add_attachment', {
+					parentKey: parent.key,
+					url: `${baseURL}${prefix}/paper.pdf`,
+					title: 'Preprint',
+				});
+				assert.equal(result.status, 'attached');
+				assert.equal(result.contentType, 'application/pdf');
+				assert.equal(result.title, 'Preprint');
+				let attachment = Zotero.Items.getByLibraryAndKey(parent.libraryID, result.key);
+				assert.equal(attachment.parentID, parent.id);
+				assert.isTrue(await attachment.fileExists());
+				
+				assert.isTrue(await Zotero.UndoHistory.undo());
+				assert.isTrue(attachment.deleted);
 			}
-			let [last, first, middle] = annotations;
+			finally {
+				await new Promise(resolve => httpd.stop(resolve));
+			}
+		});
+		
+		it("should title a download that outlasts the call, and make it an undo step", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			let download = Zotero.Promise.defer();
+			sinon.stub(Zotero.Attachments, 'addFileFromURLs').returns(download.promise);
+			let budget = Zotero.MCP.CALL_BUDGET;
+			Zotero.MCP.CALL_BUDGET = 200;
+			let result;
+			try {
+				result = await call('zotero_add_attachment', {
+					parentKey: parent.key,
+					url: 'https://example.com/paper.pdf',
+					title: 'Preprint',
+				});
+			}
+			finally {
+				Zotero.MCP.CALL_BUDGET = budget;
+			}
+			assert.equal(result.status, 'pending');
 			
-			let result = await call('zotero_get_notes', { itemKeys: [item.key, 'AAAAAAAA'] });
-			assert.deepEqual(result.missing, ['AAAAAAAA']);
-			assert.lengthOf(result.notes, 1);
-			assert.equal(result.notes[0].key, note.key);
-			assert.equal(result.notes[0].title, 'Findings');
-			assert.match(result.notes[0].content, /^# Findings\n\nSome \*\*bold\*\* text$/);
-			assert.deepEqual(result.annotations.map(annotation => annotation.key), [first.key, middle.key, last.key]);
-			assert.deepEqual(result.annotations[2], {
-				key: last.key,
-				attachmentKey: attachment.key,
-				type: 'highlight',
-				text: last.annotationText,
-				comment: last.annotationComment,
-				color: '#ffd400',
-				page: 5,
-				pageLabel: last.annotationPageLabel,
-				tags: ['important'],
-				link: `zotero://open/library/items/${attachment.key}?annotation=${last.key}`,
+			let file = getTestDataDirectory();
+			file.append('test.pdf');
+			let attachment = await Zotero.Attachments.importFromFile({ file, parentItemID: parent.id });
+			download.resolve(attachment);
+			await waitForCallback(() => Zotero.UndoHistory.canUndo());
+			assert.equal(attachment.getField('title'), 'Preprint');
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(attachment.deleted);
+		});
+		
+		it("should attach a file from this computer", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			let file = getTestDataDirectory();
+			file.append('test.pdf');
+			let result = await call('zotero_add_attachment', { parentKey: parent.key, path: file.path });
+			let attachment = Zotero.Items.getByLibraryAndKey(parent.libraryID, result.key);
+			assert.equal(attachment.parentID, parent.id);
+			assert.isTrue(await attachment.fileExists());
+			
+			let error = await callForError('zotero_add_attachment', { parentKey: parent.key, path: 'test.pdf' });
+			assert.match(error, /isn't an absolute path/);
+			let missing = PathUtils.join(PathUtils.parent(file.path), 'missing.pdf');
+			error = await callForError('zotero_add_attachment', { parentKey: parent.key, path: missing });
+			assert.match(error, /There's no file at/);
+		});
+		
+		it("should add a file without a parent, identify it in a collection, and undo both", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			let collection = await createDataObject('collection');
+			let recognized = new Zotero.Item('journalArticle');
+			recognized.setField('title', 'Recognized paper');
+			sinon.stub(Zotero.RecognizeDocument, '_recognize').callsFake(async () => {
+				await recognized.saveTx();
+				return recognized;
 			});
+			let file = getTestDataDirectory();
+			file.append('test.pdf');
+			let result = await call('zotero_add_attachment', { path: file.path, collectionKey: collection.key });
+			assert.isTrue(result.identified);
+			assert.equal(result.parentKey, recognized.key);
+			assert.equal(result.parent.title, 'Recognized paper');
+			let attachment = Zotero.Items.getByLibraryAndKey(recognized.libraryID, result.key);
+			assert.equal(attachment.parentID, recognized.id);
+			assert.isTrue(collection.hasItem(recognized));
 			
-			result = await call('zotero_get_notes', { itemKeys: [note.key], format: 'html' });
-			assert.include(result.notes[0].content, '<strong>bold</strong>');
-			assert.lengthOf(result.annotations, 0);
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(recognized.deleted);
+			assert.isTrue(attachment.deleted);
+		});
+		
+		it("should link a file it can't identify as a standalone attachment", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			sinon.stub(Zotero.RecognizeDocument, '_recognize').resolves(false);
+			let file = getTestDataDirectory();
+			file.append('test.pdf');
+			let result = await call('zotero_add_attachment', { path: file.path, linkFile: true });
+			assert.isFalse(result.identified);
+			assert.equal(result.linkMode, 'linked_file');
+			assert.notProperty(result, 'parentKey');
+			assert.match(result.notice, /couldn't identify/);
+			let attachment = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.key);
+			assert.isTrue(attachment.isTopLevelItem());
+			assert.equal(attachment.getFilePath(), file.path);
+			
+			assert.match(
+				await callForError('zotero_add_attachment', { url: 'https://example.com/a.pdf' }),
+				/Give parentKey/
+			);
+		});
+	});
+	
+	describe("zotero_trash", function () {
+		beforeEach(function () {
+			Zotero.UndoHistory.clear();
+		});
+		
+		it("should ask to delete before trashing, and only to edit before restoring", async function () {
+			let ask = sinon.stub(Permissions, '_ask').resolves('allow');
+			let item = await createArticle();
+			let note = await createDataObject('item', { itemType: 'note', parentID: item.id });
+			
+			await call('zotero_trash', { itemKeys: [item.key] });
+			assert.isTrue(ask.calledOnceWith('test-client', Permissions.DELETE, item.libraryID));
+			assert.isTrue(item.deleted);
+			assert.equal(Zotero.UndoHistory.getUndoAction().action, 'undo-action-mcp-changes');
+			
+			// Restoring an item restores its trashed children
+			note.deleted = true;
+			await note.saveTx();
+			let { restored } = await call('zotero_trash', { itemKeys: [item.key], restore: true });
+			assert.isTrue(restored);
+			assert.isTrue(ask.secondCall.calledWith('test-client', Permissions.EDIT_LIBRARY, item.libraryID));
+			assert.isFalse(item.deleted);
+			assert.isFalse(note.deleted);
+			
+			let error = await callForError('zotero_trash', { itemKeys: [item.key], restore: true });
+			assert.match(error, /isn't in the trash/);
+		});
+		
+		it("should trash and restore a collection with its subcollections, leaving its items", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			let parent = await createDataObject('collection');
+			let child = await createDataObject('collection', { parentID: parent.id });
+			let item = await createArticle({ collections: [child.id] });
+			
+			let { collectionKeys } = await call('zotero_trash', { collectionKeys: [child.key, parent.key] });
+			assert.deepEqual(collectionKeys, [parent.key]);
+			assert.isTrue(parent.deleted);
+			assert.isTrue(child.deleted);
+			assert.isFalse(item.deleted);
+			
+			await call('zotero_trash', { collectionKeys: [parent.key], restore: true });
+			assert.isFalse(parent.deleted);
+			assert.isFalse(child.deleted);
+		});
+		
+		it("should trash nothing if the user denies it", async function () {
+			sinon.stub(Permissions, '_ask').resolves('deny');
+			let item = await createArticle();
+			let error = await callForError('zotero_trash', { itemKeys: [item.key] });
+			assert.match(error, /denied/);
+			assert.isFalse(item.deleted);
 		});
 	});
 	
@@ -1005,842 +1967,6 @@ describe("MCP tools", function () {
 		});
 	});
 	
-	describe("zotero_update_items", function () {
-		beforeEach(function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			Zotero.UndoHistory.clear();
-		});
-		
-		it("should change several items in one step the user can undo", async function () {
-			let collection = await createDataObject('collection');
-			let a = await createArticle({ title: 'Old A' });
-			let b = await createArticle({ title: 'Old B', tags: [{ tag: 'old' }] });
-			
-			let { items } = await call('zotero_update_items', {
-				changes: [
-					{ key: a.key, fields: { title: 'New A', DOI: '10.1/x' }, addToCollections: [collection.key] },
-					{
-						key: b.key,
-						creators: [{ creatorType: 'author', name: 'Org' }, { creatorType: 'editor', firstName: 'Bo', lastName: 'Ng' }],
-						addTags: ['new'],
-						removeTags: ['old'],
-					},
-				],
-			});
-			assert.deepEqual(items.map(item => item.key), [a.key, b.key]);
-			assert.equal(items[0].title, 'New A');
-			assert.equal(a.getField('DOI'), '10.1/x');
-			assert.isTrue(collection.hasItem(a.id));
-			assert.deepEqual(b.getTags(), [{ tag: 'new' }]);
-			assert.deepEqual(b.getCreators().map(c => [c.lastName, c.fieldMode]), [['Org', 1], ['Ng', 0]]);
-			assert.deepEqual(Zotero.UndoHistory.getUndoAction(), {
-				action: 'undo-action-mcp-changes',
-				actionArgs: { app: 'test-client' },
-			});
-			
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.equal(a.getField('title'), 'Old A');
-			assert.equal(a.getField('DOI'), '');
-			assert.isFalse(collection.hasItem(a.id));
-			assert.deepEqual(b.getTags(), [{ tag: 'old' }]);
-			assert.lengthOf(b.getCreators(), 0);
-			assert.isFalse(Zotero.UndoHistory.canUndo());
-		});
-		
-		it("should change nothing if any change is invalid", async function () {
-			let a = await createArticle({ title: 'A' });
-			let book = await createDataObject('item', { itemType: 'book', title: 'B' });
-			let error = await callForError('zotero_update_items', {
-				changes: [
-					{ key: a.key, fields: { title: 'Changed' }, addTags: ['t'] },
-					{ key: book.key, fields: { issue: '3' } },
-				],
-			});
-			assert.match(error, new RegExp(`${book.key}: issue isn't a field of item type book`));
-			assert.include(error, 'numPages');
-			assert.equal(a.getField('title'), 'A');
-			assert.isFalse(a.hasTag('t'));
-			
-			error = await callForError('zotero_update_items', {
-				changes: [{ key: a.key, fields: { title: 'Changed' } }, { key: 'AAAAAAAA' }],
-			});
-			assert.match(error, /No item AAAAAAAA/);
-			assert.equal(a.getField('title'), 'A');
-			
-			error = await callForError('zotero_update_items', {
-				changes: [{ key: book.key, creators: [{ creatorType: 'director', lastName: 'X' }] }],
-			});
-			assert.match(error, /director isn't a creator type of item type book/);
-		});
-		
-		it("should set a base field by the item type's own name for it", async function () {
-			let section = await createDataObject('item', { itemType: 'bookSection' });
-			await call('zotero_update_items', {
-				changes: [{ key: section.key, fields: { publicationTitle: 'The Book' } }],
-			});
-			assert.equal(section.getField('bookTitle'), 'The Book');
-		});
-	});
-	
-	describe("zotero_list_item_types", function () {
-		it("should list each item type's fields and creator types", async function () {
-			let { itemTypes } = await call('zotero_list_item_types', { itemTypes: ['bookSection'] });
-			assert.lengthOf(itemTypes, 1);
-			let [type] = itemTypes;
-			assert.equal(type.itemType, 'bookSection');
-			assert.equal(type.label, 'Book Section');
-			assert.deepInclude(type.fields, { field: 'bookTitle', label: 'Book Title', baseField: 'publicationTitle' });
-			assert.deepInclude(type.fields, { field: 'title', label: 'Title' });
-			assert.notInclude(type.fields.map(field => field.field), 'issue');
-			assert.deepInclude(type.creatorTypes, { creatorType: 'author', label: 'Author', primary: true });
-			assert.deepInclude(type.creatorTypes, { creatorType: 'bookAuthor', label: 'Book Author' });
-			
-			({ itemTypes } = await call('zotero_list_item_types', {}));
-			let names = itemTypes.map(type => type.itemType);
-			assert.includeMembers(names, ['book', 'journalArticle', 'webpage']);
-			assert.notInclude(names, 'note');
-		});
-		
-		it("should be the item types tools.json takes, which should be all of Zotero's but notes, attachments and annotations", async function () {
-			let expected = Zotero.ItemTypes.getAll()
-				.map(type => type.name)
-				.filter(name => !['note', 'attachment', 'annotation'].includes(name))
-				.sort();
-			let { itemTypes } = await call('zotero_list_item_types', {});
-			assert.sameMembers(itemTypes.map(type => type.itemType), expected);
-			
-			// Every list of item types in an input schema, e.g. after a schema update adds a type
-			let enums = [];
-			let findEnums = (schema) => {
-				if (Array.isArray(schema?.enum) && schema.enum.includes('journalArticle')) {
-					enums.push(schema.enum);
-				}
-				else if (schema && typeof schema == 'object') {
-					Object.values(schema).forEach(findEnums);
-				}
-			};
-			let tools = await Zotero.MCP.getTools();
-			for (let tool of tools) {
-				findEnums(tool.inputSchema);
-			}
-			assert.lengthOf(enums, 3);
-			for (let itemTypeEnum of enums) {
-				assert.deepEqual([...itemTypeEnum].sort(), expected);
-			}
-		});
-	});
-	
-	describe("zotero_change_item_types", function () {
-		beforeEach(function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			Zotero.UndoHistory.clear();
-		});
-		
-		it("should change types in one step the user can undo, and say which fields moved or were removed", async function () {
-			let article = await createArticle({ title: 'T' });
-			article.setField('publicationTitle', 'The Book');
-			article.setField('issue', '3');
-			article.setCreators([
-				{ creatorType: 'author', firstName: 'Ann', lastName: 'Lee' },
-				{ creatorType: 'reviewedAuthor', firstName: 'Bo', lastName: 'Ng' },
-			]);
-			await article.saveTx();
-			// book -> bookSection moves the title to bookTitle, which isn't a base field mapping
-			let book = await createDataObject('item', { itemType: 'book', title: 'B' });
-			book.setField('shortTitle', 'S');
-			await book.saveTx();
-			
-			let { items } = await call('zotero_change_item_types', {
-				changes: [{ key: article.key, itemType: 'bookSection' }, { key: book.key, itemType: 'bookSection' }],
-			});
-			assert.equal(article.itemType, 'bookSection');
-			assert.equal(article.getField('bookTitle'), 'The Book');
-			assert.equal(article.getField('title'), 'T');
-			assert.deepInclude(items[0], {
-				key: article.key,
-				itemType: 'bookSection',
-				oldItemType: 'journalArticle',
-				movedFields: { publicationTitle: 'bookTitle' },
-				removedFields: { issue: '3' },
-				changedCreatorTypes: [{ name: 'Bo Ng', from: 'reviewedAuthor', to: 'contributor' }],
-			});
-			assert.equal(book.getField('bookTitle'), 'B');
-			assert.deepInclude(items[1], {
-				movedFields: { title: 'bookTitle' },
-				removedFields: { shortTitle: 'S' },
-				changedCreatorTypes: [],
-			});
-			assert.deepEqual(Zotero.UndoHistory.getUndoAction(), {
-				action: 'undo-action-mcp-changes',
-				actionArgs: { app: 'test-client' },
-			});
-			
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.equal(article.itemType, 'journalArticle');
-			assert.equal(article.getField('publicationTitle'), 'The Book');
-			assert.equal(article.getField('issue'), '3');
-			assert.equal(Zotero.CreatorTypes.getName(article.getCreator(1).creatorTypeID), 'reviewedAuthor');
-			assert.equal(book.itemType, 'book');
-			assert.equal(book.getField('title'), 'B');
-			assert.isFalse(Zotero.UndoHistory.canUndo());
-		});
-		
-		it("should change nothing if any item's type can't be changed", async function () {
-			let article = await createArticle({ title: 'T' });
-			let note = await createDataObject('item', { itemType: 'note' });
-			let error = await callForError('zotero_change_item_types', {
-				changes: [{ key: article.key, itemType: 'book' }, { key: note.key, itemType: 'book' }],
-			});
-			assert.match(error, new RegExp(`${note.key} is a note, whose type can't be changed`));
-			assert.equal(article.itemType, 'journalArticle');
-			
-			error = await callForError('zotero_change_item_types', {
-				changes: [{ key: article.key, itemType: 'note' }],
-			});
-			assert.include(error, 'itemType');
-			assert.equal(article.itemType, 'journalArticle');
-		});
-	});
-	
-	describe("zotero_manage_collections", function () {
-		beforeEach(function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-		});
-		
-		it("should create, rename and move collections", async function () {
-			let parent = await createDataObject('collection');
-			let created = await call('zotero_manage_collections', { action: 'create', name: 'Reading', parentKey: parent.key });
-			let collection = Zotero.Collections.getByLibraryAndKey(Zotero.Libraries.userLibraryID, created.key);
-			assert.equal(collection.name, 'Reading');
-			assert.equal(collection.parentKey, parent.key);
-			assert.equal(created.link, `zotero://select/library/collections/${created.key}`);
-			
-			await call('zotero_manage_collections', { action: 'update', collectionKey: created.key, name: 'Read' });
-			assert.equal(collection.name, 'Read');
-			assert.equal(collection.parentKey, parent.key);
-			
-			await call('zotero_manage_collections', { action: 'update', collectionKey: created.key, parentKey: null });
-			assert.isFalse(collection.parentKey);
-			assert.equal(collection.name, 'Read');
-		});
-		
-		it("shouldn't move a collection into its own subcollection", async function () {
-			let parent = await createDataObject('collection');
-			let child = await createDataObject('collection', { parentID: parent.id });
-			let error = await callForError('zotero_manage_collections', { action: 'update', collectionKey: parent.key, parentKey: child.key });
-			assert.match(error, /can't be moved into itself or a subcollection/);
-			assert.isFalse(parent.parentKey);
-		});
-		
-		it("should apply concurrent changes one after another, each its own undo step", async function () {
-			let collection = await createDataObject('collection', { name: 'Original' });
-			Zotero.UndoHistory.clear();
-			// Hold a transaction, so both calls queue for theirs
-			let release = Zotero.Promise.defer();
-			let held = Zotero.DB.executeTransaction(() => release.promise);
-			let first = call('zotero_manage_collections', { action: 'update', collectionKey: collection.key, name: 'First' });
-			let second = call('zotero_manage_collections', { action: 'update', collectionKey: collection.key, name: 'Second' });
-			await Zotero.Promise.delay(100);
-			release.resolve();
-			await held;
-			assert.deepEqual((await Promise.all([first, second])).map(result => result.name), ['First', 'Second']);
-			assert.equal(collection.name, 'Second');
-			
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.equal(collection.name, 'First');
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.equal(collection.name, 'Original');
-		});
-	});
-	
-	describe("duplicates", function () {
-		beforeEach(function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			Zotero.UndoHistory.clear();
-		});
-		
-		it("should list duplicates and merge them into the oldest, and undo", async function () {
-			let DOI = '10.1234/' + Zotero.Utilities.randomString();
-			let older = await createDataObject('item', { title: 'Merge me', dateAdded: '2020-01-01 00:00:00' });
-			older.setField('DOI', DOI);
-			await older.saveTx();
-			let newer = await createDataObject('item', { title: 'Merge me (copy)' });
-			newer.setField('DOI', DOI);
-			newer.addTag('copied');
-			await newer.saveTx();
-			let note = await createDataObject('item', { itemType: 'note', parentID: newer.id });
-			
-			let sets = [];
-			for (let offset = 0; offset !== undefined;) {
-				let result = await call('zotero_list_duplicates', { offset, limit: 100 });
-				sets.push(...result.sets);
-				offset = result.nextOffset;
-			}
-			let set = sets.find(set => set.some(item => item.key == older.key));
-			assert.deepEqual(set.map(item => item.key), [older.key, newer.key]);
-			assert.equal(set[0].DOI, DOI);
-			assert.equal(set[1].noteCount, 1);
-			
-			let result = await call('zotero_merge_items', { itemKeys: [newer.key, older.key] });
-			assert.equal(result.key, older.key);
-			assert.deepEqual(result.trashed, [newer.key]);
-			assert.isTrue(newer.deleted);
-			assert.equal(note.parentID, older.id);
-			assert.isTrue(older.hasTag('copied'));
-			
-			assert.deepEqual(Zotero.UndoHistory.getUndoAction(), {
-				action: 'undo-action-mcp-changes',
-				actionArgs: { app: 'test-client' },
-			});
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.isFalse(newer.deleted);
-			assert.equal(note.parentID, newer.id);
-		});
-		
-		it("should refuse to merge items of different types", async function () {
-			let a = await createDataObject('item', { itemType: 'book' });
-			let b = await createDataObject('item', { itemType: 'journalArticle' });
-			assert.match(
-				await callForError('zotero_merge_items', { itemKeys: [a.key, b.key] }),
-				/different types.*zotero_change_item_types/
-			);
-		});
-	});
-	
-	describe("saved searches", function () {
-		beforeEach(function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			Zotero.UndoHistory.clear();
-		});
-		
-		it("should create a saved search from conditions, list it, change it and trash it", async function () {
-			let tag = Zotero.Utilities.randomString();
-			let title = Zotero.Utilities.randomString();
-			await createDataObject('item', { title, tags: [{ tag }] });
-			await createDataObject('item', { tags: [{ tag }] });
-			let name = Zotero.Utilities.randomString();
-			let tagged = { condition: 'tag', operator: 'is', value: tag };
-			let created = await call('zotero_manage_saved_searches', {
-				action: 'create',
-				name,
-				conditions: [tagged, { condition: 'numNotes', operator: 'is', value: '0' }],
-			});
-			assert.equal(created.itemCount, 2);
-			let { savedSearches } = await call('zotero_list_saved_searches', {});
-			let listed = savedSearches.find(search => search.key == created.key);
-			assert.equal(listed.name, name);
-			assert.notProperty(listed, 'itemCount');
-			let found = await call('zotero_search', { savedSearchKey: created.key });
-			assert.equal(found.total, 2);
-			assert.deepInclude(listed.conditions, { condition: 'tag', operator: 'is', value: tag });
-			
-			let updated = await call('zotero_manage_saved_searches', {
-				action: 'update',
-				savedSearchKey: created.key,
-				conditions: [tagged, { condition: 'title', operator: 'contains', value: title }],
-			});
-			assert.equal(updated.name, name);
-			assert.equal(updated.itemCount, 1);
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			let search = Zotero.Searches.getByLibraryAndKey(Zotero.Libraries.userLibraryID, created.key);
-			assert.equal((await search.search()).length, 2);
-			
-			let result = await call('zotero_trash', { savedSearchKeys: [created.key] });
-			assert.deepEqual(result.savedSearchKeys, [created.key]);
-			assert.isTrue(search.deleted);
-		});
-	});
-	
-	describe("zotero_manage_tags", function () {
-		beforeEach(function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			Zotero.UndoHistory.clear();
-		});
-		
-		it("should merge tags into one, keeping a color, and undo", async function () {
-			let [a, b, c] = ['ML', 'machine-learning', 'Machine Learning'].map(() => Zotero.Utilities.randomString());
-			let one = await createDataObject('item', { tags: [{ tag: a }] });
-			let two = await createDataObject('item', { tags: [{ tag: b }, { tag: c }] });
-			let libraryID = Zotero.Libraries.userLibraryID;
-			await Zotero.Tags.setColor(libraryID, a, '#ff6666', 0);
-			try {
-				let result = await call('zotero_manage_tags', { action: 'rename', tags: [a, b], newName: c });
-				assert.equal(result.itemCount, 2);
-				assert.deepEqual(one.getTags(), [{ tag: c }]);
-				assert.deepEqual(two.getTags(), [{ tag: c }]);
-				assert.equal(Zotero.Tags.getColor(libraryID, c).color, '#ff6666');
-				assert.isFalse(Zotero.Tags.getColor(libraryID, a));
-				
-				assert.isTrue(await Zotero.UndoHistory.undo());
-				assert.deepEqual(one.getTags(), [{ tag: a }]);
-				assert.sameDeepMembers(two.getTags(), [{ tag: b }, { tag: c }]);
-				
-				assert.match(
-					await callForError('zotero_manage_tags', { action: 'rename', tags: ['no such tag'], newName: c }),
-					/No items in .* have the tags "no such tag"/
-				);
-				assert.match(
-					await callForError('zotero_manage_tags', { action: 'rename', tags: [c] }),
-					/Give newName to rename/
-				);
-			}
-			finally {
-				await Zotero.Tags.setColor(libraryID, a, false);
-				await Zotero.Tags.setColor(libraryID, c, false);
-			}
-		});
-		
-		it("should delete tags and set colors", async function () {
-			let tag = Zotero.Utilities.randomString();
-			let item = await createDataObject('item', { tags: [{ tag }, { tag: 'kept' }] });
-			let libraryID = Zotero.Libraries.userLibraryID;
-			let result = await call('zotero_manage_tags', { action: 'setColor', tags: [tag], color: 'green' });
-			assert.equal(result.color, 'green');
-			assert.equal(Zotero.Tags.getColor(libraryID, tag).color, '#5FB236');
-			assert.isAbove(result.position, 0);
-			
-			// A position alone moves the color to another number key and keeps it
-			let position = result.position == 9 ? 8 : 9;
-			result = await call('zotero_manage_tags', { action: 'setColor', tags: [tag], position });
-			assert.equal(result.color, 'green');
-			assert.equal(Zotero.Tags.getColor(libraryID, tag).color, '#5FB236');
-			assert.match(
-				await callForError('zotero_manage_tags', { action: 'setColor', tags: ['kept'], position: 1 }),
-				/kept has no color/
-			);
-			// Only the colors Zotero offers, by name
-			await callForError('zotero_manage_tags', { action: 'setColor', tags: [tag], color: '#5fb236' });
-			
-			await call('zotero_manage_tags', { action: 'delete', tags: [tag] });
-			assert.deepEqual(item.getTags(), [{ tag: 'kept' }]);
-			assert.isFalse(Zotero.Tags.getColor(libraryID, tag));
-		});
-	});
-	
-	describe("annotation and note images", function () {
-		it("should give rendered images' paths, and render the others on request", async function () {
-			let attachment = await importFileAttachment('test.pdf');
-			let rendered = await createAnnotation('image', attachment);
-			let unrendered = await createAnnotation('image', attachment);
-			let png = await File.createFromFileName(getTestDataDirectory().path + '/test.png');
-			await Zotero.Annotations.saveCacheImage(rendered, png);
-			let render = sinon.stub(Zotero.PDFWorker, 'renderAttachmentAnnotations').callsFake(async () => {
-				await Zotero.Annotations.saveCacheImage(unrendered, png);
-				return 1;
-			});
-			try {
-				let { annotations } = await call('zotero_get_notes', { itemKeys: [attachment.key] });
-				let byKey = Object.fromEntries(annotations.map(annotation => [annotation.key, annotation]));
-				assert.equal(byKey[rendered.key].imagePath, Zotero.Annotations.getCacheImagePath(rendered));
-				assert.notProperty(byKey[unrendered.key], 'imagePath');
-				assert.isFalse(render.called);
-				
-				let { images, missing } = await call('zotero_render_annotation_images', { itemKeys: [unrendered.key, 'AAAAAAAA'] });
-				assert.deepEqual(missing, ['AAAAAAAA']);
-				assert.isTrue(render.calledOnceWith(attachment.id));
-				assert.deepEqual(images, [{
-					key: unrendered.key,
-					path: Zotero.Annotations.getCacheImagePath(unrendered),
-					status: 'rendered',
-				}]);
-				assert.isTrue(await IOUtils.exists(images[0].path));
-			}
-			finally {
-				render.restore();
-			}
-		});
-		
-		it("should list a note's images in order with their files", async function () {
-			let note = await createDataObject('item', { itemType: 'note' });
-			let first = await createEmbeddedImage(note);
-			let second = await createEmbeddedImage(note);
-			note.setNote(`<div data-schema-version="9"><p>A</p><img data-attachment-key="${second.key}"/>`
-				+ `<p>B</p><img data-attachment-key="${first.key}"/></div>`);
-			await note.saveTx();
-			let { notes } = await call('zotero_get_notes', { itemKeys: [note.key] });
-			assert.deepEqual(notes[0].images, [
-				{ key: second.key, path: await second.getFilePathAsync() },
-				{ key: first.key, path: await first.getFilePathAsync() },
-			]);
-			assert.match(notes[0].content, /\[image\][\s\S]*\[image\]/);
-		});
-	});
-	
-	describe("zotero_edit_note", function () {
-		beforeEach(function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			Zotero.UndoHistory.clear();
-		});
-		
-		it("should append inside the note's wrapper, and undo", async function () {
-			let note = new Zotero.Item('note');
-			let citationItems = 'data-citation-items="%5B%5D"';
-			note.setNote(`<div ${citationItems} data-schema-version="8"><h1>Notes</h1><p>One</p></div>`);
-			await note.saveTx();
-			let [{ dateModified }] = (await call('zotero_get_notes', { itemKeys: [note.key] })).notes;
-			let result = await call('zotero_edit_note', { itemKey: note.key, markdown: 'Two **more**', dateModified });
-			assert.equal(result.title, 'Notes');
-			assert.equal(
-				note.getNote(),
-				`<div ${citationItems} data-schema-version="8"><h1>Notes</h1><p>One</p><p>Two <strong>more</strong></p>\n</div>`
-			);
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.include(note.getNote(), '<p>One</p></div>');
-		});
-		
-		it("should leave the note as it was when saving it fails", async function () {
-			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
-			let dateModified = Zotero.Date.sqlToISO8601(note.dateModified);
-			sinon.stub(note, 'save').rejects(new Error('Save failed'));
-			let { error, result } = await callMCPTool('zotero_edit_note', { itemKey: note.key, markdown: 'New', dateModified });
-			assert.isTrue(error !== undefined || result.isError);
-			assert.equal(note.getNote(), '<p>Old</p>');
-		});
-		
-		it("should refuse to edit a note that changed since it was read", async function () {
-			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
-			let [{ dateModified }] = (await call('zotero_get_notes', { itemKeys: [note.key] })).notes;
-			note.setNote('<p>The user\'s edit</p>');
-			note.setField('dateModified', '2099-01-01 00:00:00');
-			await note.saveTx({ skipDateModifiedUpdate: true });
-			let error = await callForError('zotero_edit_note', { itemKey: note.key, markdown: 'New', mode: 'replace', dateModified });
-			assert.match(error, /has changed since/);
-			assert.equal(note.getNote(), '<p>The user\'s edit</p>');
-		});
-		
-		it("should replace a note, but not one with highlights", async function () {
-			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
-			let dateModified = Zotero.Date.sqlToISO8601(note.dateModified);
-			let result = await call('zotero_edit_note', { itemKey: note.key, markdown: '# New', mode: 'replace', dateModified });
-			assert.equal(note.getNote(), '<div data-schema-version="9"><h1>New</h1>\n</div>');
-			
-			note.setNote('<div data-schema-version="9"><p><span class="highlight" data-annotation="%7B%7D">Quote</span></p></div>');
-			await note.saveTx();
-			let error = await callForError('zotero_edit_note', {
-				itemKey: note.key, markdown: 'New', mode: 'replace', dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
-			});
-			assert.match(error, /can't hold/);
-			assert.notEqual(result.dateModified, undefined);
-		});
-	});
-	
-	describe("zotero_add_note", function () {
-		beforeEach(function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-		});
-		
-		it("should add a child note from Markdown as the note editor stores it", async function () {
-			let item = await createArticle();
-			let markdown = '# Summary\n\nCosts $5 and $10, energy $E = mc^2$ for $m$, ~~not~~ see https://example.com\n\n'
-				+ '$$\n\\frac{a}{b}\n$$\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n<b>raw</b>';
-			let result = await call('zotero_add_note', { markdown, parentKey: item.key });
-			assert.equal(result.parentKey, item.key);
-			assert.equal(result.title, 'Summary');
-			let note = Zotero.Items.getByLibraryAndKey(item.libraryID, result.key);
-			assert.equal(note.parentID, item.id);
-			let html = note.getNote();
-			assert.match(html, /^<div data-schema-version="9"><h1>Summary<\/h1>/);
-			assert.include(html, 'Costs $5 and $10, energy <span class="math">$E = mc^2$</span> for $m$');
-			assert.include(html, '<s>not</s>');
-			assert.include(html, '<a href="https://example.com">https://example.com</a>');
-			assert.include(html, '<pre class="math">$$\\frac{a}{b}$$</pre>');
-			assert.include(html, '<td>1</td>');
-			assert.include(html, '&lt;b&gt;raw&lt;/b&gt;');
-			
-			// Its dateModified is the one zotero_edit_note checks
-			await call('zotero_edit_note', { itemKey: result.key, markdown: 'More', dateModified: result.dateModified });
-			assert.include(note.getNote(), '<p>More</p>');
-		});
-		
-		it("should let the user undo adding a note", async function () {
-			Zotero.UndoHistory.clear();
-			let { key } = await call('zotero_add_note', { markdown: 'Ideas' });
-			let note = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, key);
-			assert.deepEqual(Zotero.UndoHistory.getUndoAction(), {
-				action: 'undo-action-mcp-changes',
-				actionArgs: { app: 'test-client' },
-			});
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.isTrue(note.deleted);
-		});
-		
-		it("should add a standalone note to a collection, but not under a note", async function () {
-			let collection = await createDataObject('collection');
-			let { key } = await call('zotero_add_note', { markdown: 'Ideas', collectionKey: collection.key });
-			let note = Zotero.Items.getByLibraryAndKey(collection.libraryID, key);
-			assert.isTrue(note.isTopLevelItem());
-			assert.isTrue(collection.hasItem(note.id));
-			
-			let error = await callForError('zotero_add_note', { markdown: 'x', parentKey: key });
-			assert.match(error, /is a note/);
-		});
-	});
-	
-	describe("zotero_trash", function () {
-		beforeEach(function () {
-			Zotero.UndoHistory.clear();
-		});
-		
-		it("should ask to delete before trashing, and only to edit before restoring", async function () {
-			let ask = sinon.stub(Permissions, '_ask').resolves('allow');
-			let item = await createArticle();
-			let note = await createDataObject('item', { itemType: 'note', parentID: item.id });
-			
-			await call('zotero_trash', { itemKeys: [item.key] });
-			assert.isTrue(ask.calledOnceWith('test-client', Permissions.DELETE, item.libraryID));
-			assert.isTrue(item.deleted);
-			assert.equal(Zotero.UndoHistory.getUndoAction().action, 'undo-action-mcp-changes');
-			
-			// Restoring an item restores its trashed children
-			note.deleted = true;
-			await note.saveTx();
-			let { restored } = await call('zotero_trash', { itemKeys: [item.key], restore: true });
-			assert.isTrue(restored);
-			assert.isTrue(ask.secondCall.calledWith('test-client', Permissions.EDIT_LIBRARY, item.libraryID));
-			assert.isFalse(item.deleted);
-			assert.isFalse(note.deleted);
-			
-			let error = await callForError('zotero_trash', { itemKeys: [item.key], restore: true });
-			assert.match(error, /isn't in the trash/);
-		});
-		
-		it("should trash and restore a collection with its subcollections, leaving its items", async function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			let parent = await createDataObject('collection');
-			let child = await createDataObject('collection', { parentID: parent.id });
-			let item = await createArticle({ collections: [child.id] });
-			
-			let { collectionKeys } = await call('zotero_trash', { collectionKeys: [child.key, parent.key] });
-			assert.deepEqual(collectionKeys, [parent.key]);
-			assert.isTrue(parent.deleted);
-			assert.isTrue(child.deleted);
-			assert.isFalse(item.deleted);
-			
-			await call('zotero_trash', { collectionKeys: [parent.key], restore: true });
-			assert.isFalse(parent.deleted);
-			assert.isFalse(child.deleted);
-		});
-		
-		it("should trash nothing if the user denies it", async function () {
-			sinon.stub(Permissions, '_ask').resolves('deny');
-			let item = await createArticle();
-			let error = await callForError('zotero_trash', { itemKeys: [item.key] });
-			assert.match(error, /denied/);
-			assert.isFalse(item.deleted);
-		});
-	});
-	
-	describe("zotero_add_items", function () {
-		let lookups;
-		// Lookups of 10.8888/ DOIs wait for it
-		let slowLookups;
-		
-		beforeEach(function () {
-			slowLookups = Promise.withResolvers();
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			Zotero.UndoHistory.clear();
-			// Lookups need the network, so they make an item from the identifier instead
-			lookups = [];
-			sinon.stub(Zotero.Translate.Search.prototype, 'setIdentifier').callsFake(function (identifier) {
-				this._testIdentifier = identifier;
-			});
-			sinon.stub(Zotero.Translate.Search.prototype, 'getTranslators').resolves([]);
-			sinon.stub(Zotero.Translate.Search.prototype, 'translate').callsFake(async function ({ libraryID, collections }) {
-				let identifier = this._testIdentifier;
-				lookups.push(identifier);
-				if (identifier.DOI?.startsWith('10.9999/')) {
-					throw new Error('Not found');
-				}
-				if (identifier.DOI?.startsWith('10.8888/')) {
-					await slowLookups.promise;
-				}
-				let item = createUnsavedDataObject('item', { itemType: 'journalArticle', libraryID, collections: collections || [] });
-				item.setField('title', 'Looked Up');
-				if (identifier.DOI) {
-					item.setField('DOI', identifier.DOI);
-				}
-				await item.saveTx();
-				return [item];
-			});
-		});
-		
-		it("should add items by identifier, in one undo step", async function () {
-			let collection = await createDataObject('collection');
-			let doi = '10.1234/' + Zotero.Utilities.randomString();
-			let existing = await createArticle();
-			existing.setField('DOI', doi);
-			await existing.saveTx();
-			let newDOI = '10.1234/' + Zotero.Utilities.randomString();
-			
-			let { results } = await call('zotero_add_items', {
-				identifiers: [`https://doi.org/${newDOI}`, doi, '10.9999/missing', 'https://example.com/page'],
-				collectionKey: collection.key,
-				findFiles: false,
-			});
-			assert.deepEqual(results.map(result => result.status), ['added', 'added', 'failed', 'failed']);
-			assert.match(results[2].error, /couldn't find DOI 10\.9999\/missing/);
-			assert.match(results[3].error, /Zotero Connector/);
-			// An item already in the library is added again, as when the user adds it
-			assert.deepEqual(lookups, [{ DOI: newDOI }, { DOI: doi }, { DOI: '10.9999/missing' }]);
-			assert.notEqual(results[1].key, existing.key);
-			
-			let added = results.slice(0, 2).map(result => Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.key));
-			assert.deepEqual(added.map(item => item.getField('DOI')), [newDOI, doi]);
-			assert.isTrue(added.every(item => collection.hasItem(item.id)));
-			assert.isFalse(collection.hasItem(existing.id));
-			
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.isTrue(added.every(item => item.deleted));
-			assert.isFalse(existing.deleted);
-		});
-		
-		it("should return lookups still running as pending, and add their items later as another undo step", async function () {
-			let collection = await createDataObject('collection');
-			let slowDOI = '10.8888/' + Zotero.Utilities.randomString();
-			let fastDOI = '10.1234/' + Zotero.Utilities.randomString();
-			let budget = Zotero.MCP.CALL_BUDGET;
-			Zotero.MCP.CALL_BUDGET = 500;
-			let result;
-			try {
-				result = await call('zotero_add_items', {
-					identifiers: [slowDOI, fastDOI],
-					collectionKey: collection.key,
-					findFiles: false,
-				});
-			}
-			finally {
-				Zotero.MCP.CALL_BUDGET = budget;
-			}
-			// The slow lookup didn't hold up the one after it
-			assert.deepEqual(result.results.map(result => [result.input, result.status]), [
-				[slowDOI, 'pending'],
-				[fastDOI, 'added'],
-			]);
-			assert.match(result.notice, /still looking up/);
-			let fast = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.results[1].key);
-			
-			slowLookups.resolve();
-			await waitForCallback(() => Zotero.UndoHistory._undoStack.length == 2);
-			let slow = (await Zotero.Items.getAll(Zotero.Libraries.userLibraryID))
-				.find(item => item.getField('DOI') == slowDOI);
-			assert.isTrue(collection.hasItem(slow.id));
-			
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.isTrue(slow.deleted);
-			assert.isFalse(fast.deleted);
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.isTrue(fast.deleted);
-		});
-		
-		it("should add items from item JSON", async function () {
-			let title = Zotero.Utilities.randomString();
-			let { results } = await call('zotero_add_items', {
-				items: [{
-					itemType: 'report',
-					title: `${title} Report`,
-					creators: [{ creatorType: 'author', name: 'Org' }],
-					institution: 'Inst',
-					key: 'ABCD2345',
-					dateAdded: '2020-01-01T00:00:00Z',
-				}],
-				findFiles: false,
-			});
-			assert.deepEqual(results.map(result => [result.input, result.status, result.itemType, result.title]), [
-				['items[0]', 'added', 'report', `${title} Report`],
-			]);
-			let report = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, results[0].key);
-			assert.notEqual(report.key, 'ABCD2345');
-			assert.equal(report.getField('institution'), 'Inst');
-		});
-		
-		it("should add nothing if item JSON is invalid", async function () {
-			let error = await callForError('zotero_add_items', {
-				identifiers: ['10.1234/abc'],
-				items: [{ itemType: 'book', title: 'A' }, { itemType: 'book', publicationTitle: 'Journal' }],
-			});
-			assert.match(error, /^items\[1\]: Invalid field 'publicationTitle' for type book/);
-			assert.lengthOf(lookups, 0);
-		});
-		
-		it("should say when Zotero found no file, or is still looking", async function () {
-			let search = sinon.stub(Zotero.Attachments, 'addAvailableFiles').resolves();
-			let item = { itemType: 'webpage', title: 'Page', url: 'https://example.com/' + Zotero.Utilities.randomString() };
-			let result = await call('zotero_add_items', { items: [item], findFiles: true });
-			assert.equal(search.firstCall.args[0][0].key, result.results[0].key);
-			assert.equal(result.results[0].fileSearch, 'notFound');
-			assert.deepEqual(result.results[0].attachments, []);
-			assert.notProperty(result.results[0], 'bestAttachment');
-			assert.match(result.notice, /zotero_add_attachment/);
-			
-			// The time the user takes to answer the permission dialog comes out of the call's
-			// budget, so the file search is waited for only for what's left of it
-			let budget = Zotero.MCP.CALL_BUDGET;
-			Zotero.MCP.CALL_BUDGET = 1000;
-			Permissions._ask.callsFake(() => Zotero.Promise.delay(800).then(() => 'allow'));
-			search.returns(new Promise(() => {}));
-			let start = Date.now();
-			try {
-				item.url += '2';
-				result = await call('zotero_add_items', { items: [item], findFiles: true });
-			}
-			finally {
-				Zotero.MCP.CALL_BUDGET = budget;
-			}
-			assert.isBelow(Date.now() - start, 1500);
-			assert.equal(result.results[0].fileSearch, 'pending');
-			assert.match(result.notice, /still looking/);
-		});
-	});
-	
-	describe("zotero_find_fulltext_attachments", function () {
-		beforeEach(function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			Zotero.UndoHistory.clear();
-		});
-		
-		it("should report what it found for each item, and undo the files it added", async function () {
-			let found = await createArticle();
-			found.setField('DOI', '10.1234/' + Zotero.Utilities.randomString());
-			await found.saveTx();
-			let notFound = await createArticle();
-			notFound.setField('url', 'https://example.com/' + Zotero.Utilities.randomString());
-			await notFound.saveTx();
-			let noIdentifier = await createArticle();
-			let attachment;
-			let usersFile;
-			let search = sinon.stub(Zotero.Attachments, 'addAvailableFiles').callsFake(async (items) => {
-				assert.sameMembers(items, [found, notFound]);
-				attachment = await importFileAttachment('test.pdf', { parentID: found.id });
-				// One the user adds meanwhile isn't the search's
-				usersFile = await importFileAttachment('test.pdf', { parentID: notFound.id });
-				return new Map([[found, attachment], [notFound, false]]);
-			});
-			
-			let { results, notice } = await call('zotero_find_fulltext_attachments', {
-				itemKeys: [found.key, notFound.key, noIdentifier.key],
-			});
-			assert.isTrue(search.calledOnce);
-			assert.deepEqual(results.map(result => result.status), ['found', 'notFound', 'skipped']);
-			assert.equal(results[0].attachment.key, attachment.key);
-			assert.match(results[2].reason, /no DOI, URL or PMCID/);
-			assert.match(notice, /zotero_add_attachment/);
-			
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.isTrue(attachment.deleted);
-			assert.isFalse(usersFile.deleted);
-		});
-		
-		it("should say which items it's still searching for at the deadline", async function () {
-			let item = await createArticle();
-			item.setField('DOI', '10.1234/' + Zotero.Utilities.randomString());
-			await item.saveTx();
-			sinon.stub(Zotero.Attachments, 'addAvailableFiles').returns(new Promise(() => {}));
-			let { results, notice } = await withBudget(300, () => call('zotero_find_fulltext_attachments', { itemKeys: [item.key] }));
-			assert.equal(results[0].status, 'pending');
-			assert.match(notice, /still looking/);
-		});
-	});
-	
 	describe("zotero_import", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');
@@ -1982,132 +2108,6 @@ describe("MCP tools", function () {
 		it("should list the formats when it doesn't know one", async function () {
 			let error = await callForError('zotero_export', { format: 'nope', itemKeys: [item.key] });
 			assert.match(error, /Zotero has no export format nope\. Its formats are .*BibTeX/);
-		});
-	});
-	
-	describe("zotero_add_attachment", function () {
-		let parent;
-		
-		beforeEach(async function () {
-			Zotero.UndoHistory.clear();
-			parent = await createArticle();
-		});
-		
-		it("should attach a PDF from a URL", async function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			let { httpd, baseURL } = await startHTTPServer();
-			let prefix = Zotero.Utilities.randomString();
-			let file = getTestDataDirectory();
-			file.append('test.pdf');
-			httpd.registerFile(`/${prefix}/paper.pdf`, file);
-			try {
-				let result = await call('zotero_add_attachment', {
-					parentKey: parent.key,
-					url: `${baseURL}${prefix}/paper.pdf`,
-					title: 'Preprint',
-				});
-				assert.equal(result.status, 'attached');
-				assert.equal(result.contentType, 'application/pdf');
-				assert.equal(result.title, 'Preprint');
-				let attachment = Zotero.Items.getByLibraryAndKey(parent.libraryID, result.key);
-				assert.equal(attachment.parentID, parent.id);
-				assert.isTrue(await attachment.fileExists());
-				
-				assert.isTrue(await Zotero.UndoHistory.undo());
-				assert.isTrue(attachment.deleted);
-			}
-			finally {
-				await new Promise(resolve => httpd.stop(resolve));
-			}
-		});
-		
-		it("should title a download that outlasts the call, and make it an undo step", async function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			let download = Zotero.Promise.defer();
-			sinon.stub(Zotero.Attachments, 'addFileFromURLs').returns(download.promise);
-			let budget = Zotero.MCP.CALL_BUDGET;
-			Zotero.MCP.CALL_BUDGET = 200;
-			let result;
-			try {
-				result = await call('zotero_add_attachment', {
-					parentKey: parent.key,
-					url: 'https://example.com/paper.pdf',
-					title: 'Preprint',
-				});
-			}
-			finally {
-				Zotero.MCP.CALL_BUDGET = budget;
-			}
-			assert.equal(result.status, 'pending');
-			
-			let file = getTestDataDirectory();
-			file.append('test.pdf');
-			let attachment = await Zotero.Attachments.importFromFile({ file, parentItemID: parent.id });
-			download.resolve(attachment);
-			await waitForCallback(() => Zotero.UndoHistory.canUndo());
-			assert.equal(attachment.getField('title'), 'Preprint');
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.isTrue(attachment.deleted);
-		});
-		
-		it("should attach a file from this computer", async function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			let file = getTestDataDirectory();
-			file.append('test.pdf');
-			let result = await call('zotero_add_attachment', { parentKey: parent.key, path: file.path });
-			let attachment = Zotero.Items.getByLibraryAndKey(parent.libraryID, result.key);
-			assert.equal(attachment.parentID, parent.id);
-			assert.isTrue(await attachment.fileExists());
-			
-			let error = await callForError('zotero_add_attachment', { parentKey: parent.key, path: 'test.pdf' });
-			assert.match(error, /isn't an absolute path/);
-			let missing = PathUtils.join(PathUtils.parent(file.path), 'missing.pdf');
-			error = await callForError('zotero_add_attachment', { parentKey: parent.key, path: missing });
-			assert.match(error, /There's no file at/);
-		});
-		
-		it("should add a file without a parent, identify it in a collection, and undo both", async function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			let collection = await createDataObject('collection');
-			let recognized = new Zotero.Item('journalArticle');
-			recognized.setField('title', 'Recognized paper');
-			sinon.stub(Zotero.RecognizeDocument, '_recognize').callsFake(async () => {
-				await recognized.saveTx();
-				return recognized;
-			});
-			let file = getTestDataDirectory();
-			file.append('test.pdf');
-			let result = await call('zotero_add_attachment', { path: file.path, collectionKey: collection.key });
-			assert.isTrue(result.identified);
-			assert.equal(result.parentKey, recognized.key);
-			assert.equal(result.parent.title, 'Recognized paper');
-			let attachment = Zotero.Items.getByLibraryAndKey(recognized.libraryID, result.key);
-			assert.equal(attachment.parentID, recognized.id);
-			assert.isTrue(collection.hasItem(recognized));
-			
-			assert.isTrue(await Zotero.UndoHistory.undo());
-			assert.isTrue(recognized.deleted);
-			assert.isTrue(attachment.deleted);
-		});
-		
-		it("should link a file it can't identify as a standalone attachment", async function () {
-			sinon.stub(Permissions, '_ask').resolves('allow');
-			sinon.stub(Zotero.RecognizeDocument, '_recognize').resolves(false);
-			let file = getTestDataDirectory();
-			file.append('test.pdf');
-			let result = await call('zotero_add_attachment', { path: file.path, linkFile: true });
-			assert.isFalse(result.identified);
-			assert.equal(result.linkMode, 'linked_file');
-			assert.notProperty(result, 'parentKey');
-			assert.match(result.notice, /couldn't identify/);
-			let attachment = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.key);
-			assert.isTrue(attachment.isTopLevelItem());
-			assert.equal(attachment.getFilePath(), file.path);
-			
-			assert.match(
-				await callForError('zotero_add_attachment', { url: 'https://example.com/a.pdf' }),
-				/Give parentKey/
-			);
 		});
 	});
 });

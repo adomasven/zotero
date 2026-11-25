@@ -44,81 +44,15 @@ don't exist, or are in the trash, as missing; a tool that changes things throws 
 */
 
 Zotero.MCP.Tools = new function () {
-	const STYLE_REPOSITORY = 'https://www.zotero.org/styles/';
-	const STYLE_ID_PREFIX = 'http://www.zotero.org/styles/';
-	
-	// Pages zotero_read_text extracts at a time beyond those Zotero indexed
-	const EXTRACT_PAGES = 10;
 	// What untilDeadline() gives when the deadline comes first
 	const TIMED_OUT = Symbol('timedOut');
-	const TEXT_PENDING = "Zotero is still getting the text from the file, so it isn't all here. "
-		+ 'Call zotero_read_text again shortly, from nextPage for a PDF.';
-	const LABELS_PENDING = "Page labels (the page numbers printed on the pages) and the outline "
-		+ "aren't available yet for some files. Zotero is preparing them, so a later call may "
-		+ 'include them.';
-	// Characters of context around a zotero_search_fulltext match, and the longest a passage
-	// of nearby matches grows
-	const PASSAGE_CONTEXT = 200;
-	const MAX_PASSAGE = 1000;
-	const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 	
-	// Most selected items zotero_get_context lists
-	const MAX_CONTEXT_ITEMS = 50;
-	
-	// Most new items zotero_import lists
-	const MAX_LISTED_ITEMS = 50;
-	// Longest export zotero_export returns as text, in characters
-	const MAX_EXPORT_CHARS = 200000;
-	// Annotations Zotero keeps an image of
-	const IMAGE_ANNOTATION_TYPES = ['image', 'ink'];
-	// Most items zotero_export gives the BibTeX citation keys of
-	const MAX_CITATION_KEYS = 500;
-	// The tag colors Zotero's color picker offers (elements/colorPicker.js), by name
-	const TAG_COLORS = {
-		red: '#FF6666',
-		orange: '#FF8C19',
-		gray: '#999999',
-		green: '#5FB236',
-		teal: '#009980',
-		blue: '#2EA8E5',
-		indigo: '#576DD9',
-		purple: '#A28AE5',
-		plum: '#A6507B',
-	};
-	const BIBTEX_TRANSLATOR_ID = '9cb70025-a888-4a29-a210-93ec52da40d4';
-	const BIBLATEX_TRANSLATOR_ID = 'b6e39b57-8942-4d11-8259-342c46ce395f';
 	const LAST_RESORT = 'As a last resort, ask the user to save it with the Zotero Connector from a '
 		+ "browser where they're signed in to the site.";
-	const FILES_NOT_FOUND = "Zotero found no PDF or EPUB for items with fileSearch notFound. Find "
-		+ "one elsewhere (e.g. arXiv, PubMed Central or the author's site) and attach it with "
-		+ 'zotero_add_attachment. ' + LAST_RESORT;
-	const FILES_PENDING = 'Zotero is still looking for files for items with fileSearch pending. '
-		+ 'Call zotero_get_items later to see what it found.';
-	const LOOKUPS_PENDING = 'Zotero is still looking up the identifiers with status pending. It '
-		+ 'adds each item when its lookup finishes, and looks for its file if asked to. To get their '
-		+ 'keys, search for them later with zotero_search in fields mode, by the identifier. If one '
-		+ "doesn't turn up, Zotero couldn't find it: give its metadata as items.";
-	// Identifiers zotero_add_items looks up at a time
-	const LOOKUP_CONCURRENCY = 3;
-	// Properties of item JSON from Zotero (e.g. zotero_get_items) that a new item doesn't take
-	const EXISTING_ITEM_PROPERTIES = new Set([
-		'key',
-		'version',
-		'parentItem',
-		'collections',
-		'relations',
-		'deleted',
-		'inPublications',
-		'dateAdded',
-		'dateModified',
-		'link',
-		'attachments',
-		'notes',
-	]);
 	
-	// Longest a call waits for structured document text (see getStructure()), within its
-	// deadline
-	this._structureWait = 15 * 1000;
+	//
+	// Library and schema -- Zotero itself, and the item types items can have
+	//
 	
 	/**
 	 * Zotero's version, the libraries, and the permissions the app has been granted
@@ -138,6 +72,82 @@ Zotero.MCP.Tools = new function () {
 			permissions: Zotero.MCP.Permissions.getGrants(clientID),
 		});
 	};
+	
+	/**
+	 * The item types an item can be, with their fields and creator types, as the web API's
+	 * /itemTypes, /itemTypeFields and /itemTypeCreatorTypes give them
+	 */
+	this.listItemTypes = async function ({ itemTypes }) {
+		let types = getRegularItemTypes();
+		if (itemTypes?.length) {
+			types = types.filter(type => itemTypes.includes(type.name));
+		}
+		return Zotero.MCP.jsonResult({
+			itemTypes: types.map(({ id, name }) => {
+				let primaryID = Zotero.CreatorTypes.getPrimaryIDForType(id);
+				return {
+					itemType: name,
+					label: Zotero.ItemTypes.getLocalizedString(id),
+					fields: Zotero.ItemFields.getItemTypeFields(id).map((fieldID) => {
+						let baseID = Zotero.ItemFields.getBaseIDFromTypeAndField(id, fieldID);
+						return {
+							field: Zotero.ItemFields.getName(fieldID),
+							label: Zotero.ItemFields.getLocalizedString(fieldID),
+							baseField: baseID && baseID != fieldID ? Zotero.ItemFields.getName(baseID) : undefined,
+						};
+					}),
+					creatorTypes: Zotero.CreatorTypes.getTypesForItemType(id).map(type => ({
+						creatorType: type.name,
+						label: Zotero.CreatorTypes.getLocalizedString(type.id),
+						primary: type.id == primaryID || undefined,
+					})),
+				};
+			}),
+		});
+	};
+	
+	/**
+	 * Item types an item can be created as or changed to: not notes, attachments or annotations
+	 */
+	function getRegularItemTypes() {
+		return Zotero.ItemTypes.getAll()
+			.filter(type => !['note', 'attachment', 'annotation'].includes(type.name));
+	}
+	
+	//
+	// Items -- Regular items: finding, reading, adding, editing, retyping and merging them
+	//
+	
+	const FILES_NOT_FOUND = "Zotero found no PDF or EPUB for items with fileSearch notFound. Find "
+		+ "one elsewhere (e.g. arXiv, PubMed Central or the author's site) and attach it with "
+		+ 'zotero_add_attachment. ' + LAST_RESORT;
+	
+	const FILES_PENDING = 'Zotero is still looking for files for items with fileSearch pending. '
+		+ 'Call zotero_get_items later to see what it found.';
+	
+	const LOOKUPS_PENDING = 'Zotero is still looking up the identifiers with status pending. It '
+		+ 'adds each item when its lookup finishes, and looks for its file if asked to. To get their '
+		+ 'keys, search for them later with zotero_search in fields mode, by the identifier. If one '
+		+ "doesn't turn up, Zotero couldn't find it: give its metadata as items.";
+	
+	// Identifiers zotero_add_items looks up at a time
+	const LOOKUP_CONCURRENCY = 3;
+	
+	// Properties of item JSON from Zotero (e.g. zotero_get_items) that a new item doesn't take
+	const EXISTING_ITEM_PROPERTIES = new Set([
+		'key',
+		'version',
+		'parentItem',
+		'collections',
+		'relations',
+		'deleted',
+		'inPublications',
+		'dateAdded',
+		'dateModified',
+		'link',
+		'attachments',
+		'notes',
+	]);
 	
 	/**
 	 * Search like the main window's search box: the same query syntax and modes, in the
@@ -230,6 +240,481 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * Sets of items Zotero considers duplicates, as its Duplicate Items view shows them
+	 */
+	this.listDuplicates = async function ({ libraryID, limit = 20, offset = 0 }) {
+		libraryID = getLibraryID(libraryID);
+		let sets = await Promise.all(
+			(await new Zotero.Duplicates(libraryID).getSets()).map(ids => Zotero.Items.getAsync(ids))
+		);
+		for (let set of sets) {
+			set.sort((a, b) => (a.dateAdded < b.dateAdded ? -1 : a.dateAdded > b.dateAdded ? 1 : 0));
+		}
+		sets.sort((a, b) => Zotero.localeCompare(a[0].getDisplayTitle(), b[0].getDisplayTitle()));
+		let page = sets.slice(offset, offset + limit);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			total: sets.length,
+			sets: await Promise.all(page.map(set => Promise.all(set.map(async item => ({
+				...await describeItem(item),
+				DOI: item.getField('DOI') || undefined,
+				ISBN: item.getField('ISBN') || undefined,
+				dateAdded: Zotero.Date.sqlToISO8601(item.dateAdded),
+			}))))),
+			nextOffset: offset + limit < sets.length ? offset + limit : undefined,
+		});
+	};
+	
+	/**
+	 * Add items by identifier or from item JSON, and look for their files
+	 *
+	 * Translators save in their own transactions, which can't be nested, so their items are
+	 * made one undo step afterwards, with any JSON items.
+	 *
+	 * Identifiers are looked up a few at a time. Lookups still running at the call's deadline
+	 * can't be stopped, as each saves its items when it finishes, so they're reported as
+	 * pending and go on in the background, where their items become a later undo step.
+	 */
+	this.addItems = async function ({
+		identifiers = [], items: json = [], collectionKey,
+		findFiles = true, libraryID,
+	}, { clientID, deadline }) {
+		libraryID = getLibraryID(libraryID);
+		if (!identifiers.length && !json.length) {
+			throw new Zotero.MCP.ToolError('Give identifiers or items');
+		}
+		let collections = collectionKey ? [getCollection(libraryID, collectionKey).id] : false;
+		
+		// Checked before anything is added
+		let jsonItems = json.map((data, i) => itemFromJSON(libraryID, data, `items[${i}]`));
+		
+		// { input, status, item, error }, or { lookup } in place of a lookup's results
+		let results = [];
+		let lookups = [];
+		for (let input of identifiers) {
+			let found = extractIdentifiers(input);
+			if (!found.length) {
+				results.push({
+					input,
+					status: 'failed',
+					error: 'No DOI, ISBN, arXiv ID or PubMed ID found. Zotero only adds web pages '
+						+ 'through the Zotero Connector. Find an identifier, or give the metadata '
+						+ 'as items.',
+				});
+				continue;
+			}
+			for (let identifier of found) {
+				let lookup = { input, identifier, results: null };
+				lookups.push(lookup);
+				results.push({ lookup });
+			}
+		}
+		let queue = [...lookups];
+		let lookUpNext = async () => {
+			for (let lookup = queue.shift(); lookup; lookup = queue.shift()) {
+				lookup.results = await lookUp(lookup, libraryID, collections);
+			}
+		};
+		let lookedUp = Promise.all(Array.from({ length: LOOKUP_CONCURRENCY }, lookUpNext));
+		await untilDeadline(lookedUp, deadline);
+		let pending = lookups.filter(lookup => !lookup.results);
+		results = results.flatMap(({ lookup, ...result }) => {
+			if (!lookup) {
+				return [result];
+			}
+			return lookup.results ?? [{ input: lookup.input, status: 'pending' }];
+		});
+		// Saved by translators
+		let translated = results.filter(result => result.status == 'added').map(result => result.item);
+		for (let [i, item] of jsonItems.entries()) {
+			results.push({ input: `items[${i}]`, status: 'added', item });
+		}
+		
+		await edit(clientID, async () => {
+			for (let item of translated) {
+				Zotero.UndoHistory.stageCreation(item);
+			}
+			for (let item of jsonItems) {
+				if (collections) {
+					item.setCollections(collections);
+				}
+				await item.save({ skipSelect: true });
+			}
+		});
+		if (pending.length) {
+			lookedUp.then(() => addLookedUpLate(pending, clientID, findFiles)).catch(e => Zotero.logError(e));
+		}
+		
+		// Like Find Full Text, for new items that can have one
+		let searched = new Set();
+		let searching = false;
+		if (findFiles) {
+			let items = [...translated, ...jsonItems].filter(item => Zotero.Attachments.canFindFileForItem(item));
+			items.forEach(item => searched.add(item));
+			if (items.length) {
+				let search = Zotero.Attachments.addAvailableFiles(items).catch(e => Zotero.logError(e));
+				searching = await untilDeadline(search, deadline) === TIMED_OUT;
+			}
+		}
+		
+		let notices = new Set();
+		if (pending.length) {
+			notices.add(LOOKUPS_PENDING);
+		}
+		let output = [];
+		for (let { input, status, item, error } of results) {
+			if (!item) {
+				output.push({ input, status, error });
+				continue;
+			}
+			// All of a new item's attachments, rather than the best one and counts
+			let {
+				bestAttachment: _bestAttachment, attachmentCount: _attachmentCount, noteCount: _noteCount,
+				annotationCount: _annotationCount, ...summary
+			} = await describeItem(item);
+			summary.attachments = Zotero.Items.get(item.getAttachments()).map(attachment => ({
+				key: attachment.key,
+				title: attachment.getField('title'),
+				contentType: attachment.attachmentContentType || undefined,
+			}));
+			if (searched.has(item) && !summary.attachments.length) {
+				summary.fileSearch = searching ? 'pending' : 'notFound';
+				notices.add(searching ? FILES_PENDING : FILES_NOT_FOUND);
+			}
+			output.push({ input, status, ...summary });
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			results: output,
+			notice: notices.size ? [...notices].join(' ') : undefined,
+		});
+	};
+	
+	/**
+	 * Change items' fields, creators, tags and collections, all or none: everything is checked
+	 * before anything changes
+	 */
+	this.updateItems = async function ({ changes, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		let checked = [];
+		for (let change of changes) {
+			let item = await getItem(libraryID, change.key);
+			if (!item.isEditable()) {
+				throw new Zotero.MCP.ToolError(`${item.key} can't be edited`);
+			}
+			for (let field of Object.keys(change.fields ?? {})) {
+				checkField(item, field);
+			}
+			if (change.creators) {
+				checkCreators(item, change.creators);
+			}
+			let tags = [...change.addTags ?? [], ...change.removeTags ?? []];
+			if (tags.some(tag => !tag.trim())) {
+				throw new Zotero.MCP.ToolError('Tags must not be empty');
+			}
+			let addTo = (change.addToCollections ?? []).map(key => getCollection(libraryID, key));
+			let removeFrom = (change.removeFromCollections ?? []).map(key => getCollection(libraryID, key));
+			if ((addTo.length || removeFrom.length) && !item.isTopLevelItem()) {
+				throw new Zotero.MCP.ToolError(
+					`${item.key} is a child item, which is in the collections of its parent item `
+						+ `${item.parentKey}`
+				);
+			}
+			checked.push({ item, change, addTo, removeFrom });
+		}
+		
+		let items = [...new Set(checked.map(({ item }) => item))];
+		await edit(clientID, async () => {
+			for (let { item, change, addTo, removeFrom } of checked) {
+				for (let [field, value] of Object.entries(change.fields ?? {})) {
+					item.setField(field, value);
+				}
+				if (change.creators) {
+					item.setCreators(change.creators, { strict: true });
+				}
+				for (let tag of change.addTags ?? []) {
+					item.addTag(tag.trim());
+				}
+				for (let tag of change.removeTags ?? []) {
+					item.removeTag(tag.trim());
+				}
+				for (let collection of addTo) {
+					item.addToCollection(collection.id);
+				}
+				for (let collection of removeFrom) {
+					item.removeFromCollection(collection.id);
+				}
+				await item.save();
+			}
+		}, items);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			items: await Promise.all(items.map(describeItem)),
+		});
+	};
+	
+	/**
+	 * Change items' types, as the item pane's Item Type menu does, all or none
+	 */
+	this.changeItemTypes = async function ({ changes, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		let items = [];
+		for (let { key } of changes) {
+			let item = await getItem(libraryID, key);
+			if (!item.isEditable()) {
+				throw new Zotero.MCP.ToolError(`${item.key} can't be edited`);
+			}
+			// Zotero.Item.setType() doesn't change notes, attachments or annotations
+			if (!item.isRegularItem()) {
+				throw new Zotero.MCP.ToolError(
+					`${item.key} is ${item.isNote() ? 'a note' : 'an ' + item.itemType}, whose type can't be changed`
+				);
+			}
+			if (items.includes(item)) {
+				throw new Zotero.MCP.ToolError(`${item.key} is in changes more than once`);
+			}
+			items.push(item);
+		}
+		
+		let fieldValues = item => Object.fromEntries(
+			item.getUsedFields(true).map(field => [field, item.getField(field)])
+		);
+		let changed = await edit(clientID, async () => {
+			let changed = [];
+			for (let [i, item] of items.entries()) {
+				let oldItemType = item.itemType;
+				let oldFields = fieldValues(item);
+				let oldCreators = item.getCreators();
+				item.setType(Zotero.ItemTypes.getID(changes[i].itemType));
+				await item.save();
+				
+				// setType() copies values to the new type's fields, by base field and for
+				// book <-> bookSection, so a value that left one field and is now in another moved
+				let newFields = fieldValues(item);
+				let filled = Object.keys(newFields).filter(field => newFields[field] !== oldFields[field]);
+				let movedFields = {};
+				let removedFields = {};
+				for (let [field, value] of Object.entries(oldFields)) {
+					if (newFields[field] === value) {
+						continue;
+					}
+					let to = filled.find(newField => newFields[newField] === value);
+					if (to) {
+						movedFields[field] = to;
+						filled.splice(filled.indexOf(to), 1);
+					}
+					else {
+						removedFields[field] = value;
+					}
+				}
+				let changedCreatorTypes = item.getCreators().flatMap((creator, j) => (
+					creator.creatorTypeID == oldCreators[j].creatorTypeID
+						? []
+						: [{
+							name: [creator.firstName, creator.lastName].filter(Boolean).join(' '),
+							from: Zotero.CreatorTypes.getName(oldCreators[j].creatorTypeID),
+							to: Zotero.CreatorTypes.getName(creator.creatorTypeID),
+						}]
+				));
+				changed.push({ item, oldItemType, movedFields, removedFields, changedCreatorTypes });
+			}
+			return changed;
+		}, items);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			items: await Promise.all(changed.map(async ({ item, ...change }) => ({
+				...await describeItem(item),
+				...change,
+			}))),
+		});
+	};
+	
+	/**
+	 * Merge duplicates as Zotero's merge pane does: the master item gets the others' notes,
+	 * attachments, tags, collections and relations, and the others go to the trash
+	 */
+	this.mergeItems = async function ({ itemKeys, masterKey, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		itemKeys = [...new Set(itemKeys)];
+		if (itemKeys.length < 2) {
+			throw new Zotero.MCP.ToolError('Give at least two items to merge');
+		}
+		let items = [];
+		for (let key of itemKeys) {
+			let item = await getItem(libraryID, key);
+			if (!item.isRegularItem()) {
+				throw new Zotero.MCP.ToolError(
+					`${item.key} is ${item.isNote() ? 'a note' : 'an ' + item.itemType}. Only regular items can be merged.`
+				);
+			}
+			if (!item.isEditable()) {
+				throw new Zotero.MCP.ToolError(`${item.key} can't be changed`);
+			}
+			items.push(item);
+		}
+		if (new Set(items.map(item => item.itemTypeID)).size > 1) {
+			throw new Zotero.MCP.ToolError(
+				'Items of different types can\'t be merged. Change their types with zotero_change_item_types first.'
+			);
+		}
+		// The oldest by default, as in the merge pane
+		let master = masterKey
+			? items.find(item => item.key == masterKey)
+			: items.reduce((oldest, item) => (item.dateAdded < oldest.dateAdded ? item : oldest));
+		if (!master) {
+			throw new Zotero.MCP.ToolError('masterKey must be one of itemKeys');
+		}
+		let others = items.filter(item => item != master);
+		let { mergeItems } = ChromeUtils.importESModule('chrome://zotero/content/mergeItems.mjs');
+		await mergeItems(master, others, {
+			undoAction: 'undo-action-mcp-changes',
+			undoActionArgs: { app: Zotero.MCP.Apps.getDisplayName(clientID) },
+		});
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			key: master.key,
+			trashed: others.map(item => item.key),
+			link: getSelectLink(master),
+		});
+	};
+	
+	/**
+	 * Look up an identifier for zotero_add_items, saving the items found
+	 *
+	 * @return {Promise<Object[]>} Its results, { input, status, item, error }
+	 */
+	async function lookUp({ input, identifier }, libraryID, collections) {
+		try {
+			let translate = new Zotero.Translate.Search();
+			translate.setIdentifier(identifier);
+			translate.setTranslator(await translate.getTranslators());
+			// Files are found afterwards instead, so the call doesn't wait for downloads
+			let items = await translate.translate({ libraryID, collections, saveAttachments: false });
+			if (!items.length) {
+				throw new Error('No items');
+			}
+			return items.map(item => ({ input, status: 'added', item }));
+		}
+		catch (e) {
+			Zotero.debug(e, 2);
+			return [{
+				input,
+				status: 'failed',
+				error: `Zotero couldn't find ${Object.keys(identifier)[0]} `
+					+ `${Object.values(identifier)[0]}. Check it, or give the metadata as items.`,
+			}];
+		}
+	}
+	
+	/**
+	 * Make the items of lookups that finished after zotero_add_items returned one undo step of
+	 * their own, and look for their files
+	 */
+	async function addLookedUpLate(lookups, clientID, findFiles) {
+		let items = lookups.flatMap(lookup => lookup.results)
+			.filter(result => result.status == 'added')
+			.map(result => result.item);
+		if (!items.length) {
+			return;
+		}
+		await edit(clientID, async () => {
+			for (let item of items) {
+				Zotero.UndoHistory.stageCreation(item);
+			}
+		});
+		let findable = findFiles ? items.filter(item => Zotero.Attachments.canFindFileForItem(item)) : [];
+		if (findable.length) {
+			await Zotero.Attachments.addAvailableFiles(findable);
+		}
+	}
+	
+	/**
+	 * A new item from item JSON, checked but not saved
+	 *
+	 * @param {String} input - Where the JSON is in the arguments, for errors
+	 */
+	function itemFromJSON(libraryID, data, input) {
+		let json = { ...data };
+		for (let property of EXISTING_ITEM_PROPERTIES) {
+			delete json[property];
+		}
+		let item = new Zotero.Item();
+		item.libraryID = libraryID;
+		try {
+			item.fromJSON(json, { strict: true });
+		}
+		catch (e) {
+			throw new Zotero.MCP.ToolError(`${input}: ${e.message}`);
+		}
+		return item;
+	}
+	
+	/**
+	 * Identifiers in a string, as in Add Item by Identifier, also from PubMed URLs, whose
+	 * IDs extractIdentifiers() doesn't take after a slash
+	 *
+	 * @return {Object[]} e.g. [{ DOI: '10.1000/xyz' }]
+	 */
+	function extractIdentifiers(text) {
+		text = text.replace(/^https?:\/\/(?:pubmed\.ncbi\.nlm\.nih\.gov|www\.ncbi\.nlm\.nih\.gov\/pubmed)\/(\d+)\/?$/i, '$1');
+		return Zotero.Utilities.extractIdentifiers(text);
+	}
+	
+	function sortItems(items, sort, direction) {
+		let value = {
+			dateModified: item => item.dateModified,
+			dateAdded: item => item.dateAdded,
+			title: item => item.getDisplayTitle(),
+			creator: item => (item.isRegularItem() ? item.getField('firstCreator') : ''),
+			// Multipart dates ("2020-05-00 May 2020") sort by their first part
+			date: item => (item.isRegularItem() ? item.getField('date', true, true).slice(0, 10) : ''),
+		}[sort];
+		let compare = sort == 'title' || sort == 'creator'
+			? (a, b) => Zotero.localeCompare(a, b)
+			: (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+		// Newest first for dates, A to Z otherwise
+		let sign = (direction ?? (sort.startsWith('date') ? 'desc' : 'asc')) == 'desc' ? -1 : 1;
+		let values = new Map(items.map(item => [item, value(item)]));
+		items.sort((a, b) => sign * compare(values.get(a), values.get(b)));
+	}
+	
+	/**
+	 * @throws {Zotero.MCP.ToolError} If a field isn't valid for the item's type
+	 */
+	function checkField(item, field) {
+		let fieldID = Zotero.ItemFields.getID(field);
+		// Base fields (e.g. publicationTitle) stand for the type's own (e.g. bookTitle)
+		fieldID = fieldID && (Zotero.ItemFields.getFieldIDFromTypeAndBase(item.itemTypeID, fieldID) || fieldID);
+		if (!fieldID || !Zotero.ItemFields.isValidForType(fieldID, item.itemTypeID)) {
+			let fields = Zotero.ItemFields.getItemTypeFields(item.itemTypeID)
+				.map(id => Zotero.ItemFields.getName(id));
+			throw new Zotero.MCP.ToolError(
+				`${item.key}: ${field} isn't a field of item type ${item.itemType}. `
+					+ (fields.length ? `Its fields are ${fields.join(', ')}.` : 'It has no fields.')
+			);
+		}
+	}
+	
+	/**
+	 * @throws {Zotero.MCP.ToolError} If a creator type isn't valid for the item's type
+	 */
+	function checkCreators(item, creators) {
+		let types = Zotero.CreatorTypes.getTypesForItemType(item.itemTypeID).map(type => type.name);
+		for (let creator of creators) {
+			if (!types.includes(creator.creatorType)) {
+				throw new Zotero.MCP.ToolError(
+					`${item.key}: ${creator.creatorType} isn't a creator type of item type ${item.itemType}. `
+						+ (types.length ? `Its creator types are ${types.join(', ')}.` : 'It has no creators.')
+				);
+			}
+		}
+	}
+	
+	//
+	// Collections -- The collection tree
+	//
+	
+	/**
 	 * All the library's collections, or all those inside a collection, at every depth
 	 */
 	this.listCollections = async function ({ libraryID, collectionKey, includeSubcollectionItems = false }) {
@@ -258,21 +743,70 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
-	 * Saved searches, with their conditions. Not how many items each finds, which would run
-	 * every saved search.
+	 * Create a collection, or rename or move one
 	 */
-	this.listSavedSearches = async function ({ libraryID }) {
+	this.manageCollections = async function ({ action, collectionKey, name, parentKey, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
-		let searches = Zotero.Searches.getByLibrary(libraryID).filter(search => !search.deleted);
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			savedSearches: searches.map(search => ({
-				key: search.key,
-				name: search.name,
-				conditions: search.toJSON().conditions,
-				link: getSelectLink(search),
-			})),
-		});
+		name = name?.trim();
+		if (action == 'create' && !name) {
+			throw new Zotero.MCP.ToolError('create needs a name');
+		}
+		if (action == 'update' && !name && parentKey === undefined) {
+			throw new Zotero.MCP.ToolError('update needs a name, or a parentKey to move it (null for the top level)');
+		}
+		let collection;
+		if (action == 'create') {
+			collection = new Zotero.Collection({ libraryID });
+		}
+		else if (collectionKey) {
+			collection = getCollection(libraryID, collectionKey);
+		}
+		else {
+			throw new Zotero.MCP.ToolError(`${action} needs a collectionKey`);
+		}
+		let parent = parentKey ? getCollection(libraryID, parentKey) : null;
+		let result;
+		// Checked and changed inside the transaction, so that concurrent calls can't
+		// interleave, e.g. two moves that together put a collection inside itself
+		await edit(clientID, async () => {
+			if (parent && collection.id
+					&& (parent.id == collection.id || collection.hasDescendent('collection', parent.id))) {
+				throw new Zotero.MCP.ToolError(`${collection.key} can't be moved into itself or a subcollection`);
+			}
+			if (name) {
+				collection.name = name;
+			}
+			if (parentKey !== undefined) {
+				collection.parentKey = parent?.key ?? false;
+			}
+			// New collections aren't selected, so as not to disturb the user
+			await collection.save({ skipSelect: true });
+			result = {
+				libraryID,
+				key: collection.key,
+				name: collection.name,
+				parentKey: collection.parentKey || undefined,
+				link: getSelectLink(collection),
+			};
+		}, [collection]);
+		return Zotero.MCP.jsonResult(result);
+	};
+	
+	//
+	// Tags -- Tags across a library
+	//
+	
+	// The tag colors Zotero's color picker offers (elements/colorPicker.js), by name
+	const TAG_COLORS = {
+		red: '#FF6666',
+		orange: '#FF8C19',
+		gray: '#999999',
+		green: '#5FB236',
+		teal: '#009980',
+		blue: '#2EA8E5',
+		indigo: '#576DD9',
+		purple: '#A28AE5',
+		plum: '#A6507B',
 	};
 	
 	/**
@@ -314,37 +848,586 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
-	 * The item types an item can be, with their fields and creator types, as the web API's
-	 * /itemTypes, /itemTypeFields and /itemTypeCreatorTypes give them
+	 * Rename, merge or delete tags across a library, or set a tag's color
+	 *
+	 * Renaming and deleting change each item that has the tag, as one undo step, rather than
+	 * through Zotero.Tags.rename() and removeFromLibrary(), which write to the database
+	 * directly and so can't be undone. Colors are a synced setting, outside the undo history.
 	 */
-	this.listItemTypes = async function ({ itemTypes }) {
-		let types = getRegularItemTypes();
-		if (itemTypes?.length) {
-			types = types.filter(type => itemTypes.includes(type.name));
+	this.manageTags = async function ({ action, tags, newName, color, position, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		let library = Zotero.Libraries.get(libraryID);
+		if (!library.editable) {
+			throw new Zotero.MCP.ToolError(`${library.name} can't be edited`);
 		}
+		tags = [...new Set(tags.map(tag => tag.trim()))];
+		newName = newName?.trim();
+		if (tags.some(tag => !tag) || newName === '') {
+			throw new Zotero.MCP.ToolError('Tags must not be empty');
+		}
+		if ((action == 'rename') != (newName !== undefined)) {
+			throw new Zotero.MCP.ToolError('Give newName to rename, and only then');
+		}
+		let colors = Zotero.Tags.getColors(libraryID);
+		
+		if (action == 'setColor') {
+			let [tag] = tags;
+			if (tags.length != 1) {
+				throw new Zotero.MCP.ToolError('Give one tag to color');
+			}
+			// Without a color, the tag keeps its own, e.g. to move it to another number key
+			if (color === undefined) {
+				color = colors.get(tag)?.color;
+				if (!color) {
+					throw new Zotero.MCP.ToolError(`${tag} has no color. Give color too.`);
+				}
+			}
+			else if (color) {
+				color = TAG_COLORS[color];
+			}
+			if (color && !colors.has(tag) && colors.size >= Zotero.Tags.MAX_COLORED_TAGS) {
+				throw new Zotero.MCP.ToolError(
+					`Only ${Zotero.Tags.MAX_COLORED_TAGS} tags can have colors, one per number key. `
+						+ 'Remove the color of another tag first.'
+				);
+			}
+			await Zotero.Tags.setColor(libraryID, tag, color || false, position && position - 1);
+			let set = Zotero.Tags.getColor(libraryID, tag);
+			return Zotero.MCP.jsonResult({
+				libraryID,
+				action,
+				tag,
+				color: getTagColorName(set?.color),
+				position: set ? set.position + 1 : undefined,
+			});
+		}
+		
+		if (action == 'rename') {
+			tags = tags.filter(tag => tag != newName);
+			if (!tags.length) {
+				throw new Zotero.MCP.ToolError(`The tag is already named ${JSON.stringify(newName)}`);
+			}
+		}
+		let itemIDs = new Set();
+		let missing = [];
+		for (let tag of tags) {
+			let tagID = Zotero.Tags.getID(tag);
+			let ids = tagID ? await Zotero.Tags.getTagItems(libraryID, tagID) : [];
+			if (!ids.length) {
+				missing.push(tag);
+			}
+			ids.forEach(id => itemIDs.add(id));
+		}
+		if (missing.length) {
+			throw new Zotero.MCP.ToolError(
+				`No items in ${library.name} have the tags ${missing.map(tag => JSON.stringify(tag)).join(', ')}. `
+					+ 'Tags match exactly, including case: see zotero_list_tags.'
+			);
+		}
+		let items = await Zotero.Items.getAsync([...itemIDs]);
+		await Zotero.Items.loadDataTypes(items);
+		// A renamed tag keeps its color, as when the user renames it, unless the new name has one
+		let keptColor = action == 'rename' && !colors.has(newName)
+			? tags.map(tag => colors.get(tag)).find(Boolean)
+			: null;
+		await edit(clientID, async () => {
+			for (let item of items) {
+				for (let tag of tags) {
+					if (action == 'rename' && !item.hasTag(newName)) {
+						item.replaceTag(tag, newName);
+					}
+					else {
+						item.removeTag(tag);
+					}
+				}
+				await item.save({ skipSelect: true });
+			}
+			for (let tag of tags) {
+				if (colors.has(tag)) {
+					await Zotero.Tags.setColor(libraryID, tag, false);
+				}
+			}
+			if (keptColor) {
+				await Zotero.Tags.setColor(libraryID, newName, keptColor.color, keptColor.position);
+			}
+		});
+		// Removes the tags no item has anymore
+		Zotero.Prefs.set('purge.tags', true);
 		return Zotero.MCP.jsonResult({
-			itemTypes: types.map(({ id, name }) => {
-				let primaryID = Zotero.CreatorTypes.getPrimaryIDForType(id);
-				return {
-					itemType: name,
-					label: Zotero.ItemTypes.getLocalizedString(id),
-					fields: Zotero.ItemFields.getItemTypeFields(id).map((fieldID) => {
-						let baseID = Zotero.ItemFields.getBaseIDFromTypeAndField(id, fieldID);
-						return {
-							field: Zotero.ItemFields.getName(fieldID),
-							label: Zotero.ItemFields.getLocalizedString(fieldID),
-							baseField: baseID && baseID != fieldID ? Zotero.ItemFields.getName(baseID) : undefined,
-						};
-					}),
-					creatorTypes: Zotero.CreatorTypes.getTypesForItemType(id).map(type => ({
-						creatorType: type.name,
-						label: Zotero.CreatorTypes.getLocalizedString(type.id),
-						primary: type.id == primaryID || undefined,
-					})),
-				};
-			}),
+			libraryID,
+			action,
+			itemCount: items.length,
 		});
 	};
+	
+	/**
+	 * A tag color's name in TAG_COLORS, or its hex value if it isn't one of them, e.g. one
+	 * set by a plugin
+	 */
+	function getTagColorName(hex) {
+		if (!hex) {
+			return undefined;
+		}
+		return Object.keys(TAG_COLORS).find(name => TAG_COLORS[name] == hex.toUpperCase()) ?? hex;
+	}
+	
+	//
+	// Saved searches -- Saved searches and their conditions
+	//
+	
+	/**
+	 * Saved searches, with their conditions. Not how many items each finds, which would run
+	 * every saved search.
+	 */
+	this.listSavedSearches = async function ({ libraryID }) {
+		libraryID = getLibraryID(libraryID);
+		let searches = Zotero.Searches.getByLibrary(libraryID).filter(search => !search.deleted);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			savedSearches: searches.map(search => ({
+				key: search.key,
+				name: search.name,
+				conditions: search.toJSON().conditions,
+				link: getSelectLink(search),
+			})),
+		});
+	};
+	
+	/**
+	 * Create a saved search from a query in zotero_search's syntax, or rename one or change
+	 * its query
+	 */
+	this.manageSavedSearches = async function ({
+		action, savedSearchKey, name, conditions, libraryID,
+	}, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		name = name?.trim();
+		if (action == 'create' ? !name || !conditions?.length : !name && !conditions?.length) {
+			throw new Zotero.MCP.ToolError(
+				action == 'create' ? 'create needs a name and conditions' : 'update needs a name or conditions'
+			);
+		}
+		let search;
+		if (action == 'create') {
+			search = new Zotero.Search({ libraryID });
+		}
+		else {
+			search = savedSearchKey && Zotero.Searches.getByLibraryAndKey(libraryID, savedSearchKey);
+			if (!search || search.deleted) {
+				throw new Zotero.MCP.ToolError(`No saved search ${savedSearchKey} in library ${libraryID}`);
+			}
+		}
+		if (!search.isEditable()) {
+			throw new Zotero.MCP.ToolError(`${search.key} can't be changed`);
+		}
+		let built = conditions?.length && buildSearch(libraryID, conditions).search;
+		await edit(clientID, async () => {
+			search.fromJSON({
+				name: name || search.name,
+				conditions: (built || search).toJSON().conditions,
+			});
+			// Not selected, so as not to disturb the user
+			await search.save({ skipSelect: true });
+		}, [search]);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			key: search.key,
+			name: search.name,
+			conditions: search.toJSON().conditions,
+			itemCount: await countSearchItems(search),
+			link: getSelectLink(search),
+		});
+	};
+	
+	/**
+	 * The items a saved search shows, as in its view: top-level, and not in the trash
+	 */
+	async function countSearchItems(search) {
+		let items = await Zotero.Items.getAsync(await search.search());
+		return Zotero.Items.getTopLevel(items).filter(item => !item.deleted).length;
+	}
+	
+	//
+	// Notes and annotations -- Notes, and the annotations made in the reader
+	//
+	
+	// Annotations Zotero keeps an image of
+	const IMAGE_ANNOTATION_TYPES = ['image', 'ink'];
+	
+	/**
+	 * Notes and annotations, as Markdown or HTML
+	 */
+	this.getNotes = async function ({ itemKeys, format = 'markdown', libraryID }) {
+		libraryID = getLibraryID(libraryID);
+		let notes = new Set();
+		let annotations = new Set();
+		let { items, missing } = await getItemsByKey(libraryID, itemKeys);
+		for (let item of items) {
+			if (item.isNote()) {
+				notes.add(item);
+			}
+			else if (item.isAnnotation()) {
+				annotations.add(item);
+			}
+			else if (item.isRegularItem()) {
+				Zotero.Items.get(item.getNotes()).forEach(note => notes.add(note));
+				for (let attachment of Zotero.Items.get(item.getAttachments())) {
+					if (attachment.isFileAttachment()) {
+						attachment.getAnnotations().forEach(annotation => annotations.add(annotation));
+					}
+				}
+			}
+			else if (item.isFileAttachment()) {
+				item.getAnnotations().forEach(annotation => annotations.add(annotation));
+			}
+		}
+		let noteResults = [];
+		for (let note of notes) {
+			// Embedded images, in the order they're in the note
+			let imageKeys = [...note.getNote().matchAll(/<img\b[^>]*\bdata-attachment-key="([^"]+)"/g)]
+				.map(match => match[1]);
+			let images = [];
+			for (let key of imageKeys) {
+				let image = Zotero.Items.getByLibraryAndKey(note.libraryID, key);
+				let path = image && await image.getFilePathAsync();
+				images.push({ key, path: path || undefined });
+			}
+			noteResults.push({
+				key: note.key,
+				parentKey: note.parentKey || undefined,
+				title: note.getNoteTitle(),
+				tags: note.getTags().map(tag => tag.tag),
+				dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
+				content: format == 'html'
+					? note.getNote()
+					: await noteToMarkdown(note),
+				images: images.length ? images : undefined,
+				link: getSelectLink(note),
+			});
+		}
+		// In the order they're in the file, as in the reader's sidebar
+		let sorted = [...annotations]
+			.sort((a, b) => a.parentID - b.parentID
+				|| (a.annotationSortIndex < b.annotationSortIndex ? -1 : 1));
+		let annotationResults = [];
+		for (let annotation of sorted) {
+			let result = describeAnnotation(annotation);
+			// Only an image already rendered, as rendering means opening the PDF
+			if (IMAGE_ANNOTATION_TYPES.includes(annotation.annotationType)
+					&& await Zotero.Annotations.hasCacheImage(annotation)) {
+				result.imagePath = Zotero.Annotations.getCacheImagePath(annotation);
+			}
+			annotationResults.push(result);
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			notes: noteResults,
+			annotations: annotationResults,
+			missing: missing.length ? missing : undefined,
+		});
+	};
+	
+	/**
+	 * Image files of image and ink annotations, rendering those not rendered yet from their
+	 * PDFs, as the attachment pane does when it shows them
+	 *
+	 * Zotero renders all of a PDF's missing images at once, so asking for one also renders the
+	 * others in its PDF.
+	 */
+	this.renderAnnotationImages = async function ({ itemKeys, libraryID }, { deadline }) {
+		libraryID = getLibraryID(libraryID);
+		let { items: annotations, missing } = await getItemsByKey(libraryID, itemKeys);
+		for (let annotation of annotations) {
+			let { key } = annotation;
+			if (!annotation.isAnnotation() || !IMAGE_ANNOTATION_TYPES.includes(annotation.annotationType)) {
+				throw new Zotero.MCP.ToolError(`${key} isn't an image or ink annotation`);
+			}
+			if (!annotation.parentItem.isPDFAttachment()) {
+				throw new Zotero.MCP.ToolError(`${key} isn't in a PDF, and only PDFs' annotations can be rendered`);
+			}
+		}
+		let attachmentIDs = new Set();
+		for (let annotation of annotations) {
+			if (!await Zotero.Annotations.hasCacheImage(annotation)) {
+				attachmentIDs.add(annotation.parentID);
+			}
+		}
+		let rendering = Promise.all([...attachmentIDs].map(
+			id => Zotero.PDFWorker.renderAttachmentAnnotations(id, true).catch(e => Zotero.logError(e))
+		));
+		let pending = await untilDeadline(rendering, deadline) === TIMED_OUT;
+		let images = [];
+		for (let annotation of annotations) {
+			let rendered = await Zotero.Annotations.hasCacheImage(annotation);
+			images.push({
+				key: annotation.key,
+				path: rendered ? Zotero.Annotations.getCacheImagePath(annotation) : undefined,
+				status: rendered ? 'rendered' : pending ? 'pending' : 'failed',
+			});
+		}
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			images,
+			missing: missing.length ? missing : undefined,
+			notice: [
+				pending && 'Zotero is still rendering the images with status pending. Call again shortly.',
+				images.some(image => image.status == 'failed')
+					&& "Zotero couldn't render the images with status failed, e.g. because the PDF isn't "
+						+ 'on this computer.',
+			].filter(Boolean).join(' ') || undefined,
+		});
+	};
+	
+	/**
+	 * A note from Markdown, under an item, in a collection, or standalone
+	 */
+	this.addNote = async function ({ markdown, parentKey, collectionKey, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		if (!markdown.trim()) {
+			throw new Zotero.MCP.ToolError('The note must not be empty');
+		}
+		if (parentKey && collectionKey) {
+			throw new Zotero.MCP.ToolError(
+				'Give parentKey or collectionKey, not both: a note under an item shows wherever the item is'
+			);
+		}
+		let note = new Zotero.Item('note');
+		note.libraryID = libraryID;
+		if (parentKey) {
+			let parent = await getItem(libraryID, parentKey);
+			if (!parent.isRegularItem()) {
+				throw new Zotero.MCP.ToolError(
+					`${parent.key} is ${parent.isNote() ? 'a note' : 'an ' + parent.itemType}. Notes can `
+						+ "only be added under regular items, such as a journal article."
+				);
+			}
+			note.parentID = parent.id;
+		}
+		if (collectionKey) {
+			note.addToCollection(getCollection(libraryID, collectionKey).id);
+		}
+		note.setNote(markdownToNoteHTML(markdown));
+		// Not selected, so as not to disturb the user
+		await edit(clientID, () => note.save({ skipSelect: true }));
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			key: note.key,
+			parentKey: note.parentKey || undefined,
+			title: note.getNoteTitle(),
+			dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
+			link: getSelectLink(note),
+		});
+	};
+	
+	/**
+	 * Add Markdown to the end of a note, or replace its content
+	 *
+	 * Refuses if the note changed since the model read it, so an edit the user made in the
+	 * meantime isn't lost, and refuses to replace content Markdown can't hold: highlights and
+	 * citations linked to items, and images stored in Zotero.
+	 */
+	this.editNote = async function ({ itemKey, markdown, mode = 'append', dateModified, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		if (!markdown.trim()) {
+			throw new Zotero.MCP.ToolError('The Markdown must not be empty');
+		}
+		let note = await getItem(libraryID, itemKey);
+		if (!note.isNote()) {
+			throw new Zotero.MCP.ToolError(`${note.key} isn't a note`);
+		}
+		if (!note.isEditable()) {
+			throw new Zotero.MCP.ToolError(`${note.key} can't be edited`);
+		}
+		if (Zotero.Date.sqlToISO8601(note.dateModified) != dateModified) {
+			throw new Zotero.MCP.ToolError(
+				`The note has changed since ${dateModified}, maybe because the user edited it. `
+					+ 'Get it again with zotero_get_notes, then make the edit to what it is now.'
+			);
+		}
+		let html = markdownToNoteHTML(markdown);
+		if (mode == 'replace') {
+			if (/\sdata-(annotation|citation|attachment-key)=/.test(note.getNote())) {
+				throw new Zotero.MCP.ToolError(
+					"The note has highlights, citations or images that Markdown can't hold, which "
+						+ 'replacing it would lose. Append to it instead, or ask the user to make the change.'
+				);
+			}
+		}
+		else {
+			// Inside the note's own wrapper, which carries its schema version and citation data
+			let [, wrapper, content] = note.getNote()
+				.match(/^\s*(<div\b[^>]*\bdata-schema-version="[^"]*"[^>]*>)([\s\S]*)<\/div>\s*$/)
+				?? [null, '<div data-schema-version="9">', note.getNote()];
+			html = wrapper + content + html.replace(/^<div[^>]*>|<\/div>$/g, '') + '</div>';
+		}
+		await edit(clientID, () => {
+			note.setNote(html);
+			return note.save({ skipSelect: true });
+		}, [note]);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			key: note.key,
+			parentKey: note.parentKey || undefined,
+			title: note.getNoteTitle(),
+			dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
+			link: getSelectLink(note),
+		});
+	};
+	
+	async function noteToMarkdown(note) {
+		let markdown = await new Promise((resolve, reject) => {
+			let translation = new Zotero.Translate.Export();
+			translation.setItems([note]);
+			translation.setTranslator(Zotero.Translators.TRANSLATOR_ID_NOTE_MARKDOWN);
+			translation.setHandler('done', () => resolve(translation.string));
+			translation.setHandler('error', (_, error) => reject(error));
+			translation.translate();
+		});
+		return markdown.replace(/\r\n/g, '\n').trim();
+	}
+	
+	let _markdownIt;
+	
+	/**
+	 * Note HTML from Markdown, as the note editor makes from pasted Markdown (CommonMark with
+	 * tables, strikethrough and TeX math, and no raw HTML), and with bare URLs made links
+	 */
+	function markdownToNoteHTML(markdown) {
+		if (!_markdownIt) {
+			// The note editor's configuration (note-editor/src/core/plugins/markdown-parser.js),
+			// plus the linkify rule, which the commonmark preset leaves off even with
+			// linkify: true
+			_markdownIt = require('markdown-it')('commonmark', { html: false, linkify: true, breaks: false })
+				.enable(['table', 'strikethrough', 'linkify']);
+			addMath(_markdownIt);
+			// Notes only show images stored in Zotero, so other images become links
+			_markdownIt.renderer.rules.image = (tokens, i, options, env, self) => {
+				let src = _markdownIt.utils.escapeHtml(tokens[i].attrGet('src'));
+				let alt = self.renderInlineAsText(tokens[i].children, options, env);
+				return `<a href="${src}">${_markdownIt.utils.escapeHtml(alt) || src}</a>`;
+			};
+		}
+		return `<div data-schema-version="9">${_markdownIt.render(markdown)}</div>`;
+	}
+	
+	/**
+	 * TeX math as the note editor stores it: <span class="math">$…$</span> and
+	 * <pre class="math">$$…$$</pre>
+	 *
+	 * The same rules as when Markdown is pasted into a note, copied from the note editor
+	 * (note-editor/src/core/plugins/markdown-parser.js), so a note reads the same either way:
+	 * dollar signs become math only around content that looks like math (a TeX command,
+	 * braces or an operator), and display math is fenced by lines of just $$.
+	 */
+	function addMath(md) {
+		let { escapeHtml } = md.utils;
+		
+		function isMathish(content) {
+			let text = String(content).trim();
+			if (!text) return false;
+			// Ignore trivial numeric values (helps with currency like "$20")
+			if (/^\d+(?:[.,]\d+)?$/.test(text)) return false;
+			let hasCommand = /\\[a-zA-Z]+/.test(text);
+			// Leading +/- of a number isn't an operator
+			let sanitized = text.replace(/(^|\s)[+-](?=\d)/g, ' ');
+			let hasOperator = /[+\-*/=^_]/.test(sanitized);
+			let open = (text.match(/{/g) || []).length;
+			let close = (text.match(/}/g) || []).length;
+			if ((open || close) && open !== close) return false;
+			return hasCommand || open > 0 || hasOperator;
+		}
+		
+		md.inline.ruler.after('escape', 'math_inline', (state, silent) => {
+			let start = state.pos;
+			if (state.src[start] !== '$' || state.src[start + 1] === '$') return false;
+			// Avoid matching inside code spans
+			if (state.tokens && state.tokens.some(t => t.type === 'code_inline')) return false;
+			let pos = start + 1;
+			let found = false;
+			while (pos < state.posMax) {
+				if (state.src[pos] === '$') {
+					// An odd number of backslashes escapes it
+					let backslashes = 0;
+					for (let prev = pos - 1; prev >= 0 && state.src[prev] === '\\'; prev--) {
+						backslashes++;
+					}
+					if (backslashes % 2 === 0) {
+						found = true;
+						break;
+					}
+				}
+				pos++;
+			}
+			if (!found) return false;
+			let content = state.src.slice(start + 1, pos);
+			if (!content || /^\s+$/.test(content) || !isMathish(content)) return false;
+			if (!silent) {
+				state.push('math_inline', '', 0).content = content;
+			}
+			state.pos = pos + 1;
+			return true;
+		});
+		
+		md.block.ruler.after('fence', 'math_block', (state, startLine, endLine, silent) => {
+			// A line of $$ and nothing else but spaces and tabs
+			let isFence = (line) => {
+				let start = state.bMarks[line] + state.tShift[line];
+				return /^\$\$[ \t]*$/.test(state.src.slice(start, state.eMarks[line]));
+			};
+			if (!isFence(startLine)) return false;
+			let contentStart = state.bMarks[startLine] + state.tShift[startLine] + 2;
+			let nextLine = startLine;
+			let contentEnd;
+			while (true) {
+				nextLine++;
+				if (nextLine >= endLine) return false;
+				if (isFence(nextLine)) {
+					contentEnd = state.bMarks[nextLine];
+					break;
+				}
+			}
+			if (silent) return true;
+			let content = state.src.slice(contentStart, contentEnd).replace(/^\s*\n?|\n?\s*$/g, '');
+			if (!isMathish(content)) return false;
+			state.line = nextLine + 1;
+			let token = state.push('math_block', '', 0);
+			token.block = true;
+			token.map = [startLine, nextLine + 1];
+			token.content = content;
+			return true;
+		});
+		
+		// eslint-disable-next-line camelcase
+		md.renderer.rules.math_inline = (tokens, i) => `<span class="math">$${escapeHtml(tokens[i].content)}$</span>`;
+		// eslint-disable-next-line camelcase
+		md.renderer.rules.math_block = (tokens, i) => `<pre class="math">$$${escapeHtml(tokens[i].content)}$$</pre>\n`;
+	}
+	
+	//
+	// Files and full text -- Attachments: the text of their files, and getting files for items
+	//
+	
+	// Pages zotero_read_text extracts at a time beyond those Zotero indexed
+	const EXTRACT_PAGES = 10;
+	
+	const TEXT_PENDING = "Zotero is still getting the text from the file, so it isn't all here. "
+		+ 'Call zotero_read_text again shortly, from nextPage for a PDF.';
+	
+	const LABELS_PENDING = "Page labels (the page numbers printed on the pages) and the outline "
+		+ "aren't available yet for some files. Zotero is preparing them, so a later call may "
+		+ 'include them.';
+	
+	// Characters of context around a zotero_search_fulltext match, and the longest a passage
+	// of nearby matches grows
+	const PASSAGE_CONTEXT = 200;
+	
+	const MAX_PASSAGE = 1000;
+	
+	const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+	
+	// Longest a call waits for structured document text (see getStructure()), within its
+	// deadline
+	this._structureWait = 15 * 1000;
 	
 	/**
 	 * Where words or phrases occur in the full text of attachments, with the passage around
@@ -584,128 +1667,591 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
-	 * Notes and annotations, as Markdown or HTML
+	 * Find Full Text for existing items, as the item menu does, with what it found for each
+	 *
+	 * The files found become one undo step once the search ends, which can be after the
+	 * call's deadline.
 	 */
-	this.getNotes = async function ({ itemKeys, format = 'markdown', libraryID }) {
+	this.findFulltextAttachments = async function ({ itemKeys, libraryID }, { clientID, deadline }) {
 		libraryID = getLibraryID(libraryID);
-		let notes = new Set();
-		let annotations = new Set();
-		let { items, missing } = await getItemsByKey(libraryID, itemKeys);
-		for (let item of items) {
-			if (item.isNote()) {
-				notes.add(item);
+		let library = Zotero.Libraries.get(libraryID);
+		if (!library.editable || !library.filesEditable) {
+			throw new Zotero.MCP.ToolError(`Files can't be added to ${library.name}`);
+		}
+		let items = [];
+		for (let key of new Set(itemKeys)) {
+			items.push(await getItem(libraryID, key));
+		}
+		let eligible = new Set(items.filter(item => Zotero.Attachments.canFindFileForItem(item)));
+		// The attachment found for each item, once the search ends
+		let found = new Map();
+		let finding = (async () => {
+			if (!eligible.size) {
+				return;
 			}
-			else if (item.isAnnotation()) {
-				annotations.add(item);
-			}
-			else if (item.isRegularItem()) {
-				Zotero.Items.get(item.getNotes()).forEach(note => notes.add(note));
-				for (let attachment of Zotero.Items.get(item.getAttachments())) {
-					if (attachment.isFileAttachment()) {
-						attachment.getAnnotations().forEach(annotation => annotations.add(annotation));
+			found = await Zotero.Attachments.addAvailableFiles([...eligible]);
+			let attachments = [...found.values()].filter(Boolean);
+			if (attachments.length) {
+				await edit(clientID, async () => {
+					for (let attachment of attachments) {
+						Zotero.UndoHistory.stageCreation(attachment);
 					}
-				}
+				});
 			}
-			else if (item.isFileAttachment()) {
-				item.getAnnotations().forEach(annotation => annotations.add(annotation));
+		})();
+		finding.catch(e => Zotero.logError(e));
+		let searching = await untilDeadline(finding, deadline) === TIMED_OUT;
+		let results = await Promise.all(items.map(async (item) => {
+			let result = { key: item.key, title: item.getDisplayTitle() };
+			if (!eligible.has(item)) {
+				result.status = 'skipped';
+				result.reason = !item.isRegularItem()
+					? 'Only regular items, such as a journal article, can have files found'
+					: Zotero.Attachments.FIND_AVAILABLE_FILE_TYPES
+						.some(type => item.numFileAttachmentsWithContentType(type))
+						? 'It already has a PDF or EPUB'
+						: 'It has no DOI, URL or PMCID to look for a file by';
+				return result;
 			}
-		}
-		let noteResults = [];
-		for (let note of notes) {
-			// Embedded images, in the order they're in the note
-			let imageKeys = [...note.getNote().matchAll(/<img\b[^>]*\bdata-attachment-key="([^"]+)"/g)]
-				.map(match => match[1]);
-			let images = [];
-			for (let key of imageKeys) {
-				let image = Zotero.Items.getByLibraryAndKey(note.libraryID, key);
-				let path = image && await image.getFilePathAsync();
-				images.push({ key, path: path || undefined });
+			let attachment = found.get(item);
+			if (attachment) {
+				result.status = 'found';
+				result.attachment = await describeAttachment(attachment);
 			}
-			noteResults.push({
-				key: note.key,
-				parentKey: note.parentKey || undefined,
-				title: note.getNoteTitle(),
-				tags: note.getTags().map(tag => tag.tag),
-				dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
-				content: format == 'html'
-					? note.getNote()
-					: await noteToMarkdown(note),
-				images: images.length ? images : undefined,
-				link: getSelectLink(note),
-			});
-		}
-		// In the order they're in the file, as in the reader's sidebar
-		let sorted = [...annotations]
-			.sort((a, b) => a.parentID - b.parentID
-				|| (a.annotationSortIndex < b.annotationSortIndex ? -1 : 1));
-		let annotationResults = [];
-		for (let annotation of sorted) {
-			let result = describeAnnotation(annotation);
-			// Only an image already rendered, as rendering means opening the PDF
-			if (IMAGE_ANNOTATION_TYPES.includes(annotation.annotationType)
-					&& await Zotero.Annotations.hasCacheImage(annotation)) {
-				result.imagePath = Zotero.Annotations.getCacheImagePath(annotation);
+			else {
+				result.status = searching ? 'pending' : 'notFound';
 			}
-			annotationResults.push(result);
-		}
+			return result;
+		}));
 		return Zotero.MCP.jsonResult({
 			libraryID,
-			notes: noteResults,
-			annotations: annotationResults,
-			missing: missing.length ? missing : undefined,
+			results,
+			notice: [
+				searching && 'Zotero is still looking for files for the items with status pending. '
+					+ 'Call zotero_get_items on them later to see whether it found one.',
+				results.some(result => result.status == 'notFound')
+					&& "Zotero found no PDF or EPUB for items with status notFound. Find one elsewhere "
+						+ "(e.g. arXiv, PubMed Central or the author's site) and attach it with "
+						+ 'zotero_add_attachment. ' + LAST_RESORT,
+			].filter(Boolean).join(' ') || undefined,
 		});
 	};
 	
 	/**
-	 * Image files of image and ink annotations, rendering those not rendered yet from their
-	 * PDFs, as the attachment pane does when it shows them
-	 *
-	 * Zotero renders all of a PDF's missing images at once, so asking for one also renders the
-	 * others in its PDF.
+	 * Attach a file to an item from a URL or this computer, or add a file from this computer
+	 * as a standalone attachment, which Zotero identifies as with Retrieve Metadata
 	 */
-	this.renderAnnotationImages = async function ({ itemKeys, libraryID }, { deadline }) {
+	this.addAttachment = async function ({
+		parentKey, url, path, linkFile = false, title, collectionKey, libraryID,
+	}, { clientID, deadline }) {
 		libraryID = getLibraryID(libraryID);
-		let { items: annotations, missing } = await getItemsByKey(libraryID, itemKeys);
-		for (let annotation of annotations) {
-			let { key } = annotation;
-			if (!annotation.isAnnotation() || !IMAGE_ANNOTATION_TYPES.includes(annotation.annotationType)) {
-				throw new Zotero.MCP.ToolError(`${key} isn't an image or ink annotation`);
-			}
-			if (!annotation.parentItem.isPDFAttachment()) {
-				throw new Zotero.MCP.ToolError(`${key} isn't in a PDF, and only PDFs' annotations can be rendered`);
-			}
+		let library = Zotero.Libraries.get(libraryID);
+		if (!library.editable || !library.filesEditable) {
+			throw new Zotero.MCP.ToolError(`Files can't be added to ${library.name}`);
 		}
-		let attachmentIDs = new Set();
-		for (let annotation of annotations) {
-			if (!await Zotero.Annotations.hasCacheImage(annotation)) {
-				attachmentIDs.add(annotation.parentID);
-			}
+		if (!url == !path) {
+			throw new Zotero.MCP.ToolError('Give url or path');
 		}
-		let rendering = Promise.all([...attachmentIDs].map(
-			id => Zotero.PDFWorker.renderAttachmentAnnotations(id, true).catch(e => Zotero.logError(e))
-		));
-		let pending = await untilDeadline(rendering, deadline) === TIMED_OUT;
-		let images = [];
-		for (let annotation of annotations) {
-			let rendered = await Zotero.Annotations.hasCacheImage(annotation);
-			images.push({
-				key: annotation.key,
-				path: rendered ? Zotero.Annotations.getCacheImagePath(annotation) : undefined,
-				status: rendered ? 'rendered' : pending ? 'pending' : 'failed',
+		if (url && linkFile) {
+			throw new Zotero.MCP.ToolError('Only a file from path can be linked');
+		}
+		if (linkFile && library.libraryType != 'user') {
+			throw new Zotero.MCP.ToolError('Files can be linked only in My Library');
+		}
+		if (!parentKey) {
+			if (url) {
+				throw new Zotero.MCP.ToolError('Give parentKey to attach a file from a URL');
+			}
+			return addStandaloneFile({ path, linkFile, title, collectionKey, libraryID }, { clientID, deadline });
+		}
+		if (collectionKey) {
+			throw new Zotero.MCP.ToolError("Give collectionKey only without parentKey. A file is in its parent's collections.");
+		}
+		let parent = await getItem(libraryID, parentKey);
+		if (!parent.isRegularItem()) {
+			throw new Zotero.MCP.ToolError(
+				`${parent.key} is ${parent.isNote() ? 'a note' : 'an ' + parent.itemType}. Files can only `
+					+ 'be attached to regular items, such as a journal article.'
+			);
+		}
+		// Makes the new attachment an undo step
+		let finish = async (attachment) => {
+			await edit(clientID, async () => {
+				Zotero.UndoHistory.stageCreation(attachment);
+				// The title of a downloaded file comes from where it was found, e.g. "Full Text PDF"
+				if (title) {
+					attachment.setField('title', title);
+					await attachment.save();
+				}
 			});
+			return attachment;
+		};
+		let attachment;
+		if (url) {
+			if (!/^https?:\/\//i.test(url)) {
+				throw new Zotero.MCP.ToolError('Only http and https URLs can be attached');
+			}
+			// A link to the file, or a page that links to it, as Find Full Text follows
+			let download = Zotero.Attachments.addFileFromURLs(parent, [{ pageURL: url }])
+				.catch((e) => {
+					Zotero.debug(e, 2);
+					return false;
+				})
+				// Finished also when the download outlasts the call
+				.then(attachment => attachment && finish(attachment));
+			attachment = await untilDeadline(download, deadline);
+			if (attachment === TIMED_OUT) {
+				return Zotero.MCP.jsonResult({
+					libraryID,
+					parentKey: parent.key,
+					status: 'pending',
+					notice: 'Zotero is still downloading the file. Call zotero_get_items on the '
+						+ 'parent item later to see whether it was attached.',
+				});
+			}
+			if (!attachment) {
+				throw new Zotero.MCP.ToolError(
+					`Zotero couldn't get a PDF or EPUB from ${url}: it isn't a link to one, the `
+						+ "page doesn't link to one Zotero recognizes, or the site requires signing in "
+						+ 'or blocks automated downloads. Try a direct link to the file. ' + LAST_RESORT
+				);
+			}
+		}
+		else {
+			let info = await statPath(path);
+			if (info?.type != 'regular') {
+				throw new Zotero.MCP.ToolError(`There's no file at ${path} on this computer.`);
+			}
+			if (linkFile) {
+				attachment = await finish(await Zotero.Attachments.linkFromFile({
+					file: path,
+					parentItemID: parent.id,
+					saveOptions: { skipSelect: true },
+				}));
+			}
+			else {
+				// Renamed as when the user adds the item's first file (ZoteroPane.addAttachmentFromDialog())
+				let fileBaseName;
+				if (Zotero.Attachments.shouldAutoRenameFile(false, libraryID) && !parent.numNonHTMLFileAttachments()) {
+					fileBaseName = await Zotero.Attachments.getRenamedFileBaseNameIfAllowedType(parent, path);
+				}
+				attachment = await finish(await Zotero.Attachments.importFromFile({
+					file: path,
+					parentItemID: parent.id,
+					fileBaseName,
+					saveOptions: { skipSelect: true },
+				}));
+			}
 		}
 		return Zotero.MCP.jsonResult({
 			libraryID,
-			images,
-			missing: missing.length ? missing : undefined,
-			notice: [
-				pending && 'Zotero is still rendering the images with status pending. Call again shortly.',
-				images.some(image => image.status == 'failed')
-					&& "Zotero couldn't render the images with status failed, e.g. because the PDF isn't "
-						+ 'on this computer.',
-			].filter(Boolean).join(' ') || undefined,
+			parentKey: parent.key,
+			status: 'attached',
+			...await describeAttachment(attachment),
+			link: getOpenLink(attachment),
 		});
 	};
+	
+	/**
+	 * Add a file as a standalone attachment and identify it, creating its parent item from the
+	 * metadata found, as when the user adds a PDF or EPUB on its own
+	 *
+	 * The file and its new parent become one undo step once identifying ends, which can be
+	 * after the call's deadline.
+	 */
+	async function addStandaloneFile({ path, linkFile, title, collectionKey, libraryID }, { clientID, deadline }) {
+		let collection = collectionKey ? getCollection(libraryID, collectionKey) : null;
+		let info = await statPath(path);
+		if (info?.type != 'regular') {
+			throw new Zotero.MCP.ToolError(`There's no file at ${path} on this computer.`);
+		}
+		let options = {
+			file: path,
+			libraryID,
+			collections: collection ? [collection.id] : undefined,
+			saveOptions: { skipSelect: true },
+		};
+		let attachment = linkFile
+			? await Zotero.Attachments.linkFromFile(options)
+			: await Zotero.Attachments.importFromFile(options);
+		let identifying = (async () => {
+			if (Zotero.RecognizeDocument.canRecognize(attachment)) {
+				await Zotero.RecognizeDocument.recognizeItems([attachment]);
+			}
+			let parent = attachment.parentItem;
+			await edit(clientID, async () => {
+				if (parent) {
+					Zotero.UndoHistory.stageCreation(parent);
+				}
+				Zotero.UndoHistory.stageCreation(attachment);
+				if (title) {
+					attachment.setField('title', title);
+					await attachment.save();
+				}
+			});
+			return parent || false;
+		})();
+		let parent = await untilDeadline(identifying, deadline);
+		let result = {
+			libraryID,
+			status: 'attached',
+			...await describeAttachment(attachment),
+			link: getOpenLink(attachment),
+		};
+		if (parent === TIMED_OUT) {
+			result.notice = 'Zotero is still identifying the file. Call zotero_get_items on the '
+				+ 'attachment later to see whether it has a parent item.';
+		}
+		else if (parent) {
+			result.identified = true;
+			result.parent = await describeItem(parent);
+			result.parentKey = parent.key;
+		}
+		else {
+			result.identified = false;
+			result.notice = Zotero.RecognizeDocument.canRecognize(attachment)
+				? "Zotero couldn't identify the file, so it's a standalone attachment. If you know "
+					+ 'what it is, add the item with zotero_add_items and attach the file to it.'
+				: 'Zotero identifies only PDFs and EPUBs, so the file is a standalone attachment.';
+		}
+		return Zotero.MCP.jsonResult(result);
+	}
+	
+	/**
+	 * The attachments of the items given by keys or in a collection, with ids null for the whole
+	 * library, and the keys with no item
+	 *
+	 * @return {Promise<Object>} { ids, missing }
+	 */
+	async function getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems }) {
+		if (itemKeys && collectionKey) {
+			throw new Zotero.MCP.ToolError('Give itemKeys or collectionKey, not both');
+		}
+		let items = [];
+		let missing = [];
+		if (itemKeys) {
+			({ items, missing } = await getItemsByKey(libraryID, itemKeys));
+		}
+		else if (collectionKey) {
+			let collection = getCollection(libraryID, collectionKey);
+			let collections = [collection];
+			if (includeSubcollectionItems) {
+				collections.push(...Zotero.Collections.get(
+					collection.getDescendents(false, 'collection').map(descendant => descendant.id)
+				));
+			}
+			for (let collection of collections) {
+				items.push(...collection.getChildItems());
+			}
+		}
+		else {
+			return { ids: null, missing };
+		}
+		let ids = new Set();
+		for (let item of items) {
+			if (item.isRegularItem()) {
+				item.getAttachments().forEach(id => ids.add(id));
+			}
+			else if (item.isAttachment()) {
+				ids.add(item.id);
+			}
+		}
+		return { ids: [...ids], missing };
+	}
+	
+	/**
+	 * A file attachment Zotero can get text from, or the best one of a parent item
+	 */
+	async function getTextAttachment(libraryID, key) {
+		let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
+		if (!item || item.deleted) {
+			throw new Zotero.MCP.ToolError(`No item ${key} in library ${libraryID}`);
+		}
+		if (item.isRegularItem()) {
+			item = await item.getBestAttachment();
+			if (!item) {
+				throw new Zotero.MCP.ToolError(`${key} has no PDF, EPUB, snapshot or other file`);
+			}
+		}
+		if (!Zotero.FullText.canIndex(item)) {
+			throw new Zotero.MCP.ToolError(
+				`${item.key} isn't a file Zotero can get text from: only PDFs, EPUBs, web page `
+					+ 'snapshots and text files'
+			);
+		}
+		return item;
+	}
+	
+	/**
+	 * The text Zotero extracted from an attachment for its full-text index (indexing it now if
+	 * it hasn't been), or a text file's contents
+	 *
+	 * @param {Number} deadline - Date.now() time to stop waiting for indexing at
+	 * @return {Promise<String|null|Symbol>} Null if there's no text, or the file is missing;
+	 *     TIMED_OUT if indexing didn't finish by the deadline
+	 */
+	async function getIndexedText(attachment, deadline) {
+		if (!Zotero.FullText.isCachedMIMEType(attachment.attachmentContentType)) {
+			let path = await attachment.getFilePathAsync();
+			return path ? Zotero.File.getContentsAsync(path, attachment.attachmentCharset) : null;
+		}
+		let path = Zotero.FullText.getItemCacheFile(attachment).path;
+		if (!await IOUtils.exists(path) && await attachment.fileExists()
+				&& await untilDeadline(Zotero.FullText.indexItems([attachment.id]), deadline) === TIMED_OUT) {
+			return TIMED_OUT;
+		}
+		return await IOUtils.exists(path) ? Zotero.File.getContentsAsync(path) : null;
+	}
+	
+	/**
+	 * Text of PDF pages, from the file
+	 *
+	 * @param {Integer[]} pageIndexes - Consecutive
+	 * @param {Number} deadline - Date.now() time to stop waiting at
+	 * @return {Promise<Object|Symbol>} { texts, totalPages }, with texts in the order of
+	 *     pageIndexes, or TIMED_OUT
+	 */
+	async function extractPages(attachment, pageIndexes, deadline) {
+		let result = await untilDeadline(Zotero.PDFWorker.getFullText(attachment.id, pageIndexes, true), deadline);
+		if (result === TIMED_OUT) {
+			return result;
+		}
+		return { texts: result.text.split('\f'), totalPages: result.totalPages };
+	}
+	
+	/**
+	 * A PDF's page labels (the page numbers printed on its pages) and outline, from its
+	 * structured document text (see sdt.js)
+	 *
+	 * The text itself comes from the full-text index, which works even when only text synced
+	 * from another computer is here; structured document text is only for what the index
+	 * doesn't have. Like Read Aloud, it's generated if it isn't cached, at the front of the PDF
+	 * worker's queue. That takes about 25 ms a page, but the worker runs one job at a time,
+	 * and the call has to finish by its deadline, so it's waited for only until the deadline.
+	 * Generation goes on after that, so a later call has it.
+	 *
+	 * @param {Number} deadline - Date.now() time to stop waiting at
+	 * @return {Promise<Object|null>} { labels, outline }, { pending: true } if it wasn't ready
+	 *     by the deadline, or null if there's none (e.g., a password-protected PDF)
+	 */
+	async function getStructure(attachment, deadline) {
+		let reader = Zotero.SDT.getReader(attachment.id, { isPriority: true });
+		let timeout = Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => 'timeout');
+		let result = await Promise.race([reader, timeout]);
+		if (result == 'timeout') {
+			// getPack() logs its own errors
+			reader.catch(() => {});
+			return { pending: true };
+		}
+		if (!result) {
+			return null;
+		}
+		let { pages = [], outline = [] } = await result.getCatalog();
+		let getOutline = entries => entries.map((entry) => {
+			let pageIndex = entry.target?.position?.pageIndex;
+			return {
+				title: entry.title,
+				page: Number.isInteger(pageIndex) ? pageIndex + 1 : undefined,
+				children: entry.children?.length ? getOutline(entry.children) : undefined,
+			};
+		});
+		return {
+			labels: pages.map(page => page.label),
+			outline: getOutline(outline),
+		};
+	}
+	
+	/**
+	 * A RegExp for a search term in text normalized with normalizeWithOffsets(), matching as
+	 * Zotero.FullText.findItemsWithContent() does: ignoring case and diacritics, with any
+	 * whitespace and hyphens between words, from the start of a word except in CJK text
+	 */
+	function getTermRegExp(term) {
+		let pattern = Zotero.Utilities.Internal.normalizeForSearch(term)
+			.split(/[\s-]+/)
+			.filter(Boolean)
+			.map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+			.join('[\\s-]+');
+		if (!pattern) {
+			return null;
+		}
+		if (/^[\p{L}\p{N}]/u.test(pattern) && !CJK_RE.test(pattern)) {
+			pattern = '(?<![\\p{L}\\p{N}])' + pattern;
+		}
+		return new RegExp(pattern, 'gu');
+	}
+	
+	/**
+	 * Text normalized with normalizeForSearch(), and for each character of it, the offset in
+	 * the text of the character it came from, so a match can be cut from the original text
+	 */
+	function normalizeWithOffsets(text) {
+		let pieces = [];
+		let offsets = [];
+		let offset = 0;
+		for (let char of text) {
+			let piece = char.charCodeAt(0) < 0x80
+				? char.toLowerCase()
+				: Zotero.Utilities.Internal.normalizeForSearch(char);
+			pieces.push(piece);
+			for (let i = 0; i < piece.length; i++) {
+				offsets.push(offset);
+			}
+			offset += char.length;
+		}
+		offsets.push(offset);
+		return { normalized: pieces.join(''), offsets };
+	}
+	
+	/**
+	 * Passages of text around matches of the RegExps, with nearby matches in one passage
+	 *
+	 * @return {Object} { matchCount, passages: [{ start, text, termCount }] }, termCount being
+	 *     how many of the RegExps match in the passage
+	 */
+	function findPassages(text, regExps) {
+		let { normalized, offsets } = normalizeWithOffsets(text);
+		let matches = [];
+		regExps.forEach((regExp, term) => {
+			for (let match of normalized.matchAll(regExp)) {
+				matches.push({
+					term,
+					start: offsets[match.index],
+					end: offsets[match.index + match[0].length],
+				});
+			}
+		});
+		matches.sort((a, b) => a.start - b.start);
+		let ranges = [];
+		for (let match of matches) {
+			let start = Math.max(0, match.start - PASSAGE_CONTEXT);
+			let end = Math.min(text.length, match.end + PASSAGE_CONTEXT);
+			let last = ranges.at(-1);
+			if (last && start <= last.end && end - last.start <= MAX_PASSAGE) {
+				last.end = end;
+				last.terms.add(match.term);
+			}
+			else {
+				ranges.push({ start, end, terms: new Set([match.term]) });
+			}
+		}
+		let passages = ranges.map(({ start, end, terms }) => {
+			let passage = text.slice(start, end);
+			// Start and end between words
+			if (start > 0) {
+				let cut = passage.match(/^\S*\s+/)?.[0].length ?? 0;
+				passage = passage.slice(cut);
+				start += cut;
+			}
+			if (end < text.length) {
+				passage = passage.replace(/\s+\S*$/, '');
+			}
+			return {
+				start,
+				text: (start > 0 ? '…' : '') + passage.replace(/\s+/g, ' ').trim()
+					+ (end < text.length ? '…' : ''),
+				termCount: terms.size,
+			};
+		});
+		return { matchCount: matches.length, passages };
+	}
+	
+	//
+	// Trash -- Items, collections and saved searches, to the trash and back
+	//
+	
+	/**
+	 * Move items and collections to the trash, or restore them from it
+	 *
+	 * Trashing needs DELETE, but restoring only EDIT_LIBRARY, so this asks for the permission
+	 * itself instead of declaring one in tools.json.
+	 */
+	this.trash = async function ({ itemKeys = [], collectionKeys = [], savedSearchKeys = [], restore = false, libraryID }, call) {
+		libraryID = getLibraryID(libraryID);
+		let library = Zotero.Libraries.get(libraryID);
+		if (!library.editable || !library.hasTrash) {
+			throw new Zotero.MCP.ToolError(`${library.name} is read-only`);
+		}
+		if (!itemKeys.length && !collectionKeys.length && !savedSearchKeys.length) {
+			throw new Zotero.MCP.ToolError('Give itemKeys, collectionKeys or savedSearchKeys');
+		}
+		let check = (object, type, key) => {
+			if (!object) {
+				throw new Zotero.MCP.ToolError(`No ${type} ${key} in library ${libraryID}`);
+			}
+			if (object.deleted != restore) {
+				throw new Zotero.MCP.ToolError(
+					`${key} ${restore ? "isn't in the trash" : 'is already in the trash'}`
+				);
+			}
+			if (!object.isEditable()) {
+				throw new Zotero.MCP.ToolError(`${key} can't be changed`);
+			}
+			return object;
+		};
+		let items = [];
+		for (let key of new Set(itemKeys)) {
+			let item = check(await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key), 'item', key);
+			if (item.isAnnotation()) {
+				throw new Zotero.MCP.ToolError(`${key} is an annotation, which can't be moved to the trash`);
+			}
+			items.push(item);
+		}
+		let collections = [...new Set(collectionKeys)]
+			.map(key => check(Zotero.Collections.getByLibraryAndKey(libraryID, key), 'collection', key));
+		let searches = [...new Set(savedSearchKeys)]
+			.map(key => check(Zotero.Searches.getByLibraryAndKey(libraryID, key), 'saved search', key));
+		// Subcollections go with their collection
+		collections = collections.filter(collection => !collections.some(
+			other => other != collection && other.hasDescendent('collection', collection.id)
+		));
+		
+		let { EDIT_LIBRARY, DELETE } = Zotero.MCP.Permissions;
+		await Zotero.MCP.Permissions.require(call.clientID, restore ? EDIT_LIBRARY : DELETE, libraryID, call);
+		await edit(call.clientID, async () => {
+			if (!restore) {
+				await Zotero.Items.trash(items.map(item => item.id));
+				for (let object of [...collections, ...searches]) {
+					object.deleted = true;
+					await object.save();
+				}
+				return;
+			}
+			// As when the user restores only parent items and collections in the trash
+			// (ZoteroPane.restoreSelectedItems()), their children come back too
+			let restored = [...items, ...collections, ...searches];
+			for (let item of items) {
+				if (item.isRegularItem()) {
+					restored.push(...Zotero.Items.get([...item.getNotes(true), ...item.getAttachments(true)]));
+				}
+			}
+			for (let collection of collections) {
+				restored.push(...Zotero.Collections.get(
+					collection.getDescendents(false, 'collection', true).map(descendant => descendant.id)
+				));
+			}
+			for (let object of new Set(restored)) {
+				if (object.deleted) {
+					object.deleted = false;
+					await object.save();
+				}
+			}
+		});
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			restored: restore,
+			itemKeys: items.map(item => item.key),
+			collectionKeys: collections.map(collection => collection.key),
+			savedSearchKeys: searches.map(search => search.key),
+		});
+	};
+	
+	//
+	// Zotero windows -- What the user sees: the selection, the open tabs, and showing things to them
+	//
+	
+	// Most selected items zotero_get_context lists
+	const MAX_CONTEXT_ITEMS = 50;
 	
 	/**
 	 * What the user is looking at in the most recently used main window: the selection of its
@@ -1007,6 +2553,213 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
+	 * The file open in a reader tab, the page the user is on, and what they've selected
+	 */
+	function describeReader(reader, attachment) {
+		let { pageIndex, pageLabel, selection, selectedAnnotationKeys } = getReaderState(reader);
+		let page;
+		// For an EPUB, the reader's page is a location number unless the book has page numbers,
+		// and links can't open one, so only a selection's page label is given
+		if (attachment.isPDFAttachment()) {
+			pageIndex ??= attachment.getAttachmentLastPageIndex() ?? undefined;
+			page = Number.isInteger(pageIndex) ? pageIndex + 1 : undefined;
+		}
+		else {
+			pageLabel = undefined;
+		}
+		let description = {
+			libraryID: attachment.libraryID,
+			key: attachment.key,
+			parentKey: attachment.parentKey || undefined,
+			title: getTitle(attachment),
+			contentType: attachment.attachmentContentType,
+			path: attachment.getFilePath() || undefined,
+			type: reader.type,
+			page,
+			pageLabel: knownPageLabel(pageLabel),
+			link: getOpenLink(attachment, { page }),
+			selectedAnnotations: selectedAnnotationKeys
+				.map(key => Zotero.Items.getByLibraryAndKey(attachment.libraryID, key))
+				.filter(annotation => annotation?.isAnnotation())
+				.map(describeAnnotation),
+		};
+		if (selection?.text) {
+			let selectionPageIndex = selection.position?.pageIndex;
+			description.selection = {
+				text: selection.text,
+				page: Number.isInteger(selectionPageIndex) ? selectionPageIndex + 1 : undefined,
+				pageLabel: knownPageLabel(selection.pageLabel),
+			};
+		}
+		return description;
+	}
+	
+	/**
+	 * The page the user is on and what they've selected, from the reader's private state,
+	 * which can change without notice, so anything missing is left out.
+	 *
+	 * TODO: Use _internalReader.getSelection(), .selectedAnnotationIDs, .pageIndex and
+	 * .pageLabel once the reader has them (https://github.com/zotero/reader/pull/276)
+	 */
+	function getReaderState(reader) {
+		try {
+			let internalReader = reader._internalReader;
+			let state = internalReader._state;
+			// The view the user last used, as the reader's getSelectionPosition() decides
+			let view = internalReader._lastViewPrimary === false ? 'secondaryView' : 'primaryView';
+			// Copied out of the reader's window, so they can be passed on
+			let copy = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
+			let stats = copy(state[`${view}Stats`]) || {};
+			let selectedAnnotationKeys = copy(state.selectedAnnotationIDs);
+			return {
+				pageIndex: Number.isInteger(stats.pageIndex) ? stats.pageIndex : undefined,
+				pageLabel: typeof stats.pageLabel == 'string' ? stats.pageLabel : undefined,
+				selection: copy(state[`${view}SelectionPopup`]?.annotation),
+				selectedAnnotationKeys: Array.isArray(selectedAnnotationKeys) ? selectedAnnotationKeys : [],
+			};
+		}
+		catch (e) {
+			Zotero.logError(e);
+			return { selectedAnnotationKeys: [] };
+		}
+	}
+	
+	/**
+	 * A main window by its ID, or the one with a tab
+	 *
+	 * @param {String} [windowID]
+	 * @param {String} [tabID]
+	 * @return {ChromeWindow|null} Null if neither is given
+	 */
+	function getWindowByID(windowID, tabID) {
+		let windows = Zotero.getMainWindows().filter(win => win.Zotero_Tabs);
+		if (windowID) {
+			let win = windows.find(win => win.Zotero_Tabs.windowID == windowID);
+			if (!win) {
+				throw new Zotero.MCP.ToolError(
+					`No window ${windowID}. zotero_get_context lists Zotero's windows.`
+				);
+			}
+			if (tabID && !getTabIDs(win).includes(tabID)) {
+				throw new Zotero.MCP.ToolError(`${tabID} isn't a tab of window ${windowID}`);
+			}
+			return win;
+		}
+		if (tabID) {
+			let found = windows.filter(win => getTabIDs(win).includes(tabID));
+			if (!found.length) {
+				throw new Zotero.MCP.ToolError(`No tab ${tabID}. zotero_get_context lists Zotero's tabs.`);
+			}
+			// Tab IDs are only unique in a window: each window's first library tab is zotero-pane
+			if (found.length > 1) {
+				throw new Zotero.MCP.ToolError(
+					`${tabID} is a tab in ${found.length} windows. Give windowID too.`
+				);
+			}
+			return found[0];
+		}
+		return null;
+	}
+	
+	/**
+	 * @throws {Zotero.MCP.ToolError} If arguments for where to show something conflict
+	 */
+	function checkWhere({ windowID, tabID, newWindow, newTab }) {
+		if (newWindow && (windowID || tabID || newTab)) {
+			throw new Zotero.MCP.ToolError(
+				'newWindow opens a window of its own. Leave out windowID, tabID and newTab.'
+			);
+		}
+		if (newTab && tabID) {
+			throw new Zotero.MCP.ToolError('Give tabID or newTab, not both');
+		}
+	}
+	
+	/**
+	 * The IDs of a main window's tabs, in order, or only of those showing an item
+	 */
+	function getTabIDs(win, item) {
+		return win.Zotero_Tabs._tabs
+			.filter(tab => !item || tab.data?.itemID === item.id)
+			.map(tab => tab.id);
+	}
+	
+	function describeTab(win, tabID) {
+		let { Zotero_Tabs, ZoteroPane } = win;
+		let info = Zotero_Tabs.getTabInfo(tabID);
+		let tab = {
+			tabID,
+			type: Zotero_Tabs.parseTabType(info.type).tabContentType,
+			title: info.title,
+			selected: tabID == Zotero_Tabs.selectedID || undefined,
+		};
+		let item = info.data?.itemID && Zotero.Items.get(info.data.itemID);
+		if (item) {
+			Object.assign(tab, { libraryID: item.libraryID, key: item.key });
+			let reader = Zotero.Reader.getByTabID(tabID);
+			if (reader && item.isPDFAttachment()) {
+				let { pageIndex } = getReaderState(reader);
+				tab.page = Number.isInteger(pageIndex) ? pageIndex + 1 : undefined;
+			}
+		}
+		let view = ZoteroPane.getLibraryView(tabID);
+		if (view?.loaded) {
+			let rows = view.getCollectionTreeRows();
+			let row = rows.length == 1 ? rows[0] : null;
+			Object.assign(tab, {
+				libraryID: row?.ref.libraryID,
+				collectionKey: row?.isCollection() ? row.ref.key : undefined,
+				savedSearchKey: row?.isSearch() ? row.ref.key : undefined,
+			});
+		}
+		return tab;
+	}
+	
+	/**
+	 * A library tab's view once it shows what it was opened with
+	 *
+	 * @param {String|null} tabID - Null for the library tab of a new window
+	 * @param {Number} deadline - Date.now() time to stop waiting at
+	 */
+	async function waitForLibraryView(win, tabID, deadline) {
+		let view;
+		while (!(view = tabID ? win.ZoteroPane?.getLibraryView(tabID) : win.ZoteroPane?.libraryView)?.loaded) {
+			if (win.closed) {
+				throw new Zotero.MCP.ToolError('The window was closed before the library tab opened');
+			}
+			if (Date.now() > deadline) {
+				throw new Zotero.MCP.ToolError(
+					'Zotero is still opening the library tab. Call zotero_get_context later for it.'
+				);
+			}
+			await Zotero.Promise.delay(20);
+		}
+		await view.waitForLibraryTabState();
+		return view;
+	}
+	
+	//
+	// Citations, import and export -- Formatted citations, and items in and out of Zotero as files
+	//
+	
+	const STYLE_REPOSITORY = 'https://www.zotero.org/styles/';
+	
+	const STYLE_ID_PREFIX = 'http://www.zotero.org/styles/';
+	
+	// Most new items zotero_import lists
+	const MAX_LISTED_ITEMS = 50;
+	
+	// Longest export zotero_export returns as text, in characters
+	const MAX_EXPORT_CHARS = 200000;
+	
+	// Most items zotero_export gives the BibTeX citation keys of
+	const MAX_CITATION_KEYS = 500;
+	
+	const BIBTEX_TRANSLATOR_ID = '9cb70025-a888-4a29-a210-93ec52da40d4';
+	
+	const BIBLATEX_TRANSLATOR_ID = 'b6e39b57-8942-4d11-8259-342c46ce395f';
+	
+	/**
 	 * Citations and bibliographies in a CSL style
 	 */
 	this.generateCitation = async function ({
@@ -1082,1037 +2835,6 @@ Zotero.MCP.Tools = new function () {
 		}
 		return Zotero.MCP.jsonResult(result);
 	};
-	
-	/**
-	 * Change items' fields, creators, tags and collections, all or none: everything is checked
-	 * before anything changes
-	 */
-	this.updateItems = async function ({ changes, libraryID }, { clientID }) {
-		libraryID = getLibraryID(libraryID);
-		let checked = [];
-		for (let change of changes) {
-			let item = await getItem(libraryID, change.key);
-			if (!item.isEditable()) {
-				throw new Zotero.MCP.ToolError(`${item.key} can't be edited`);
-			}
-			for (let field of Object.keys(change.fields ?? {})) {
-				checkField(item, field);
-			}
-			if (change.creators) {
-				checkCreators(item, change.creators);
-			}
-			let tags = [...change.addTags ?? [], ...change.removeTags ?? []];
-			if (tags.some(tag => !tag.trim())) {
-				throw new Zotero.MCP.ToolError('Tags must not be empty');
-			}
-			let addTo = (change.addToCollections ?? []).map(key => getCollection(libraryID, key));
-			let removeFrom = (change.removeFromCollections ?? []).map(key => getCollection(libraryID, key));
-			if ((addTo.length || removeFrom.length) && !item.isTopLevelItem()) {
-				throw new Zotero.MCP.ToolError(
-					`${item.key} is a child item, which is in the collections of its parent item `
-						+ `${item.parentKey}`
-				);
-			}
-			checked.push({ item, change, addTo, removeFrom });
-		}
-		
-		let items = [...new Set(checked.map(({ item }) => item))];
-		await edit(clientID, async () => {
-			for (let { item, change, addTo, removeFrom } of checked) {
-				for (let [field, value] of Object.entries(change.fields ?? {})) {
-					item.setField(field, value);
-				}
-				if (change.creators) {
-					item.setCreators(change.creators, { strict: true });
-				}
-				for (let tag of change.addTags ?? []) {
-					item.addTag(tag.trim());
-				}
-				for (let tag of change.removeTags ?? []) {
-					item.removeTag(tag.trim());
-				}
-				for (let collection of addTo) {
-					item.addToCollection(collection.id);
-				}
-				for (let collection of removeFrom) {
-					item.removeFromCollection(collection.id);
-				}
-				await item.save();
-			}
-		}, items);
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			items: await Promise.all(items.map(describeItem)),
-		});
-	};
-	
-	/**
-	 * Change items' types, as the item pane's Item Type menu does, all or none
-	 */
-	this.changeItemTypes = async function ({ changes, libraryID }, { clientID }) {
-		libraryID = getLibraryID(libraryID);
-		let items = [];
-		for (let { key } of changes) {
-			let item = await getItem(libraryID, key);
-			if (!item.isEditable()) {
-				throw new Zotero.MCP.ToolError(`${item.key} can't be edited`);
-			}
-			// Zotero.Item.setType() doesn't change notes, attachments or annotations
-			if (!item.isRegularItem()) {
-				throw new Zotero.MCP.ToolError(
-					`${item.key} is ${item.isNote() ? 'a note' : 'an ' + item.itemType}, whose type can't be changed`
-				);
-			}
-			if (items.includes(item)) {
-				throw new Zotero.MCP.ToolError(`${item.key} is in changes more than once`);
-			}
-			items.push(item);
-		}
-		
-		let fieldValues = item => Object.fromEntries(
-			item.getUsedFields(true).map(field => [field, item.getField(field)])
-		);
-		let changed = await edit(clientID, async () => {
-			let changed = [];
-			for (let [i, item] of items.entries()) {
-				let oldItemType = item.itemType;
-				let oldFields = fieldValues(item);
-				let oldCreators = item.getCreators();
-				item.setType(Zotero.ItemTypes.getID(changes[i].itemType));
-				await item.save();
-				
-				// setType() copies values to the new type's fields, by base field and for
-				// book <-> bookSection, so a value that left one field and is now in another moved
-				let newFields = fieldValues(item);
-				let filled = Object.keys(newFields).filter(field => newFields[field] !== oldFields[field]);
-				let movedFields = {};
-				let removedFields = {};
-				for (let [field, value] of Object.entries(oldFields)) {
-					if (newFields[field] === value) {
-						continue;
-					}
-					let to = filled.find(newField => newFields[newField] === value);
-					if (to) {
-						movedFields[field] = to;
-						filled.splice(filled.indexOf(to), 1);
-					}
-					else {
-						removedFields[field] = value;
-					}
-				}
-				let changedCreatorTypes = item.getCreators().flatMap((creator, j) => (
-					creator.creatorTypeID == oldCreators[j].creatorTypeID
-						? []
-						: [{
-							name: [creator.firstName, creator.lastName].filter(Boolean).join(' '),
-							from: Zotero.CreatorTypes.getName(oldCreators[j].creatorTypeID),
-							to: Zotero.CreatorTypes.getName(creator.creatorTypeID),
-						}]
-				));
-				changed.push({ item, oldItemType, movedFields, removedFields, changedCreatorTypes });
-			}
-			return changed;
-		}, items);
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			items: await Promise.all(changed.map(async ({ item, ...change }) => ({
-				...await describeItem(item),
-				...change,
-			}))),
-		});
-	};
-	
-	/**
-	 * Create a collection, or rename or move one
-	 */
-	this.manageCollections = async function ({ action, collectionKey, name, parentKey, libraryID }, { clientID }) {
-		libraryID = getLibraryID(libraryID);
-		name = name?.trim();
-		if (action == 'create' && !name) {
-			throw new Zotero.MCP.ToolError('create needs a name');
-		}
-		if (action == 'update' && !name && parentKey === undefined) {
-			throw new Zotero.MCP.ToolError('update needs a name, or a parentKey to move it (null for the top level)');
-		}
-		let collection;
-		if (action == 'create') {
-			collection = new Zotero.Collection({ libraryID });
-		}
-		else if (collectionKey) {
-			collection = getCollection(libraryID, collectionKey);
-		}
-		else {
-			throw new Zotero.MCP.ToolError(`${action} needs a collectionKey`);
-		}
-		let parent = parentKey ? getCollection(libraryID, parentKey) : null;
-		let result;
-		// Checked and changed inside the transaction, so that concurrent calls can't
-		// interleave, e.g. two moves that together put a collection inside itself
-		await edit(clientID, async () => {
-			if (parent && collection.id
-					&& (parent.id == collection.id || collection.hasDescendent('collection', parent.id))) {
-				throw new Zotero.MCP.ToolError(`${collection.key} can't be moved into itself or a subcollection`);
-			}
-			if (name) {
-				collection.name = name;
-			}
-			if (parentKey !== undefined) {
-				collection.parentKey = parent?.key ?? false;
-			}
-			// New collections aren't selected, so as not to disturb the user
-			await collection.save({ skipSelect: true });
-			result = {
-				libraryID,
-				key: collection.key,
-				name: collection.name,
-				parentKey: collection.parentKey || undefined,
-				link: getSelectLink(collection),
-			};
-		}, [collection]);
-		return Zotero.MCP.jsonResult(result);
-	};
-	
-	/**
-	 * Create a saved search from a query in zotero_search's syntax, or rename one or change
-	 * its query
-	 */
-	this.manageSavedSearches = async function ({
-		action, savedSearchKey, name, conditions, libraryID,
-	}, { clientID }) {
-		libraryID = getLibraryID(libraryID);
-		name = name?.trim();
-		if (action == 'create' ? !name || !conditions?.length : !name && !conditions?.length) {
-			throw new Zotero.MCP.ToolError(
-				action == 'create' ? 'create needs a name and conditions' : 'update needs a name or conditions'
-			);
-		}
-		let search;
-		if (action == 'create') {
-			search = new Zotero.Search({ libraryID });
-		}
-		else {
-			search = savedSearchKey && Zotero.Searches.getByLibraryAndKey(libraryID, savedSearchKey);
-			if (!search || search.deleted) {
-				throw new Zotero.MCP.ToolError(`No saved search ${savedSearchKey} in library ${libraryID}`);
-			}
-		}
-		if (!search.isEditable()) {
-			throw new Zotero.MCP.ToolError(`${search.key} can't be changed`);
-		}
-		let built = conditions?.length && buildSearch(libraryID, conditions).search;
-		await edit(clientID, async () => {
-			search.fromJSON({
-				name: name || search.name,
-				conditions: (built || search).toJSON().conditions,
-			});
-			// Not selected, so as not to disturb the user
-			await search.save({ skipSelect: true });
-		}, [search]);
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			key: search.key,
-			name: search.name,
-			conditions: search.toJSON().conditions,
-			itemCount: await countSearchItems(search),
-			link: getSelectLink(search),
-		});
-	};
-	
-	/**
-	 * A note from Markdown, under an item, in a collection, or standalone
-	 */
-	this.addNote = async function ({ markdown, parentKey, collectionKey, libraryID }, { clientID }) {
-		libraryID = getLibraryID(libraryID);
-		if (!markdown.trim()) {
-			throw new Zotero.MCP.ToolError('The note must not be empty');
-		}
-		if (parentKey && collectionKey) {
-			throw new Zotero.MCP.ToolError(
-				'Give parentKey or collectionKey, not both: a note under an item shows wherever the item is'
-			);
-		}
-		let note = new Zotero.Item('note');
-		note.libraryID = libraryID;
-		if (parentKey) {
-			let parent = await getItem(libraryID, parentKey);
-			if (!parent.isRegularItem()) {
-				throw new Zotero.MCP.ToolError(
-					`${parent.key} is ${parent.isNote() ? 'a note' : 'an ' + parent.itemType}. Notes can `
-						+ "only be added under regular items, such as a journal article."
-				);
-			}
-			note.parentID = parent.id;
-		}
-		if (collectionKey) {
-			note.addToCollection(getCollection(libraryID, collectionKey).id);
-		}
-		note.setNote(markdownToNoteHTML(markdown));
-		// Not selected, so as not to disturb the user
-		await edit(clientID, () => note.save({ skipSelect: true }));
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			key: note.key,
-			parentKey: note.parentKey || undefined,
-			title: note.getNoteTitle(),
-			dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
-			link: getSelectLink(note),
-		});
-	};
-	
-	/**
-	 * Rename, merge or delete tags across a library, or set a tag's color
-	 *
-	 * Renaming and deleting change each item that has the tag, as one undo step, rather than
-	 * through Zotero.Tags.rename() and removeFromLibrary(), which write to the database
-	 * directly and so can't be undone. Colors are a synced setting, outside the undo history.
-	 */
-	this.manageTags = async function ({ action, tags, newName, color, position, libraryID }, { clientID }) {
-		libraryID = getLibraryID(libraryID);
-		let library = Zotero.Libraries.get(libraryID);
-		if (!library.editable) {
-			throw new Zotero.MCP.ToolError(`${library.name} can't be edited`);
-		}
-		tags = [...new Set(tags.map(tag => tag.trim()))];
-		newName = newName?.trim();
-		if (tags.some(tag => !tag) || newName === '') {
-			throw new Zotero.MCP.ToolError('Tags must not be empty');
-		}
-		if ((action == 'rename') != (newName !== undefined)) {
-			throw new Zotero.MCP.ToolError('Give newName to rename, and only then');
-		}
-		let colors = Zotero.Tags.getColors(libraryID);
-		
-		if (action == 'setColor') {
-			let [tag] = tags;
-			if (tags.length != 1) {
-				throw new Zotero.MCP.ToolError('Give one tag to color');
-			}
-			// Without a color, the tag keeps its own, e.g. to move it to another number key
-			if (color === undefined) {
-				color = colors.get(tag)?.color;
-				if (!color) {
-					throw new Zotero.MCP.ToolError(`${tag} has no color. Give color too.`);
-				}
-			}
-			else if (color) {
-				color = TAG_COLORS[color];
-			}
-			if (color && !colors.has(tag) && colors.size >= Zotero.Tags.MAX_COLORED_TAGS) {
-				throw new Zotero.MCP.ToolError(
-					`Only ${Zotero.Tags.MAX_COLORED_TAGS} tags can have colors, one per number key. `
-						+ 'Remove the color of another tag first.'
-				);
-			}
-			await Zotero.Tags.setColor(libraryID, tag, color || false, position && position - 1);
-			let set = Zotero.Tags.getColor(libraryID, tag);
-			return Zotero.MCP.jsonResult({
-				libraryID,
-				action,
-				tag,
-				color: getTagColorName(set?.color),
-				position: set ? set.position + 1 : undefined,
-			});
-		}
-		
-		if (action == 'rename') {
-			tags = tags.filter(tag => tag != newName);
-			if (!tags.length) {
-				throw new Zotero.MCP.ToolError(`The tag is already named ${JSON.stringify(newName)}`);
-			}
-		}
-		let itemIDs = new Set();
-		let missing = [];
-		for (let tag of tags) {
-			let tagID = Zotero.Tags.getID(tag);
-			let ids = tagID ? await Zotero.Tags.getTagItems(libraryID, tagID) : [];
-			if (!ids.length) {
-				missing.push(tag);
-			}
-			ids.forEach(id => itemIDs.add(id));
-		}
-		if (missing.length) {
-			throw new Zotero.MCP.ToolError(
-				`No items in ${library.name} have the tags ${missing.map(tag => JSON.stringify(tag)).join(', ')}. `
-					+ 'Tags match exactly, including case: see zotero_list_tags.'
-			);
-		}
-		let items = await Zotero.Items.getAsync([...itemIDs]);
-		await Zotero.Items.loadDataTypes(items);
-		// A renamed tag keeps its color, as when the user renames it, unless the new name has one
-		let keptColor = action == 'rename' && !colors.has(newName)
-			? tags.map(tag => colors.get(tag)).find(Boolean)
-			: null;
-		await edit(clientID, async () => {
-			for (let item of items) {
-				for (let tag of tags) {
-					if (action == 'rename' && !item.hasTag(newName)) {
-						item.replaceTag(tag, newName);
-					}
-					else {
-						item.removeTag(tag);
-					}
-				}
-				await item.save({ skipSelect: true });
-			}
-			for (let tag of tags) {
-				if (colors.has(tag)) {
-					await Zotero.Tags.setColor(libraryID, tag, false);
-				}
-			}
-			if (keptColor) {
-				await Zotero.Tags.setColor(libraryID, newName, keptColor.color, keptColor.position);
-			}
-		});
-		// Removes the tags no item has anymore
-		Zotero.Prefs.set('purge.tags', true);
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			action,
-			itemCount: items.length,
-		});
-	};
-	
-	/**
-	 * Add Markdown to the end of a note, or replace its content
-	 *
-	 * Refuses if the note changed since the model read it, so an edit the user made in the
-	 * meantime isn't lost, and refuses to replace content Markdown can't hold: highlights and
-	 * citations linked to items, and images stored in Zotero.
-	 */
-	this.editNote = async function ({ itemKey, markdown, mode = 'append', dateModified, libraryID }, { clientID }) {
-		libraryID = getLibraryID(libraryID);
-		if (!markdown.trim()) {
-			throw new Zotero.MCP.ToolError('The Markdown must not be empty');
-		}
-		let note = await getItem(libraryID, itemKey);
-		if (!note.isNote()) {
-			throw new Zotero.MCP.ToolError(`${note.key} isn't a note`);
-		}
-		if (!note.isEditable()) {
-			throw new Zotero.MCP.ToolError(`${note.key} can't be edited`);
-		}
-		if (Zotero.Date.sqlToISO8601(note.dateModified) != dateModified) {
-			throw new Zotero.MCP.ToolError(
-				`The note has changed since ${dateModified}, maybe because the user edited it. `
-					+ 'Get it again with zotero_get_notes, then make the edit to what it is now.'
-			);
-		}
-		let html = markdownToNoteHTML(markdown);
-		if (mode == 'replace') {
-			if (/\sdata-(annotation|citation|attachment-key)=/.test(note.getNote())) {
-				throw new Zotero.MCP.ToolError(
-					"The note has highlights, citations or images that Markdown can't hold, which "
-						+ 'replacing it would lose. Append to it instead, or ask the user to make the change.'
-				);
-			}
-		}
-		else {
-			// Inside the note's own wrapper, which carries its schema version and citation data
-			let [, wrapper, content] = note.getNote()
-				.match(/^\s*(<div\b[^>]*\bdata-schema-version="[^"]*"[^>]*>)([\s\S]*)<\/div>\s*$/)
-				?? [null, '<div data-schema-version="9">', note.getNote()];
-			html = wrapper + content + html.replace(/^<div[^>]*>|<\/div>$/g, '') + '</div>';
-		}
-		await edit(clientID, () => {
-			note.setNote(html);
-			return note.save({ skipSelect: true });
-		}, [note]);
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			key: note.key,
-			parentKey: note.parentKey || undefined,
-			title: note.getNoteTitle(),
-			dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
-			link: getSelectLink(note),
-		});
-	};
-	
-	/**
-	 * Sets of items Zotero considers duplicates, as its Duplicate Items view shows them
-	 */
-	this.listDuplicates = async function ({ libraryID, limit = 20, offset = 0 }) {
-		libraryID = getLibraryID(libraryID);
-		let sets = await Promise.all(
-			(await new Zotero.Duplicates(libraryID).getSets()).map(ids => Zotero.Items.getAsync(ids))
-		);
-		for (let set of sets) {
-			set.sort((a, b) => (a.dateAdded < b.dateAdded ? -1 : a.dateAdded > b.dateAdded ? 1 : 0));
-		}
-		sets.sort((a, b) => Zotero.localeCompare(a[0].getDisplayTitle(), b[0].getDisplayTitle()));
-		let page = sets.slice(offset, offset + limit);
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			total: sets.length,
-			sets: await Promise.all(page.map(set => Promise.all(set.map(async item => ({
-				...await describeItem(item),
-				DOI: item.getField('DOI') || undefined,
-				ISBN: item.getField('ISBN') || undefined,
-				dateAdded: Zotero.Date.sqlToISO8601(item.dateAdded),
-			}))))),
-			nextOffset: offset + limit < sets.length ? offset + limit : undefined,
-		});
-	};
-	
-	/**
-	 * Merge duplicates as Zotero's merge pane does: the master item gets the others' notes,
-	 * attachments, tags, collections and relations, and the others go to the trash
-	 */
-	this.mergeItems = async function ({ itemKeys, masterKey, libraryID }, { clientID }) {
-		libraryID = getLibraryID(libraryID);
-		itemKeys = [...new Set(itemKeys)];
-		if (itemKeys.length < 2) {
-			throw new Zotero.MCP.ToolError('Give at least two items to merge');
-		}
-		let items = [];
-		for (let key of itemKeys) {
-			let item = await getItem(libraryID, key);
-			if (!item.isRegularItem()) {
-				throw new Zotero.MCP.ToolError(
-					`${item.key} is ${item.isNote() ? 'a note' : 'an ' + item.itemType}. Only regular items can be merged.`
-				);
-			}
-			if (!item.isEditable()) {
-				throw new Zotero.MCP.ToolError(`${item.key} can't be changed`);
-			}
-			items.push(item);
-		}
-		if (new Set(items.map(item => item.itemTypeID)).size > 1) {
-			throw new Zotero.MCP.ToolError(
-				'Items of different types can\'t be merged. Change their types with zotero_change_item_types first.'
-			);
-		}
-		// The oldest by default, as in the merge pane
-		let master = masterKey
-			? items.find(item => item.key == masterKey)
-			: items.reduce((oldest, item) => (item.dateAdded < oldest.dateAdded ? item : oldest));
-		if (!master) {
-			throw new Zotero.MCP.ToolError('masterKey must be one of itemKeys');
-		}
-		let others = items.filter(item => item != master);
-		let { mergeItems } = ChromeUtils.importESModule('chrome://zotero/content/mergeItems.mjs');
-		await mergeItems(master, others, {
-			undoAction: 'undo-action-mcp-changes',
-			undoActionArgs: { app: Zotero.MCP.Apps.getDisplayName(clientID) },
-		});
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			key: master.key,
-			trashed: others.map(item => item.key),
-			link: getSelectLink(master),
-		});
-	};
-	
-	/**
-	 * Move items and collections to the trash, or restore them from it
-	 *
-	 * Trashing needs DELETE, but restoring only EDIT_LIBRARY, so this asks for the permission
-	 * itself instead of declaring one in tools.json.
-	 */
-	this.trash = async function ({ itemKeys = [], collectionKeys = [], savedSearchKeys = [], restore = false, libraryID }, call) {
-		libraryID = getLibraryID(libraryID);
-		let library = Zotero.Libraries.get(libraryID);
-		if (!library.editable || !library.hasTrash) {
-			throw new Zotero.MCP.ToolError(`${library.name} is read-only`);
-		}
-		if (!itemKeys.length && !collectionKeys.length && !savedSearchKeys.length) {
-			throw new Zotero.MCP.ToolError('Give itemKeys, collectionKeys or savedSearchKeys');
-		}
-		let check = (object, type, key) => {
-			if (!object) {
-				throw new Zotero.MCP.ToolError(`No ${type} ${key} in library ${libraryID}`);
-			}
-			if (object.deleted != restore) {
-				throw new Zotero.MCP.ToolError(
-					`${key} ${restore ? "isn't in the trash" : 'is already in the trash'}`
-				);
-			}
-			if (!object.isEditable()) {
-				throw new Zotero.MCP.ToolError(`${key} can't be changed`);
-			}
-			return object;
-		};
-		let items = [];
-		for (let key of new Set(itemKeys)) {
-			let item = check(await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key), 'item', key);
-			if (item.isAnnotation()) {
-				throw new Zotero.MCP.ToolError(`${key} is an annotation, which can't be moved to the trash`);
-			}
-			items.push(item);
-		}
-		let collections = [...new Set(collectionKeys)]
-			.map(key => check(Zotero.Collections.getByLibraryAndKey(libraryID, key), 'collection', key));
-		let searches = [...new Set(savedSearchKeys)]
-			.map(key => check(Zotero.Searches.getByLibraryAndKey(libraryID, key), 'saved search', key));
-		// Subcollections go with their collection
-		collections = collections.filter(collection => !collections.some(
-			other => other != collection && other.hasDescendent('collection', collection.id)
-		));
-		
-		let { EDIT_LIBRARY, DELETE } = Zotero.MCP.Permissions;
-		await Zotero.MCP.Permissions.require(call.clientID, restore ? EDIT_LIBRARY : DELETE, libraryID, call);
-		await edit(call.clientID, async () => {
-			if (!restore) {
-				await Zotero.Items.trash(items.map(item => item.id));
-				for (let object of [...collections, ...searches]) {
-					object.deleted = true;
-					await object.save();
-				}
-				return;
-			}
-			// As when the user restores only parent items and collections in the trash
-			// (ZoteroPane.restoreSelectedItems()), their children come back too
-			let restored = [...items, ...collections, ...searches];
-			for (let item of items) {
-				if (item.isRegularItem()) {
-					restored.push(...Zotero.Items.get([...item.getNotes(true), ...item.getAttachments(true)]));
-				}
-			}
-			for (let collection of collections) {
-				restored.push(...Zotero.Collections.get(
-					collection.getDescendents(false, 'collection', true).map(descendant => descendant.id)
-				));
-			}
-			for (let object of new Set(restored)) {
-				if (object.deleted) {
-					object.deleted = false;
-					await object.save();
-				}
-			}
-		});
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			restored: restore,
-			itemKeys: items.map(item => item.key),
-			collectionKeys: collections.map(collection => collection.key),
-			savedSearchKeys: searches.map(search => search.key),
-		});
-	};
-	
-	/**
-	 * Add items by identifier or from item JSON, and look for their files
-	 *
-	 * Translators save in their own transactions, which can't be nested, so their items are
-	 * made one undo step afterwards, with any JSON items.
-	 *
-	 * Identifiers are looked up a few at a time. Lookups still running at the call's deadline
-	 * can't be stopped, as each saves its items when it finishes, so they're reported as
-	 * pending and go on in the background, where their items become a later undo step.
-	 */
-	this.addItems = async function ({
-		identifiers = [], items: json = [], collectionKey,
-		findFiles = true, libraryID,
-	}, { clientID, deadline }) {
-		libraryID = getLibraryID(libraryID);
-		if (!identifiers.length && !json.length) {
-			throw new Zotero.MCP.ToolError('Give identifiers or items');
-		}
-		let collections = collectionKey ? [getCollection(libraryID, collectionKey).id] : false;
-		
-		// Checked before anything is added
-		let jsonItems = json.map((data, i) => itemFromJSON(libraryID, data, `items[${i}]`));
-		
-		// { input, status, item, error }, or { lookup } in place of a lookup's results
-		let results = [];
-		let lookups = [];
-		for (let input of identifiers) {
-			let found = extractIdentifiers(input);
-			if (!found.length) {
-				results.push({
-					input,
-					status: 'failed',
-					error: 'No DOI, ISBN, arXiv ID or PubMed ID found. Zotero only adds web pages '
-						+ 'through the Zotero Connector. Find an identifier, or give the metadata '
-						+ 'as items.',
-				});
-				continue;
-			}
-			for (let identifier of found) {
-				let lookup = { input, identifier, results: null };
-				lookups.push(lookup);
-				results.push({ lookup });
-			}
-		}
-		let queue = [...lookups];
-		let lookUpNext = async () => {
-			for (let lookup = queue.shift(); lookup; lookup = queue.shift()) {
-				lookup.results = await lookUp(lookup, libraryID, collections);
-			}
-		};
-		let lookedUp = Promise.all(Array.from({ length: LOOKUP_CONCURRENCY }, lookUpNext));
-		await untilDeadline(lookedUp, deadline);
-		let pending = lookups.filter(lookup => !lookup.results);
-		results = results.flatMap(({ lookup, ...result }) => {
-			if (!lookup) {
-				return [result];
-			}
-			return lookup.results ?? [{ input: lookup.input, status: 'pending' }];
-		});
-		// Saved by translators
-		let translated = results.filter(result => result.status == 'added').map(result => result.item);
-		for (let [i, item] of jsonItems.entries()) {
-			results.push({ input: `items[${i}]`, status: 'added', item });
-		}
-		
-		await edit(clientID, async () => {
-			for (let item of translated) {
-				Zotero.UndoHistory.stageCreation(item);
-			}
-			for (let item of jsonItems) {
-				if (collections) {
-					item.setCollections(collections);
-				}
-				await item.save({ skipSelect: true });
-			}
-		});
-		if (pending.length) {
-			lookedUp.then(() => addLookedUpLate(pending, clientID, findFiles)).catch(e => Zotero.logError(e));
-		}
-		
-		// Like Find Full Text, for new items that can have one
-		let searched = new Set();
-		let searching = false;
-		if (findFiles) {
-			let items = [...translated, ...jsonItems].filter(item => Zotero.Attachments.canFindFileForItem(item));
-			items.forEach(item => searched.add(item));
-			if (items.length) {
-				let search = Zotero.Attachments.addAvailableFiles(items).catch(e => Zotero.logError(e));
-				searching = await untilDeadline(search, deadline) === TIMED_OUT;
-			}
-		}
-		
-		let notices = new Set();
-		if (pending.length) {
-			notices.add(LOOKUPS_PENDING);
-		}
-		let output = [];
-		for (let { input, status, item, error } of results) {
-			if (!item) {
-				output.push({ input, status, error });
-				continue;
-			}
-			// All of a new item's attachments, rather than the best one and counts
-			let {
-				bestAttachment: _bestAttachment, attachmentCount: _attachmentCount, noteCount: _noteCount,
-				annotationCount: _annotationCount, ...summary
-			} = await describeItem(item);
-			summary.attachments = Zotero.Items.get(item.getAttachments()).map(attachment => ({
-				key: attachment.key,
-				title: attachment.getField('title'),
-				contentType: attachment.attachmentContentType || undefined,
-			}));
-			if (searched.has(item) && !summary.attachments.length) {
-				summary.fileSearch = searching ? 'pending' : 'notFound';
-				notices.add(searching ? FILES_PENDING : FILES_NOT_FOUND);
-			}
-			output.push({ input, status, ...summary });
-		}
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			results: output,
-			notice: notices.size ? [...notices].join(' ') : undefined,
-		});
-	};
-	
-	/**
-	 * Look up an identifier for zotero_add_items, saving the items found
-	 *
-	 * @return {Promise<Object[]>} Its results, { input, status, item, error }
-	 */
-	async function lookUp({ input, identifier }, libraryID, collections) {
-		try {
-			let translate = new Zotero.Translate.Search();
-			translate.setIdentifier(identifier);
-			translate.setTranslator(await translate.getTranslators());
-			// Files are found afterwards instead, so the call doesn't wait for downloads
-			let items = await translate.translate({ libraryID, collections, saveAttachments: false });
-			if (!items.length) {
-				throw new Error('No items');
-			}
-			return items.map(item => ({ input, status: 'added', item }));
-		}
-		catch (e) {
-			Zotero.debug(e, 2);
-			return [{
-				input,
-				status: 'failed',
-				error: `Zotero couldn't find ${Object.keys(identifier)[0]} `
-					+ `${Object.values(identifier)[0]}. Check it, or give the metadata as items.`,
-			}];
-		}
-	}
-	
-	/**
-	 * Make the items of lookups that finished after zotero_add_items returned one undo step of
-	 * their own, and look for their files
-	 */
-	async function addLookedUpLate(lookups, clientID, findFiles) {
-		let items = lookups.flatMap(lookup => lookup.results)
-			.filter(result => result.status == 'added')
-			.map(result => result.item);
-		if (!items.length) {
-			return;
-		}
-		await edit(clientID, async () => {
-			for (let item of items) {
-				Zotero.UndoHistory.stageCreation(item);
-			}
-		});
-		let findable = findFiles ? items.filter(item => Zotero.Attachments.canFindFileForItem(item)) : [];
-		if (findable.length) {
-			await Zotero.Attachments.addAvailableFiles(findable);
-		}
-	}
-	
-	/**
-	 * Attach a file to an item from a URL or this computer, or add a file from this computer
-	 * as a standalone attachment, which Zotero identifies as with Retrieve Metadata
-	 */
-	this.addAttachment = async function ({
-		parentKey, url, path, linkFile = false, title, collectionKey, libraryID,
-	}, { clientID, deadline }) {
-		libraryID = getLibraryID(libraryID);
-		let library = Zotero.Libraries.get(libraryID);
-		if (!library.editable || !library.filesEditable) {
-			throw new Zotero.MCP.ToolError(`Files can't be added to ${library.name}`);
-		}
-		if (!url == !path) {
-			throw new Zotero.MCP.ToolError('Give url or path');
-		}
-		if (url && linkFile) {
-			throw new Zotero.MCP.ToolError('Only a file from path can be linked');
-		}
-		if (linkFile && library.libraryType != 'user') {
-			throw new Zotero.MCP.ToolError('Files can be linked only in My Library');
-		}
-		if (!parentKey) {
-			if (url) {
-				throw new Zotero.MCP.ToolError('Give parentKey to attach a file from a URL');
-			}
-			return addStandaloneFile({ path, linkFile, title, collectionKey, libraryID }, { clientID, deadline });
-		}
-		if (collectionKey) {
-			throw new Zotero.MCP.ToolError("Give collectionKey only without parentKey. A file is in its parent's collections.");
-		}
-		let parent = await getItem(libraryID, parentKey);
-		if (!parent.isRegularItem()) {
-			throw new Zotero.MCP.ToolError(
-				`${parent.key} is ${parent.isNote() ? 'a note' : 'an ' + parent.itemType}. Files can only `
-					+ 'be attached to regular items, such as a journal article.'
-			);
-		}
-		// Makes the new attachment an undo step
-		let finish = async (attachment) => {
-			await edit(clientID, async () => {
-				Zotero.UndoHistory.stageCreation(attachment);
-				// The title of a downloaded file comes from where it was found, e.g. "Full Text PDF"
-				if (title) {
-					attachment.setField('title', title);
-					await attachment.save();
-				}
-			});
-			return attachment;
-		};
-		let attachment;
-		if (url) {
-			if (!/^https?:\/\//i.test(url)) {
-				throw new Zotero.MCP.ToolError('Only http and https URLs can be attached');
-			}
-			// A link to the file, or a page that links to it, as Find Full Text follows
-			let download = Zotero.Attachments.addFileFromURLs(parent, [{ pageURL: url }])
-				.catch((e) => {
-					Zotero.debug(e, 2);
-					return false;
-				})
-				// Finished also when the download outlasts the call
-				.then(attachment => attachment && finish(attachment));
-			attachment = await untilDeadline(download, deadline);
-			if (attachment === TIMED_OUT) {
-				return Zotero.MCP.jsonResult({
-					libraryID,
-					parentKey: parent.key,
-					status: 'pending',
-					notice: 'Zotero is still downloading the file. Call zotero_get_items on the '
-						+ 'parent item later to see whether it was attached.',
-				});
-			}
-			if (!attachment) {
-				throw new Zotero.MCP.ToolError(
-					`Zotero couldn't get a PDF or EPUB from ${url}: it isn't a link to one, the `
-						+ "page doesn't link to one Zotero recognizes, or the site requires signing in "
-						+ 'or blocks automated downloads. Try a direct link to the file. ' + LAST_RESORT
-				);
-			}
-		}
-		else {
-			let info = await statPath(path);
-			if (info?.type != 'regular') {
-				throw new Zotero.MCP.ToolError(`There's no file at ${path} on this computer.`);
-			}
-			if (linkFile) {
-				attachment = await finish(await Zotero.Attachments.linkFromFile({
-					file: path,
-					parentItemID: parent.id,
-					saveOptions: { skipSelect: true },
-				}));
-			}
-			else {
-				// Renamed as when the user adds the item's first file (ZoteroPane.addAttachmentFromDialog())
-				let fileBaseName;
-				if (Zotero.Attachments.shouldAutoRenameFile(false, libraryID) && !parent.numNonHTMLFileAttachments()) {
-					fileBaseName = await Zotero.Attachments.getRenamedFileBaseNameIfAllowedType(parent, path);
-				}
-				attachment = await finish(await Zotero.Attachments.importFromFile({
-					file: path,
-					parentItemID: parent.id,
-					fileBaseName,
-					saveOptions: { skipSelect: true },
-				}));
-			}
-		}
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			parentKey: parent.key,
-			status: 'attached',
-			...await describeAttachment(attachment),
-			link: getOpenLink(attachment),
-		});
-	};
-	
-	/**
-	 * Find Full Text for existing items, as the item menu does, with what it found for each
-	 *
-	 * The files found become one undo step once the search ends, which can be after the
-	 * call's deadline.
-	 */
-	this.findFulltextAttachments = async function ({ itemKeys, libraryID }, { clientID, deadline }) {
-		libraryID = getLibraryID(libraryID);
-		let library = Zotero.Libraries.get(libraryID);
-		if (!library.editable || !library.filesEditable) {
-			throw new Zotero.MCP.ToolError(`Files can't be added to ${library.name}`);
-		}
-		let items = [];
-		for (let key of new Set(itemKeys)) {
-			items.push(await getItem(libraryID, key));
-		}
-		let eligible = new Set(items.filter(item => Zotero.Attachments.canFindFileForItem(item)));
-		// The attachment found for each item, once the search ends
-		let found = new Map();
-		let finding = (async () => {
-			if (!eligible.size) {
-				return;
-			}
-			found = await Zotero.Attachments.addAvailableFiles([...eligible]);
-			let attachments = [...found.values()].filter(Boolean);
-			if (attachments.length) {
-				await edit(clientID, async () => {
-					for (let attachment of attachments) {
-						Zotero.UndoHistory.stageCreation(attachment);
-					}
-				});
-			}
-		})();
-		finding.catch(e => Zotero.logError(e));
-		let searching = await untilDeadline(finding, deadline) === TIMED_OUT;
-		let results = await Promise.all(items.map(async (item) => {
-			let result = { key: item.key, title: item.getDisplayTitle() };
-			if (!eligible.has(item)) {
-				result.status = 'skipped';
-				result.reason = !item.isRegularItem()
-					? 'Only regular items, such as a journal article, can have files found'
-					: Zotero.Attachments.FIND_AVAILABLE_FILE_TYPES
-						.some(type => item.numFileAttachmentsWithContentType(type))
-						? 'It already has a PDF or EPUB'
-						: 'It has no DOI, URL or PMCID to look for a file by';
-				return result;
-			}
-			let attachment = found.get(item);
-			if (attachment) {
-				result.status = 'found';
-				result.attachment = await describeAttachment(attachment);
-			}
-			else {
-				result.status = searching ? 'pending' : 'notFound';
-			}
-			return result;
-		}));
-		return Zotero.MCP.jsonResult({
-			libraryID,
-			results,
-			notice: [
-				searching && 'Zotero is still looking for files for the items with status pending. '
-					+ 'Call zotero_get_items on them later to see whether it found one.',
-				results.some(result => result.status == 'notFound')
-					&& "Zotero found no PDF or EPUB for items with status notFound. Find one elsewhere "
-						+ "(e.g. arXiv, PubMed Central or the author's site) and attach it with "
-						+ 'zotero_add_attachment. ' + LAST_RESORT,
-			].filter(Boolean).join(' ') || undefined,
-		});
-	};
-	
-	/**
-	 * Add a file as a standalone attachment and identify it, creating its parent item from the
-	 * metadata found, as when the user adds a PDF or EPUB on its own
-	 *
-	 * The file and its new parent become one undo step once identifying ends, which can be
-	 * after the call's deadline.
-	 */
-	async function addStandaloneFile({ path, linkFile, title, collectionKey, libraryID }, { clientID, deadline }) {
-		let collection = collectionKey ? getCollection(libraryID, collectionKey) : null;
-		let info = await statPath(path);
-		if (info?.type != 'regular') {
-			throw new Zotero.MCP.ToolError(`There's no file at ${path} on this computer.`);
-		}
-		let options = {
-			file: path,
-			libraryID,
-			collections: collection ? [collection.id] : undefined,
-			saveOptions: { skipSelect: true },
-		};
-		let attachment = linkFile
-			? await Zotero.Attachments.linkFromFile(options)
-			: await Zotero.Attachments.importFromFile(options);
-		let identifying = (async () => {
-			if (Zotero.RecognizeDocument.canRecognize(attachment)) {
-				await Zotero.RecognizeDocument.recognizeItems([attachment]);
-			}
-			let parent = attachment.parentItem;
-			await edit(clientID, async () => {
-				if (parent) {
-					Zotero.UndoHistory.stageCreation(parent);
-				}
-				Zotero.UndoHistory.stageCreation(attachment);
-				if (title) {
-					attachment.setField('title', title);
-					await attachment.save();
-				}
-			});
-			return parent || false;
-		})();
-		let parent = await untilDeadline(identifying, deadline);
-		let result = {
-			libraryID,
-			status: 'attached',
-			...await describeAttachment(attachment),
-			link: getOpenLink(attachment),
-		};
-		if (parent === TIMED_OUT) {
-			result.notice = 'Zotero is still identifying the file. Call zotero_get_items on the '
-				+ 'attachment later to see whether it has a parent item.';
-		}
-		else if (parent) {
-			result.identified = true;
-			result.parent = await describeItem(parent);
-			result.parentKey = parent.key;
-		}
-		else {
-			result.identified = false;
-			result.notice = Zotero.RecognizeDocument.canRecognize(attachment)
-				? "Zotero couldn't identify the file, so it's a standalone attachment. If you know "
-					+ 'what it is, add the item with zotero_add_items and attach the file to it.'
-				: 'Zotero identifies only PDFs and EPUBs, so the file is a standalone attachment.';
-		}
-		return Zotero.MCP.jsonResult(result);
-	}
 	
 	/**
 	 * Import a file, or text, in a format Zotero imports, such as BibTeX, RIS or Zotero RDF,
@@ -2383,55 +3105,6 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * @return {Promise<Object|null>} IOUtils.stat() of an absolute path, or null if there's
-	 *     nothing there or it can't be read
-	 * @throws {Zotero.MCP.ToolError} If the path isn't absolute
-	 */
-	async function statPath(path) {
-		if (!PathUtils.isAbsolute(path)) {
-			throw new Zotero.MCP.ToolError(`${path} isn't an absolute path. Give the full path.`);
-		}
-		try {
-			return await IOUtils.stat(path);
-		}
-		catch {
-			return null;
-		}
-	}
-	
-	/**
-	 * A new item from item JSON, checked but not saved
-	 *
-	 * @param {String} input - Where the JSON is in the arguments, for errors
-	 */
-	function itemFromJSON(libraryID, data, input) {
-		let json = { ...data };
-		for (let property of EXISTING_ITEM_PROPERTIES) {
-			delete json[property];
-		}
-		let item = new Zotero.Item();
-		item.libraryID = libraryID;
-		try {
-			item.fromJSON(json, { strict: true });
-		}
-		catch (e) {
-			throw new Zotero.MCP.ToolError(`${input}: ${e.message}`);
-		}
-		return item;
-	}
-	
-	/**
-	 * Identifiers in a string, as in Add Item by Identifier, also from PubMed URLs, whose
-	 * IDs extractIdentifiers() doesn't take after a slash
-	 *
-	 * @return {Object[]} e.g. [{ DOI: '10.1000/xyz' }]
-	 */
-	function extractIdentifiers(text) {
-		text = text.replace(/^https?:\/\/(?:pubmed\.ncbi\.nlm\.nih\.gov|www\.ncbi\.nlm\.nih\.gov\/pubmed)\/(\d+)\/?$/i, '$1');
-		return Zotero.Utilities.extractIdentifiers(text);
-	}
-	
-	/**
 	 * An installed style, or one installed from the Zotero Style Repository with the user's
 	 * permission
 	 *
@@ -2488,496 +3161,9 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.Styles.get(installed.styleID);
 	}
 	
-	async function noteToMarkdown(note) {
-		let markdown = await new Promise((resolve, reject) => {
-			let translation = new Zotero.Translate.Export();
-			translation.setItems([note]);
-			translation.setTranslator(Zotero.Translators.TRANSLATOR_ID_NOTE_MARKDOWN);
-			translation.setHandler('done', () => resolve(translation.string));
-			translation.setHandler('error', (_, error) => reject(error));
-			translation.translate();
-		});
-		return markdown.replace(/\r\n/g, '\n').trim();
-	}
-	
-	/**
-	 * The attachments of the items given by keys or in a collection, with ids null for the whole
-	 * library, and the keys with no item
-	 *
-	 * @return {Promise<Object>} { ids, missing }
-	 */
-	async function getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems }) {
-		if (itemKeys && collectionKey) {
-			throw new Zotero.MCP.ToolError('Give itemKeys or collectionKey, not both');
-		}
-		let items = [];
-		let missing = [];
-		if (itemKeys) {
-			({ items, missing } = await getItemsByKey(libraryID, itemKeys));
-		}
-		else if (collectionKey) {
-			let collection = getCollection(libraryID, collectionKey);
-			let collections = [collection];
-			if (includeSubcollectionItems) {
-				collections.push(...Zotero.Collections.get(
-					collection.getDescendents(false, 'collection').map(descendant => descendant.id)
-				));
-			}
-			for (let collection of collections) {
-				items.push(...collection.getChildItems());
-			}
-		}
-		else {
-			return { ids: null, missing };
-		}
-		let ids = new Set();
-		for (let item of items) {
-			if (item.isRegularItem()) {
-				item.getAttachments().forEach(id => ids.add(id));
-			}
-			else if (item.isAttachment()) {
-				ids.add(item.id);
-			}
-		}
-		return { ids: [...ids], missing };
-	}
-	
-	/**
-	 * A file attachment Zotero can get text from, or the best one of a parent item
-	 */
-	async function getTextAttachment(libraryID, key) {
-		let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
-		if (!item || item.deleted) {
-			throw new Zotero.MCP.ToolError(`No item ${key} in library ${libraryID}`);
-		}
-		if (item.isRegularItem()) {
-			item = await item.getBestAttachment();
-			if (!item) {
-				throw new Zotero.MCP.ToolError(`${key} has no PDF, EPUB, snapshot or other file`);
-			}
-		}
-		if (!Zotero.FullText.canIndex(item)) {
-			throw new Zotero.MCP.ToolError(
-				`${item.key} isn't a file Zotero can get text from: only PDFs, EPUBs, web page `
-					+ 'snapshots and text files'
-			);
-		}
-		return item;
-	}
-	
-	/**
-	 * The text Zotero extracted from an attachment for its full-text index (indexing it now if
-	 * it hasn't been), or a text file's contents
-	 *
-	 * @param {Number} deadline - Date.now() time to stop waiting for indexing at
-	 * @return {Promise<String|null|Symbol>} Null if there's no text, or the file is missing;
-	 *     TIMED_OUT if indexing didn't finish by the deadline
-	 */
-	async function getIndexedText(attachment, deadline) {
-		if (!Zotero.FullText.isCachedMIMEType(attachment.attachmentContentType)) {
-			let path = await attachment.getFilePathAsync();
-			return path ? Zotero.File.getContentsAsync(path, attachment.attachmentCharset) : null;
-		}
-		let path = Zotero.FullText.getItemCacheFile(attachment).path;
-		if (!await IOUtils.exists(path) && await attachment.fileExists()
-				&& await untilDeadline(Zotero.FullText.indexItems([attachment.id]), deadline) === TIMED_OUT) {
-			return TIMED_OUT;
-		}
-		return await IOUtils.exists(path) ? Zotero.File.getContentsAsync(path) : null;
-	}
-	
-	/**
-	 * Text of PDF pages, from the file
-	 *
-	 * @param {Integer[]} pageIndexes - Consecutive
-	 * @param {Number} deadline - Date.now() time to stop waiting at
-	 * @return {Promise<Object|Symbol>} { texts, totalPages }, with texts in the order of
-	 *     pageIndexes, or TIMED_OUT
-	 */
-	async function extractPages(attachment, pageIndexes, deadline) {
-		let result = await untilDeadline(Zotero.PDFWorker.getFullText(attachment.id, pageIndexes, true), deadline);
-		if (result === TIMED_OUT) {
-			return result;
-		}
-		return { texts: result.text.split('\f'), totalPages: result.totalPages };
-	}
-	
-	/**
-	 * The promise's value, or TIMED_OUT if the deadline comes first. The work goes on, and an
-	 * error after the deadline is logged.
-	 *
-	 * @param {Number} deadline - Date.now() time to stop waiting at
-	 */
-	async function untilDeadline(promise, deadline) {
-		let timedOut = false;
-		promise.catch((e) => {
-			if (timedOut) {
-				Zotero.logError(e);
-			}
-		});
-		let result = await Promise.race([
-			promise,
-			Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => TIMED_OUT),
-		]);
-		timedOut = result === TIMED_OUT;
-		return result;
-	}
-	
-	/**
-	 * A PDF's page labels (the page numbers printed on its pages) and outline, from its
-	 * structured document text (see sdt.js)
-	 *
-	 * The text itself comes from the full-text index, which works even when only text synced
-	 * from another computer is here; structured document text is only for what the index
-	 * doesn't have. Like Read Aloud, it's generated if it isn't cached, at the front of the PDF
-	 * worker's queue. That takes about 25 ms a page, but the worker runs one job at a time,
-	 * and the call has to finish by its deadline, so it's waited for only until the deadline.
-	 * Generation goes on after that, so a later call has it.
-	 *
-	 * @param {Number} deadline - Date.now() time to stop waiting at
-	 * @return {Promise<Object|null>} { labels, outline }, { pending: true } if it wasn't ready
-	 *     by the deadline, or null if there's none (e.g., a password-protected PDF)
-	 */
-	async function getStructure(attachment, deadline) {
-		let reader = Zotero.SDT.getReader(attachment.id, { isPriority: true });
-		let timeout = Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => 'timeout');
-		let result = await Promise.race([reader, timeout]);
-		if (result == 'timeout') {
-			// getPack() logs its own errors
-			reader.catch(() => {});
-			return { pending: true };
-		}
-		if (!result) {
-			return null;
-		}
-		let { pages = [], outline = [] } = await result.getCatalog();
-		let getOutline = entries => entries.map((entry) => {
-			let pageIndex = entry.target?.position?.pageIndex;
-			return {
-				title: entry.title,
-				page: Number.isInteger(pageIndex) ? pageIndex + 1 : undefined,
-				children: entry.children?.length ? getOutline(entry.children) : undefined,
-			};
-		});
-		return {
-			labels: pages.map(page => page.label),
-			outline: getOutline(outline),
-		};
-	}
-	
-	/**
-	 * A RegExp for a search term in text normalized with normalizeWithOffsets(), matching as
-	 * Zotero.FullText.findItemsWithContent() does: ignoring case and diacritics, with any
-	 * whitespace and hyphens between words, from the start of a word except in CJK text
-	 */
-	function getTermRegExp(term) {
-		let pattern = Zotero.Utilities.Internal.normalizeForSearch(term)
-			.split(/[\s-]+/)
-			.filter(Boolean)
-			.map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-			.join('[\\s-]+');
-		if (!pattern) {
-			return null;
-		}
-		if (/^[\p{L}\p{N}]/u.test(pattern) && !CJK_RE.test(pattern)) {
-			pattern = '(?<![\\p{L}\\p{N}])' + pattern;
-		}
-		return new RegExp(pattern, 'gu');
-	}
-	
-	/**
-	 * Text normalized with normalizeForSearch(), and for each character of it, the offset in
-	 * the text of the character it came from, so a match can be cut from the original text
-	 */
-	function normalizeWithOffsets(text) {
-		let pieces = [];
-		let offsets = [];
-		let offset = 0;
-		for (let char of text) {
-			let piece = char.charCodeAt(0) < 0x80
-				? char.toLowerCase()
-				: Zotero.Utilities.Internal.normalizeForSearch(char);
-			pieces.push(piece);
-			for (let i = 0; i < piece.length; i++) {
-				offsets.push(offset);
-			}
-			offset += char.length;
-		}
-		offsets.push(offset);
-		return { normalized: pieces.join(''), offsets };
-	}
-	
-	/**
-	 * Passages of text around matches of the RegExps, with nearby matches in one passage
-	 *
-	 * @return {Object} { matchCount, passages: [{ start, text, termCount }] }, termCount being
-	 *     how many of the RegExps match in the passage
-	 */
-	function findPassages(text, regExps) {
-		let { normalized, offsets } = normalizeWithOffsets(text);
-		let matches = [];
-		regExps.forEach((regExp, term) => {
-			for (let match of normalized.matchAll(regExp)) {
-				matches.push({
-					term,
-					start: offsets[match.index],
-					end: offsets[match.index + match[0].length],
-				});
-			}
-		});
-		matches.sort((a, b) => a.start - b.start);
-		let ranges = [];
-		for (let match of matches) {
-			let start = Math.max(0, match.start - PASSAGE_CONTEXT);
-			let end = Math.min(text.length, match.end + PASSAGE_CONTEXT);
-			let last = ranges.at(-1);
-			if (last && start <= last.end && end - last.start <= MAX_PASSAGE) {
-				last.end = end;
-				last.terms.add(match.term);
-			}
-			else {
-				ranges.push({ start, end, terms: new Set([match.term]) });
-			}
-		}
-		let passages = ranges.map(({ start, end, terms }) => {
-			let passage = text.slice(start, end);
-			// Start and end between words
-			if (start > 0) {
-				let cut = passage.match(/^\S*\s+/)?.[0].length ?? 0;
-				passage = passage.slice(cut);
-				start += cut;
-			}
-			if (end < text.length) {
-				passage = passage.replace(/\s+\S*$/, '');
-			}
-			return {
-				start,
-				text: (start > 0 ? '…' : '') + passage.replace(/\s+/g, ' ').trim()
-					+ (end < text.length ? '…' : ''),
-				termCount: terms.size,
-			};
-		});
-		return { matchCount: matches.length, passages };
-	}
-	
-	/**
-	 * For an attachment, its parent's title
-	 */
-	function getTitle(attachment) {
-		return attachment.parentItem?.getDisplayTitle() || attachment.getField('title');
-	}
-	
-	/**
-	 * The file open in a reader tab, the page the user is on, and what they've selected
-	 */
-	function describeReader(reader, attachment) {
-		let { pageIndex, pageLabel, selection, selectedAnnotationKeys } = getReaderState(reader);
-		let page;
-		// For an EPUB, the reader's page is a location number unless the book has page numbers,
-		// and links can't open one, so only a selection's page label is given
-		if (attachment.isPDFAttachment()) {
-			pageIndex ??= attachment.getAttachmentLastPageIndex() ?? undefined;
-			page = Number.isInteger(pageIndex) ? pageIndex + 1 : undefined;
-		}
-		else {
-			pageLabel = undefined;
-		}
-		let description = {
-			libraryID: attachment.libraryID,
-			key: attachment.key,
-			parentKey: attachment.parentKey || undefined,
-			title: getTitle(attachment),
-			contentType: attachment.attachmentContentType,
-			path: attachment.getFilePath() || undefined,
-			type: reader.type,
-			page,
-			pageLabel: knownPageLabel(pageLabel),
-			link: getOpenLink(attachment, { page }),
-			selectedAnnotations: selectedAnnotationKeys
-				.map(key => Zotero.Items.getByLibraryAndKey(attachment.libraryID, key))
-				.filter(annotation => annotation?.isAnnotation())
-				.map(describeAnnotation),
-		};
-		if (selection?.text) {
-			let selectionPageIndex = selection.position?.pageIndex;
-			description.selection = {
-				text: selection.text,
-				page: Number.isInteger(selectionPageIndex) ? selectionPageIndex + 1 : undefined,
-				pageLabel: knownPageLabel(selection.pageLabel),
-			};
-		}
-		return description;
-	}
-	
-	/**
-	 * The page the user is on and what they've selected, from the reader's private state,
-	 * which can change without notice, so anything missing is left out.
-	 *
-	 * TODO: Use _internalReader.getSelection(), .selectedAnnotationIDs, .pageIndex and
-	 * .pageLabel once the reader has them (https://github.com/zotero/reader/pull/276)
-	 */
-	function getReaderState(reader) {
-		try {
-			let internalReader = reader._internalReader;
-			let state = internalReader._state;
-			// The view the user last used, as the reader's getSelectionPosition() decides
-			let view = internalReader._lastViewPrimary === false ? 'secondaryView' : 'primaryView';
-			// Copied out of the reader's window, so they can be passed on
-			let copy = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
-			let stats = copy(state[`${view}Stats`]) || {};
-			let selectedAnnotationKeys = copy(state.selectedAnnotationIDs);
-			return {
-				pageIndex: Number.isInteger(stats.pageIndex) ? stats.pageIndex : undefined,
-				pageLabel: typeof stats.pageLabel == 'string' ? stats.pageLabel : undefined,
-				selection: copy(state[`${view}SelectionPopup`]?.annotation),
-				selectedAnnotationKeys: Array.isArray(selectedAnnotationKeys) ? selectedAnnotationKeys : [],
-			};
-		}
-		catch (e) {
-			Zotero.logError(e);
-			return { selectedAnnotationKeys: [] };
-		}
-	}
-	
-	/**
-	 * A page label, without the reader's "-" for a page whose label it couldn't determine
-	 */
-	function knownPageLabel(label) {
-		return label && label != '-' ? label : undefined;
-	}
-	
-	function describeAnnotation(annotation) {
-		let attachment = annotation.parentItem;
-		let pageIndex = attachment.isPDFAttachment()
-			? JSON.parse(annotation.annotationPosition).pageIndex
-			: undefined;
-		return {
-			key: annotation.key,
-			attachmentKey: attachment.key,
-			type: annotation.annotationType,
-			text: annotation.annotationText || undefined,
-			comment: annotation.annotationComment || undefined,
-			color: annotation.annotationColor,
-			page: Number.isInteger(pageIndex) ? pageIndex + 1 : undefined,
-			pageLabel: knownPageLabel(annotation.annotationPageLabel),
-			tags: annotation.getTags().map(tag => tag.tag),
-			link: getOpenLink(attachment, { annotation: annotation.key }),
-		};
-	}
-	
-	/**
-	 * A main window by its ID, or the one with a tab
-	 *
-	 * @param {String} [windowID]
-	 * @param {String} [tabID]
-	 * @return {ChromeWindow|null} Null if neither is given
-	 */
-	function getWindowByID(windowID, tabID) {
-		let windows = Zotero.getMainWindows().filter(win => win.Zotero_Tabs);
-		if (windowID) {
-			let win = windows.find(win => win.Zotero_Tabs.windowID == windowID);
-			if (!win) {
-				throw new Zotero.MCP.ToolError(
-					`No window ${windowID}. zotero_get_context lists Zotero's windows.`
-				);
-			}
-			if (tabID && !getTabIDs(win).includes(tabID)) {
-				throw new Zotero.MCP.ToolError(`${tabID} isn't a tab of window ${windowID}`);
-			}
-			return win;
-		}
-		if (tabID) {
-			let found = windows.filter(win => getTabIDs(win).includes(tabID));
-			if (!found.length) {
-				throw new Zotero.MCP.ToolError(`No tab ${tabID}. zotero_get_context lists Zotero's tabs.`);
-			}
-			// Tab IDs are only unique in a window: each window's first library tab is zotero-pane
-			if (found.length > 1) {
-				throw new Zotero.MCP.ToolError(
-					`${tabID} is a tab in ${found.length} windows. Give windowID too.`
-				);
-			}
-			return found[0];
-		}
-		return null;
-	}
-	
-	/**
-	 * @throws {Zotero.MCP.ToolError} If arguments for where to show something conflict
-	 */
-	function checkWhere({ windowID, tabID, newWindow, newTab }) {
-		if (newWindow && (windowID || tabID || newTab)) {
-			throw new Zotero.MCP.ToolError(
-				'newWindow opens a window of its own. Leave out windowID, tabID and newTab.'
-			);
-		}
-		if (newTab && tabID) {
-			throw new Zotero.MCP.ToolError('Give tabID or newTab, not both');
-		}
-	}
-	
-	/**
-	 * The IDs of a main window's tabs, in order, or only of those showing an item
-	 */
-	function getTabIDs(win, item) {
-		return win.Zotero_Tabs._tabs
-			.filter(tab => !item || tab.data?.itemID === item.id)
-			.map(tab => tab.id);
-	}
-	
-	function describeTab(win, tabID) {
-		let { Zotero_Tabs, ZoteroPane } = win;
-		let info = Zotero_Tabs.getTabInfo(tabID);
-		let tab = {
-			tabID,
-			type: Zotero_Tabs.parseTabType(info.type).tabContentType,
-			title: info.title,
-			selected: tabID == Zotero_Tabs.selectedID || undefined,
-		};
-		let item = info.data?.itemID && Zotero.Items.get(info.data.itemID);
-		if (item) {
-			Object.assign(tab, { libraryID: item.libraryID, key: item.key });
-			let reader = Zotero.Reader.getByTabID(tabID);
-			if (reader && item.isPDFAttachment()) {
-				let { pageIndex } = getReaderState(reader);
-				tab.page = Number.isInteger(pageIndex) ? pageIndex + 1 : undefined;
-			}
-		}
-		let view = ZoteroPane.getLibraryView(tabID);
-		if (view?.loaded) {
-			let rows = view.getCollectionTreeRows();
-			let row = rows.length == 1 ? rows[0] : null;
-			Object.assign(tab, {
-				libraryID: row?.ref.libraryID,
-				collectionKey: row?.isCollection() ? row.ref.key : undefined,
-				savedSearchKey: row?.isSearch() ? row.ref.key : undefined,
-			});
-		}
-		return tab;
-	}
-	
-	/**
-	 * A library tab's view once it shows what it was opened with
-	 *
-	 * @param {String|null} tabID - Null for the library tab of a new window
-	 * @param {Number} deadline - Date.now() time to stop waiting at
-	 */
-	async function waitForLibraryView(win, tabID, deadline) {
-		let view;
-		while (!(view = tabID ? win.ZoteroPane?.getLibraryView(tabID) : win.ZoteroPane?.libraryView)?.loaded) {
-			if (win.closed) {
-				throw new Zotero.MCP.ToolError('The window was closed before the library tab opened');
-			}
-			if (Date.now() > deadline) {
-				throw new Zotero.MCP.ToolError(
-					'Zotero is still opening the library tab. Call zotero_get_context later for it.'
-				);
-			}
-			await Zotero.Promise.delay(20);
-		}
-		await view.waitForLibraryTabState();
-		return view;
-	}
+	//
+	// Shared: finding objects by key
+	//
 	
 	function getLibraryID(libraryID = Zotero.Libraries.userLibraryID) {
 		if (!Zotero.Libraries.exists(libraryID)) {
@@ -2986,23 +3172,47 @@ Zotero.MCP.Tools = new function () {
 		return libraryID;
 	}
 	
-	/**
-	 * The items a saved search shows, as in its view: top-level, and not in the trash
-	 */
-	async function countSearchItems(search) {
-		let items = await Zotero.Items.getAsync(await search.search());
-		return Zotero.Items.getTopLevel(items).filter(item => !item.deleted).length;
+	async function getItem(libraryID, key) {
+		let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
+		if (!item || item.deleted) {
+			throw new Zotero.MCP.ToolError(`No item ${key} in library ${libraryID}`);
+		}
+		return item;
 	}
 	
 	/**
-	 * A tag color's name in TAG_COLORS, or its hex value if it isn't one of them, e.g. one
-	 * set by a plugin
+	 * The items of keys, and the keys with no item, or with one in the trash unless
+	 * includeTrashed, for tools that read several and return the others as missing
 	 */
-	function getTagColorName(hex) {
-		if (!hex) {
-			return undefined;
+	async function getItemsByKey(libraryID, keys, { includeTrashed = false } = {}) {
+		let items = [];
+		let missing = [];
+		for (let key of new Set(keys)) {
+			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
+			if (!item || item.deleted && !includeTrashed) {
+				missing.push(key);
+			}
+			else {
+				items.push(item);
+			}
 		}
-		return Object.keys(TAG_COLORS).find(name => TAG_COLORS[name] == hex.toUpperCase()) ?? hex;
+		return { items, missing };
+	}
+	
+	function getCollection(libraryID, key) {
+		let collection = Zotero.Collections.getByLibraryAndKey(libraryID, key);
+		if (!collection || collection.deleted) {
+			throw new Zotero.MCP.ToolError(`No collection ${key} in library ${libraryID}`);
+		}
+		return collection;
+	}
+	
+	function getSavedSearch(libraryID, key) {
+		let search = Zotero.Searches.getByLibraryAndKey(libraryID, key);
+		if (!search || search.deleted) {
+			throw new Zotero.MCP.ToolError(`No saved search ${key} in library ${libraryID}`);
+		}
+		return search;
 	}
 	
 	/**
@@ -3048,44 +3258,9 @@ Zotero.MCP.Tools = new function () {
 		return { search, resultLevel };
 	}
 	
-	function getSavedSearch(libraryID, key) {
-		let search = Zotero.Searches.getByLibraryAndKey(libraryID, key);
-		if (!search || search.deleted) {
-			throw new Zotero.MCP.ToolError(`No saved search ${key} in library ${libraryID}`);
-		}
-		return search;
-	}
-	
-	function getCollection(libraryID, key) {
-		let collection = Zotero.Collections.getByLibraryAndKey(libraryID, key);
-		if (!collection || collection.deleted) {
-			throw new Zotero.MCP.ToolError(`No collection ${key} in library ${libraryID}`);
-		}
-		return collection;
-	}
-	
-	/**
-	 * A link that selects an item, collection or saved search in Zotero, for the AI app to show
-	 * the user
-	 */
-	function getSelectLink(object) {
-		return `zotero://select/${Zotero.API.getLibraryPrefix(object.libraryID)}/`
-			+ `${object._objectTypePlural}/${object.key}`;
-	}
-	
-	/**
-	 * A link that opens an attachment in Zotero, at a PDF page (1-based) or an annotation
-	 */
-	function getOpenLink(attachment, { page, annotation } = {}) {
-		let link = `zotero://open/${Zotero.API.getLibraryPrefix(attachment.libraryID)}/items/${attachment.key}`;
-		if (annotation) {
-			return `${link}?annotation=${annotation}`;
-		}
-		if (page) {
-			return `${link}?page=${page}`;
-		}
-		return link;
-	}
+	//
+	// Shared: describing objects in results
+	//
 	
 	/**
 	 * An item as a search result
@@ -3136,23 +3311,90 @@ Zotero.MCP.Tools = new function () {
 		return description;
 	}
 	
-	function sortItems(items, sort, direction) {
-		let value = {
-			dateModified: item => item.dateModified,
-			dateAdded: item => item.dateAdded,
-			title: item => item.getDisplayTitle(),
-			creator: item => (item.isRegularItem() ? item.getField('firstCreator') : ''),
-			// Multipart dates ("2020-05-00 May 2020") sort by their first part
-			date: item => (item.isRegularItem() ? item.getField('date', true, true).slice(0, 10) : ''),
-		}[sort];
-		let compare = sort == 'title' || sort == 'creator'
-			? (a, b) => Zotero.localeCompare(a, b)
-			: (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-		// Newest first for dates, A to Z otherwise
-		let sign = (direction ?? (sort.startsWith('date') ? 'desc' : 'asc')) == 'desc' ? -1 : 1;
-		let values = new Map(items.map(item => [item, value(item)]));
-		items.sort((a, b) => sign * compare(values.get(a), values.get(b)));
+	function describeAnnotation(annotation) {
+		let attachment = annotation.parentItem;
+		let pageIndex = attachment.isPDFAttachment()
+			? JSON.parse(annotation.annotationPosition).pageIndex
+			: undefined;
+		return {
+			key: annotation.key,
+			attachmentKey: attachment.key,
+			type: annotation.annotationType,
+			text: annotation.annotationText || undefined,
+			comment: annotation.annotationComment || undefined,
+			color: annotation.annotationColor,
+			page: Number.isInteger(pageIndex) ? pageIndex + 1 : undefined,
+			pageLabel: knownPageLabel(annotation.annotationPageLabel),
+			tags: annotation.getTags().map(tag => tag.tag),
+			link: getOpenLink(attachment, { annotation: annotation.key }),
+		};
 	}
+	
+	/**
+	 * A page label, without the reader's "-" for a page whose label it couldn't determine
+	 */
+	function knownPageLabel(label) {
+		return label && label != '-' ? label : undefined;
+	}
+	
+	/**
+	 * For an attachment, its parent's title
+	 */
+	function getTitle(attachment) {
+		return attachment.parentItem?.getDisplayTitle() || attachment.getField('title');
+	}
+	
+	/**
+	 * A link that selects an item, collection or saved search in Zotero, for the AI app to show
+	 * the user
+	 */
+	function getSelectLink(object) {
+		return `zotero://select/${Zotero.API.getLibraryPrefix(object.libraryID)}/`
+			+ `${object._objectTypePlural}/${object.key}`;
+	}
+	
+	/**
+	 * A link that opens an attachment in Zotero, at a PDF page (1-based) or an annotation
+	 */
+	function getOpenLink(attachment, { page, annotation } = {}) {
+		let link = `zotero://open/${Zotero.API.getLibraryPrefix(attachment.libraryID)}/items/${attachment.key}`;
+		if (annotation) {
+			return `${link}?annotation=${annotation}`;
+		}
+		if (page) {
+			return `${link}?page=${page}`;
+		}
+		return link;
+	}
+	
+	//
+	// Shared: deadlines
+	//
+	
+	/**
+	 * The promise's value, or TIMED_OUT if the deadline comes first. The work goes on, and an
+	 * error after the deadline is logged.
+	 *
+	 * @param {Number} deadline - Date.now() time to stop waiting at
+	 */
+	async function untilDeadline(promise, deadline) {
+		let timedOut = false;
+		promise.catch((e) => {
+			if (timedOut) {
+				Zotero.logError(e);
+			}
+		});
+		let result = await Promise.race([
+			promise,
+			Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => TIMED_OUT),
+		]);
+		timedOut = result === TIMED_OUT;
+		return result;
+	}
+	
+	//
+	// Shared: changing the library
+	//
 	
 	/**
 	 * Run an app's changes in one transaction, which the user undoes in one step (Edit → Undo
@@ -3183,187 +3425,24 @@ Zotero.MCP.Tools = new function () {
 		}
 	}
 	
-	/**
-	 * The items of keys, and the keys with no item, or with one in the trash unless
-	 * includeTrashed, for tools that read several and return the others as missing
-	 */
-	async function getItemsByKey(libraryID, keys, { includeTrashed = false } = {}) {
-		let items = [];
-		let missing = [];
-		for (let key of new Set(keys)) {
-			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
-			if (!item || item.deleted && !includeTrashed) {
-				missing.push(key);
-			}
-			else {
-				items.push(item);
-			}
-		}
-		return { items, missing };
-	}
-	
-	async function getItem(libraryID, key) {
-		let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
-		if (!item || item.deleted) {
-			throw new Zotero.MCP.ToolError(`No item ${key} in library ${libraryID}`);
-		}
-		return item;
-	}
+	//
+	// Shared: files on this computer
+	//
 	
 	/**
-	 * Item types an item can be created as or changed to: not notes, attachments or annotations
+	 * @return {Promise<Object|null>} IOUtils.stat() of an absolute path, or null if there's
+	 *     nothing there or it can't be read
+	 * @throws {Zotero.MCP.ToolError} If the path isn't absolute
 	 */
-	function getRegularItemTypes() {
-		return Zotero.ItemTypes.getAll()
-			.filter(type => !['note', 'attachment', 'annotation'].includes(type.name));
-	}
-	
-	/**
-	 * @throws {Zotero.MCP.ToolError} If a field isn't valid for the item's type
-	 */
-	function checkField(item, field) {
-		let fieldID = Zotero.ItemFields.getID(field);
-		// Base fields (e.g. publicationTitle) stand for the type's own (e.g. bookTitle)
-		fieldID = fieldID && (Zotero.ItemFields.getFieldIDFromTypeAndBase(item.itemTypeID, fieldID) || fieldID);
-		if (!fieldID || !Zotero.ItemFields.isValidForType(fieldID, item.itemTypeID)) {
-			let fields = Zotero.ItemFields.getItemTypeFields(item.itemTypeID)
-				.map(id => Zotero.ItemFields.getName(id));
-			throw new Zotero.MCP.ToolError(
-				`${item.key}: ${field} isn't a field of item type ${item.itemType}. `
-					+ (fields.length ? `Its fields are ${fields.join(', ')}.` : 'It has no fields.')
-			);
+	async function statPath(path) {
+		if (!PathUtils.isAbsolute(path)) {
+			throw new Zotero.MCP.ToolError(`${path} isn't an absolute path. Give the full path.`);
 		}
-	}
-	
-	/**
-	 * @throws {Zotero.MCP.ToolError} If a creator type isn't valid for the item's type
-	 */
-	function checkCreators(item, creators) {
-		let types = Zotero.CreatorTypes.getTypesForItemType(item.itemTypeID).map(type => type.name);
-		for (let creator of creators) {
-			if (!types.includes(creator.creatorType)) {
-				throw new Zotero.MCP.ToolError(
-					`${item.key}: ${creator.creatorType} isn't a creator type of item type ${item.itemType}. `
-						+ (types.length ? `Its creator types are ${types.join(', ')}.` : 'It has no creators.')
-				);
-			}
+		try {
+			return await IOUtils.stat(path);
 		}
-	}
-	
-	let _markdownIt;
-	
-	/**
-	 * Note HTML from Markdown, as the note editor makes from pasted Markdown (CommonMark with
-	 * tables, strikethrough and TeX math, and no raw HTML), and with bare URLs made links
-	 */
-	function markdownToNoteHTML(markdown) {
-		if (!_markdownIt) {
-			// The note editor's configuration (note-editor/src/core/plugins/markdown-parser.js),
-			// plus the linkify rule, which the commonmark preset leaves off even with
-			// linkify: true
-			_markdownIt = require('markdown-it')('commonmark', { html: false, linkify: true, breaks: false })
-				.enable(['table', 'strikethrough', 'linkify']);
-			addMath(_markdownIt);
-			// Notes only show images stored in Zotero, so other images become links
-			_markdownIt.renderer.rules.image = (tokens, i, options, env, self) => {
-				let src = _markdownIt.utils.escapeHtml(tokens[i].attrGet('src'));
-				let alt = self.renderInlineAsText(tokens[i].children, options, env);
-				return `<a href="${src}">${_markdownIt.utils.escapeHtml(alt) || src}</a>`;
-			};
+		catch {
+			return null;
 		}
-		return `<div data-schema-version="9">${_markdownIt.render(markdown)}</div>`;
-	}
-	
-	/**
-	 * TeX math as the note editor stores it: <span class="math">$…$</span> and
-	 * <pre class="math">$$…$$</pre>
-	 *
-	 * The same rules as when Markdown is pasted into a note, copied from the note editor
-	 * (note-editor/src/core/plugins/markdown-parser.js), so a note reads the same either way:
-	 * dollar signs become math only around content that looks like math (a TeX command,
-	 * braces or an operator), and display math is fenced by lines of just $$.
-	 */
-	function addMath(md) {
-		let { escapeHtml } = md.utils;
-		
-		function isMathish(content) {
-			let text = String(content).trim();
-			if (!text) return false;
-			// Ignore trivial numeric values (helps with currency like "$20")
-			if (/^\d+(?:[.,]\d+)?$/.test(text)) return false;
-			let hasCommand = /\\[a-zA-Z]+/.test(text);
-			// Leading +/- of a number isn't an operator
-			let sanitized = text.replace(/(^|\s)[+-](?=\d)/g, ' ');
-			let hasOperator = /[+\-*/=^_]/.test(sanitized);
-			let open = (text.match(/{/g) || []).length;
-			let close = (text.match(/}/g) || []).length;
-			if ((open || close) && open !== close) return false;
-			return hasCommand || open > 0 || hasOperator;
-		}
-		
-		md.inline.ruler.after('escape', 'math_inline', (state, silent) => {
-			let start = state.pos;
-			if (state.src[start] !== '$' || state.src[start + 1] === '$') return false;
-			// Avoid matching inside code spans
-			if (state.tokens && state.tokens.some(t => t.type === 'code_inline')) return false;
-			let pos = start + 1;
-			let found = false;
-			while (pos < state.posMax) {
-				if (state.src[pos] === '$') {
-					// An odd number of backslashes escapes it
-					let backslashes = 0;
-					for (let prev = pos - 1; prev >= 0 && state.src[prev] === '\\'; prev--) {
-						backslashes++;
-					}
-					if (backslashes % 2 === 0) {
-						found = true;
-						break;
-					}
-				}
-				pos++;
-			}
-			if (!found) return false;
-			let content = state.src.slice(start + 1, pos);
-			if (!content || /^\s+$/.test(content) || !isMathish(content)) return false;
-			if (!silent) {
-				state.push('math_inline', '', 0).content = content;
-			}
-			state.pos = pos + 1;
-			return true;
-		});
-		
-		md.block.ruler.after('fence', 'math_block', (state, startLine, endLine, silent) => {
-			// A line of $$ and nothing else but spaces and tabs
-			let isFence = (line) => {
-				let start = state.bMarks[line] + state.tShift[line];
-				return /^\$\$[ \t]*$/.test(state.src.slice(start, state.eMarks[line]));
-			};
-			if (!isFence(startLine)) return false;
-			let contentStart = state.bMarks[startLine] + state.tShift[startLine] + 2;
-			let nextLine = startLine;
-			let contentEnd;
-			while (true) {
-				nextLine++;
-				if (nextLine >= endLine) return false;
-				if (isFence(nextLine)) {
-					contentEnd = state.bMarks[nextLine];
-					break;
-				}
-			}
-			if (silent) return true;
-			let content = state.src.slice(contentStart, contentEnd).replace(/^\s*\n?|\n?\s*$/g, '');
-			if (!isMathish(content)) return false;
-			state.line = nextLine + 1;
-			let token = state.push('math_block', '', 0);
-			token.block = true;
-			token.map = [startLine, nextLine + 1];
-			token.content = content;
-			return true;
-		});
-		
-		// eslint-disable-next-line camelcase
-		md.renderer.rules.math_inline = (tokens, i) => `<span class="math">$${escapeHtml(tokens[i].content)}$</span>`;
-		// eslint-disable-next-line camelcase
-		md.renderer.rules.math_block = (tokens, i) => `<pre class="math">$$${escapeHtml(tokens[i].content)}$$</pre>\n`;
 	}
 };

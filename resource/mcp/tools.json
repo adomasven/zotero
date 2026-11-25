@@ -48,6 +48,64 @@
 			}
 		},
 		{
+			"name": "zotero_list_item_types",
+			"title": "List Zotero item types",
+			"description": "List the item types an item can be (book, journalArticle and so on), with each type's fields and creator types, by the names zotero_add_items, zotero_update_items and zotero_change_item_types take.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"itemTypes": { "type": "array", "items": { "enum": ["artwork", "audioRecording", "bill", "blogPost", "book", "bookSection", "case", "computerProgram", "conferencePaper", "dataset", "dictionaryEntry", "document", "email", "encyclopediaArticle", "film", "forumPost", "hearing", "instantMessage", "interview", "journalArticle", "letter", "magazineArticle", "manuscript", "map", "newspaperArticle", "patent", "podcast", "preprint", "presentation", "radioBroadcast", "report", "standard", "statute", "thesis", "tvBroadcast", "videoRecording", "webpage"] }, "description": "Defaults to all" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"itemTypes": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"itemType": { "type": "string" },
+								"label": { "type": "string", "description": "The name Zotero shows the user, in Zotero's language" },
+								"fields": {
+									"type": "array",
+									"description": "In the order the item pane shows them",
+									"items": {
+										"type": "object",
+										"properties": {
+											"field": { "type": "string" },
+											"label": { "type": "string" },
+											"baseField": { "type": "string", "description": "The general field this type's field stands for, e.g. publicationTitle for bookTitle. A type change moves a value between fields with the same base field, and zotero_update_items also takes the base field's name." }
+										},
+										"required": ["field", "label"]
+									}
+								},
+								"creatorTypes": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"properties": {
+											"creatorType": { "type": "string" },
+											"label": { "type": "string" },
+											"primary": { "type": "boolean", "description": "The type's main creator type, e.g. author" }
+										},
+										"required": ["creatorType", "label"]
+									}
+								}
+							},
+							"required": ["itemType", "label", "fields", "creatorTypes"]
+						}
+					}
+				},
+				"required": ["itemTypes"]
+			},
+			"annotations": {
+				"readOnlyHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
 			"name": "zotero_search",
 			"title": "Search Zotero",
 			"description": "Find items in a Zotero library by free text, as Zotero's search box matches it, and by conditions, as in its Advanced Search. Matches in notes, attachments and annotations return the item they belong to, unless a condition is itemType is note, attachment or annotation.",
@@ -218,6 +276,355 @@
 			}
 		},
 		{
+			"name": "zotero_list_duplicates",
+			"title": "List duplicate Zotero items",
+			"description": "List the sets of items Zotero considers duplicates, as its Duplicate Items view does: items with the same DOI or ISBN, or with similar titles, the same creators and years close together. Check that a set really is one work, e.g. not a preprint and its published version the user keeps apart, before merging it with zotero_merge_items. Each set is oldest first.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "Sets per page" },
+					"offset": { "type": "integer", "minimum": 0, "default": 0 },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"total": { "type": "integer", "description": "Sets in the library" },
+					"sets": {
+						"type": "array",
+						"items": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"key": { "type": "string" },
+									"itemType": { "type": "string" },
+									"title": { "type": "string" },
+									"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
+									"date": { "type": "string" },
+									"DOI": { "type": "string" },
+									"ISBN": { "type": "string" },
+									"dateAdded": { "type": "string" },
+									"bestAttachment": {
+										"type": "object",
+										"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
+										"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
+										"required": ["key"]
+									},
+									"attachmentCount": { "type": "integer" },
+									"noteCount": { "type": "integer" },
+									"annotationCount": { "type": "integer", "description": "In all its files" },
+									"link": { "type": "string" }
+								},
+								"required": ["key", "itemType", "title", "dateAdded", "attachmentCount", "noteCount"]
+							}
+						}
+					},
+					"nextOffset": { "type": "integer" }
+				},
+				"required": ["libraryID", "total", "sets"]
+			},
+			"annotations": {
+				"readOnlyHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_add_items",
+			"title": "Add items to Zotero",
+			"description": "Add items to a Zotero library, with their metadata looked up, and look for their PDFs. For BibTeX, RIS or another import format, use zotero_import. Ways to add, best first:\n- identifiers: DOIs, ISBNs, arXiv IDs or PubMed IDs, or URLs that contain one (doi.org, a publisher's article page with the DOI in its URL, arxiv.org, pubmed.ncbi.nlm.nih.gov). Zotero doesn't add other web pages: the user saves those with the Zotero Connector in their browser.\n- items: item JSON, for something without an identifier whose metadata you found yourself.\nBy default Zotero then looks for each new item's PDF or EPUB as its Find Full Text does, from the user's computer, so access through their institution works.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"identifiers": {
+						"type": "array",
+						"items": { "type": "string" },
+						"maxItems": 10,
+						"description": "e.g. [\"10.1038/nature12373\", \"978-0-262-03384-8\", \"arXiv:1706.03762\", \"PMID: 23903748\"]"
+					},
+					"items": {
+						"type": "array",
+						"maxItems": 50,
+						"description": "Item JSON in the Zotero web API format, as zotero_get_items returns, e.g. {\"itemType\": \"report\", \"title\": \"…\", \"creators\": [{\"creatorType\": \"author\", \"firstName\": \"Ann\", \"lastName\": \"Lee\"}], \"date\": \"2024\", \"institution\": \"…\", \"url\": \"…\"}. Only fields of the item type are accepted; zotero_list_item_types lists each type's fields and creator types. Notes and files aren't items here: add them with zotero_add_note and zotero_add_attachment.",
+						"items": {
+							"type": "object",
+							"properties": {
+								"itemType": { "enum": ["artwork", "audioRecording", "bill", "blogPost", "book", "bookSection", "case", "computerProgram", "conferencePaper", "dataset", "dictionaryEntry", "document", "email", "encyclopediaArticle", "film", "forumPost", "hearing", "instantMessage", "interview", "journalArticle", "letter", "magazineArticle", "manuscript", "map", "newspaperArticle", "patent", "podcast", "preprint", "presentation", "radioBroadcast", "report", "standard", "statute", "thesis", "tvBroadcast", "videoRecording", "webpage"] }
+							},
+							"required": ["itemType"]
+						}
+					},
+					"collectionKey": { "type": "string", "description": "A collection to add the items to" },
+					"findFiles": { "type": "boolean", "default": true, "description": "Look for PDFs and EPUBs" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"results": {
+						"type": "array",
+						"description": "One per item, in the order given. An identifier can give several.",
+						"items": {
+							"type": "object",
+							"properties": {
+								"input": { "type": "string", "description": "The identifier given, or \"items[i]\"" },
+								"status": { "enum": ["added", "failed", "pending"], "description": "pending: Zotero is still looking up the identifier, and adds its item when it finds it." },
+								"error": { "type": "string", "description": "Why it failed" },
+								"key": { "type": "string" },
+								"itemType": { "type": "string" },
+								"title": { "type": "string" },
+								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
+								"date": { "type": "string" },
+								"attachments": {
+									"type": "array",
+									"description": "The new item's attachments, e.g. the PDF Zotero found",
+									"items": {
+										"type": "object",
+										"properties": { "key": { "type": "string" }, "title": { "type": "string" }, "contentType": { "type": "string" } },
+										"required": ["key", "title"]
+									}
+								},
+								"fileSearch": { "enum": ["pending", "notFound"], "description": "For a new item without a file: whether Zotero is still looking for one" },
+								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
+							},
+							"required": ["input", "status"]
+						}
+					},
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
+				},
+				"required": ["libraryID", "results"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false,
+				"openWorldHint": true
+			}
+		},
+		{
+			"name": "zotero_update_items",
+			"title": "Edit Zotero items",
+			"description": "Change items' metadata, tags and collections: set or clear fields (title, date, DOI, abstractNote and so on), replace creators, add or remove tags, and add items to or remove them from collections. To change an item's type, use zotero_change_item_types. All or nothing: one invalid change fails the call.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"changes": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string", "description": "The item's key" },
+								"fields": {
+									"type": "object",
+									"description": "Fields to set, by Zotero field name (zotero_list_item_types lists each item type's), e.g. {\"title\": \"…\", \"date\": \"2020-05\"}. An empty string clears a field.",
+									"additionalProperties": { "type": "string" }
+								},
+								"creators": {
+									"type": "array",
+									"description": "Replaces all of the item's creators, in order",
+									"items": {
+										"type": "object",
+										"properties": {
+											"creatorType": { "type": "string", "description": "e.g. \"author\" or \"editor\"; zotero_list_item_types lists each item type's" },
+											"firstName": { "type": "string" },
+											"lastName": { "type": "string" },
+											"name": { "type": "string", "description": "Instead of firstName and lastName, for an organization or a one-part name" }
+										},
+										"required": ["creatorType"],
+										"oneOf": [
+											{ "required": ["lastName"], "not": { "required": ["name"] } },
+											{ "required": ["name"], "not": { "anyOf": [{ "required": ["firstName"] }, { "required": ["lastName"] }] } }
+										],
+										"additionalProperties": false
+									}
+								},
+								"addTags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+								"removeTags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+								"addToCollections": { "type": "array", "items": { "type": "string" }, "description": "Collection keys. An item stays in the collections it's already in." },
+								"removeFromCollections": { "type": "array", "items": { "type": "string" }, "description": "Collection keys. The item stays in the library." }
+							},
+							"required": ["key"],
+							"additionalProperties": false
+						},
+						"minItems": 1,
+						"maxItems": 50
+					},
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["changes"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"items": {
+						"type": "array",
+						"description": "The items as they are now",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"itemType": { "type": "string" },
+								"parentKey": { "type": "string" },
+								"title": { "type": "string" },
+								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
+								"date": { "type": "string" },
+								"bestAttachment": {
+									"type": "object",
+									"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
+									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
+									"required": ["key"]
+								},
+								"attachmentCount": { "type": "integer" },
+								"noteCount": { "type": "integer" },
+								"annotationCount": { "type": "integer", "description": "In all its files" },
+								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
+							},
+							"required": ["key", "itemType", "title", "link"]
+						}
+					}
+				},
+				"required": ["libraryID", "items"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_change_item_types",
+			"title": "Change Zotero item types",
+			"description": "Change items' types, e.g. from journalArticle to bookSection. Fields the new type also has keep their values. A field with a counterpart in the new type moves to it (e.g. publicationTitle becomes bookTitle; zotero_list_item_types lists each field's baseField). Fields the new type doesn't have are removed, and the result gives their values, so you can tell the user or put them elsewhere. Use zotero_update_items afterwards to fill the new type's fields. Notes, attachments and annotations can't change type. All or nothing: one invalid change fails the call.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"changes": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string", "description": "The item's key" },
+								"itemType": { "enum": ["artwork", "audioRecording", "bill", "blogPost", "book", "bookSection", "case", "computerProgram", "conferencePaper", "dataset", "dictionaryEntry", "document", "email", "encyclopediaArticle", "film", "forumPost", "hearing", "instantMessage", "interview", "journalArticle", "letter", "magazineArticle", "manuscript", "map", "newspaperArticle", "patent", "podcast", "preprint", "presentation", "radioBroadcast", "report", "standard", "statute", "thesis", "tvBroadcast", "videoRecording", "webpage"], "description": "The new type" }
+							},
+							"required": ["key", "itemType"],
+							"additionalProperties": false
+						},
+						"minItems": 1,
+						"maxItems": 50
+					},
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["changes"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"items": {
+						"type": "array",
+						"description": "The items as they are now, with what the change did to them",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"itemType": { "type": "string" },
+								"parentKey": { "type": "string" },
+								"title": { "type": "string" },
+								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
+								"date": { "type": "string" },
+								"bestAttachment": {
+									"type": "object",
+									"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
+									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
+									"required": ["key"]
+								},
+								"attachmentCount": { "type": "integer" },
+								"noteCount": { "type": "integer" },
+								"annotationCount": { "type": "integer", "description": "In all its files" },
+								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" },
+								"oldItemType": { "type": "string" },
+								"movedFields": { "type": "object", "description": "Old field → the new type's field its value moved to", "additionalProperties": { "type": "string" } },
+								"removedFields": { "type": "object", "description": "Old field → the value it had, which the item no longer has", "additionalProperties": { "type": "string" } },
+								"changedCreatorTypes": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"properties": {
+											"name": { "type": "string" },
+											"from": { "type": "string" },
+											"to": { "type": "string" }
+										},
+										"required": ["name", "from", "to"]
+									}
+								}
+							},
+							"required": ["key", "itemType", "title", "link", "oldItemType", "movedFields", "removedFields", "changedCreatorTypes"]
+						}
+					}
+				},
+				"required": ["libraryID", "items"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_merge_items",
+			"title": "Merge duplicate Zotero items",
+			"description": "Merge items that are the same work, as Zotero's merge button does: the master item keeps its own fields and gets the others' notes, files, annotations, tags, collections and related items, and the others go to the trash. Duplicate PDFs are combined, keeping the annotations of each. To use a field value from another copy, set it on the master with zotero_update_items. The items must be regular items of the same type.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 20 },
+					"masterKey": { "type": "string", "description": "The item to keep, one of itemKeys. Defaults to the oldest." },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["itemKeys"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string", "description": "The master item" },
+					"trashed": { "type": "array", "items": { "type": "string" } },
+					"link": { "type": "string", "description": "zotero:// link that shows the master item in Zotero" }
+				},
+				"required": ["libraryID", "key", "trashed", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "delete"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": false,
+				"openWorldHint": false
+			}
+		},
+		{
 			"name": "zotero_list_collections",
 			"title": "List Zotero collections",
 			"description": "List a library's collections, or a collection's subcollections at any depth, with how many items each has. To list a collection's items, use zotero_search with collectionKey.",
@@ -253,6 +660,46 @@
 			},
 			"annotations": {
 				"readOnlyHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_manage_collections",
+			"title": "Create, rename or move a Zotero collection",
+			"description": "Create a collection, rename one, or move one into another collection or to the top level. To put items in a collection, use zotero_update_items. To delete one, use zotero_trash.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"action": { "enum": ["create", "update"] },
+					"collectionKey": { "type": "string", "description": "For update" },
+					"name": { "type": "string", "minLength": 1, "description": "Needed for create" },
+					"parentKey": {
+						"type": ["string", "null"],
+						"description": "The collection to create or move it in, or null to move it to the top level. For create, defaults to the top level; for update, to where it is."
+					},
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["action"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string" },
+					"name": { "type": "string" },
+					"parentKey": { "type": "string" },
+					"link": { "type": "string", "description": "zotero:// link that shows the collection in Zotero" }
+				},
+				"required": ["libraryID", "key", "name", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": false,
 				"openWorldHint": false
 			}
 		},
@@ -293,6 +740,45 @@
 			},
 			"annotations": {
 				"readOnlyHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_manage_tags",
+			"title": "Manage Zotero tags",
+			"description": "Change tags across a whole library: rename a tag, merge several into one by renaming them all to the same name (which may be an existing tag), delete tags from every item that has them, or set or remove a tag's color. Tag names match exactly, including case, as zotero_list_tags lists them. To change the tags of particular items, use zotero_update_items. Color changes can't be undone.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"action": { "enum": ["rename", "delete", "setColor"] },
+					"tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100, "description": "For setColor, one tag" },
+					"newName": { "type": "string", "description": "For rename" },
+					"color": { "enum": ["red", "orange", "gray", "green", "teal", "blue", "indigo", "purple", "plum", null], "description": "For setColor: one of the colors Zotero offers, or null to remove the color. Leave it out to keep the tag's color, e.g. to give it another position. Colored tags show first in the tag selector and as colored dots on items; at most 9 tags can have colors." },
+					"position": { "type": "integer", "minimum": 1, "maximum": 9, "description": "For setColor: the number key that toggles the tag on selected items. Defaults to its current one, or the next free one." },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["action", "tags"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"action": { "type": "string" },
+					"itemCount": { "type": "integer", "description": "For rename and delete, the items changed" },
+					"tag": { "type": "string" },
+					"color": { "type": "string", "description": "For setColor: the color's name, or its #rrggbb value if it isn't one Zotero offers; absent if removed" },
+					"position": { "type": "integer" }
+				},
+				"required": ["libraryID", "action"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": false,
 				"openWorldHint": false
 			}
 		},
@@ -344,60 +830,255 @@
 			}
 		},
 		{
-			"name": "zotero_list_item_types",
-			"title": "List Zotero item types",
-			"description": "List the item types an item can be (book, journalArticle and so on), with each type's fields and creator types, by the names zotero_add_items, zotero_update_items and zotero_change_item_types take.",
+			"name": "zotero_manage_saved_searches",
+			"title": "Manage Zotero saved searches",
+			"description": "Create a saved search, or rename one or change its conditions. To delete one, use zotero_trash.",
 			"inputSchema": {
 				"type": "object",
-				"properties": {
-					"itemTypes": { "type": "array", "items": { "enum": ["artwork", "audioRecording", "bill", "blogPost", "book", "bookSection", "case", "computerProgram", "conferencePaper", "dataset", "dictionaryEntry", "document", "email", "encyclopediaArticle", "film", "forumPost", "hearing", "instantMessage", "interview", "journalArticle", "letter", "magazineArticle", "manuscript", "map", "newspaperArticle", "patent", "podcast", "preprint", "presentation", "radioBroadcast", "report", "standard", "statute", "thesis", "tvBroadcast", "videoRecording", "webpage"] }, "description": "Defaults to all" }
+				"$defs": {
+					"condition": {
+						"type": "object",
+						"properties": {
+							"condition": { "enum": ["abstractNote", "accessDate", "annotationAuthor", "annotationColor", "annotationComment", "annotationText", "annotationType", "anyField", "applicationNumber", "archive", "archiveLocation", "artworkSize", "assignee", "attachmentStorageType", "author", "authority", "bookAuthor", "callNumber", "citationKey", "code", "codeNumber", "collection", "committee", "conferenceName", "country", "creator", "date", "dateAdded", "dateModified", "DOI", "edition", "editor", "eventPlace", "extra", "fileTypeID", "filingDate", "fulltextContent", "history", "ISBN", "ISSN", "issue", "itemType", "journalAbbreviation", "language", "lastRead", "libraryCatalog", "medium", "meetingName", "note", "numAnnotations", "numAttachments", "number", "numberOfVolumes", "numNotes", "numPages", "numTags", "originalDate", "originalPlace", "originalPublisher", "pages", "partNumber", "partTitle", "place", "PMCID", "PMID", "priorityNumbers", "programmingLanguage", "publicationTitle", "publisher", "references", "reporter", "rights", "runningTime", "savedSearch", "scale", "section", "series", "seriesNumber", "seriesText", "seriesTitle", "session", "shortTitle", "status", "system", "tag", "title", "titleCreatorYear", "type", "url", "versionNumber", "volume"], "description": "As in Zotero's Advanced Search: item fields (see zotero_list_item_types), creator types, tags, notes, annotations, counts and more" },
+							"operator": { "enum": ["is", "isNot", "contains", "doesNotContain", "beginsWith", "isLessThan", "isGreaterThan", "isBefore", "isAfter", "isInTheLast", "isEmpty", "isNotEmpty"], "description": "Each condition takes some of these; an error lists which" },
+							"value": { "type": "string", "description": "Not for isEmpty and isNotEmpty. itemType: a name from zotero_list_item_types. Dates: e.g. 2020 or 2020-05-01; for isInTheLast, e.g. 7 days. collection and savedSearch: a key. annotationType: highlight, underline, note, text, image or ink. annotationColor: a hex color, as zotero_get_notes gives." },
+							"level": { "enum": ["attachment", "note", "annotation"], "description": "Match only on the item's children of this kind, e.g. a tag on its annotations and not on the item" }
+						},
+						"required": ["condition", "operator"],
+						"additionalProperties": false
+					}
 				},
+				"properties": {
+					"action": { "enum": ["create", "update"] },
+					"savedSearchKey": { "type": "string", "description": "For update" },
+					"name": { "type": "string", "description": "Needed for create" },
+					"conditions": {
+						"type": "array",
+						"description": "Needed for create. As for zotero_search; they replace the search's conditions.",
+						"items": {
+							"anyOf": [
+								{ "$ref": "#/$defs/condition" },
+								{
+									"type": "object",
+									"description": "A group, which matches if all or any of its conditions do",
+									"properties": {
+										"joinMode": { "enum": ["all", "any"] },
+										"conditions": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "minItems": 1 }
+									},
+									"required": ["joinMode", "conditions"],
+									"additionalProperties": false
+								}
+							]
+						}
+					},
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["action"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
 				"type": "object",
 				"properties": {
-					"itemTypes": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string" },
+					"name": { "type": "string" },
+					"conditions": { "type": "array", "items": { "type": "object" } },
+					"itemCount": { "type": "integer" },
+					"link": { "type": "string", "description": "zotero:// link that shows it in Zotero" }
+				},
+				"required": ["libraryID", "key", "name", "conditions", "itemCount", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": false,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_get_notes",
+			"title": "Get Zotero notes and annotations",
+			"description": "Get notes and annotations (highlights, underlines, comments and so on made in Zotero's reader). For an item, returns its notes and the annotations in its files; for an attachment, its annotations; or give note or annotation keys. Image and ink annotations (areas or drawings the user marked) have an imagePath once Zotero has rendered them; get the others' with zotero_render_annotation_images. Images in notes show as [image] in Markdown, and come in images in the same order, with their files.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"itemKeys": {
+						"type": "array",
+						"items": { "type": "string" },
+						"minItems": 1,
+						"maxItems": 50,
+						"description": "Item, attachment, note or annotation keys"
+					},
+					"format": { "enum": ["markdown", "html"], "default": "markdown", "description": "For notes" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["itemKeys"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"notes": {
 						"type": "array",
 						"items": {
 							"type": "object",
 							"properties": {
-								"itemType": { "type": "string" },
-								"label": { "type": "string", "description": "The name Zotero shows the user, in Zotero's language" },
-								"fields": {
-									"type": "array",
-									"description": "In the order the item pane shows them",
-									"items": {
-										"type": "object",
-										"properties": {
-											"field": { "type": "string" },
-											"label": { "type": "string" },
-											"baseField": { "type": "string", "description": "The general field this type's field stands for, e.g. publicationTitle for bookTitle. A type change moves a value between fields with the same base field, and zotero_update_items also takes the base field's name." }
-										},
-										"required": ["field", "label"]
-									}
-								},
-								"creatorTypes": {
-									"type": "array",
-									"items": {
-										"type": "object",
-										"properties": {
-											"creatorType": { "type": "string" },
-											"label": { "type": "string" },
-											"primary": { "type": "boolean", "description": "The type's main creator type, e.g. author" }
-										},
-										"required": ["creatorType", "label"]
-									}
-								}
+								"key": { "type": "string" },
+								"parentKey": { "type": "string" },
+								"title": { "type": "string" },
+								"tags": { "type": "array", "items": { "type": "string" } },
+								"dateModified": { "type": "string" },
+								"content": { "type": "string" },
+								"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" },
+								"images": { "type": "array", "description": "Images in the note, in order", "items": { "type": "object", "properties": { "key": { "type": "string" }, "path": { "type": "string", "description": "The image file, if it's on this computer" } }, "required": ["key"] } }
 							},
-							"required": ["itemType", "label", "fields", "creatorTypes"]
+							"required": ["key", "title", "tags", "dateModified", "content", "link"]
 						}
-					}
+					},
+					"annotations": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"attachmentKey": { "type": "string" },
+								"type": { "enum": ["highlight", "underline", "note", "text", "image", "ink"] },
+								"text": { "type": "string", "description": "The highlighted or underlined text" },
+								"comment": { "type": "string" },
+								"color": { "type": "string" },
+								"page": { "type": "integer", "description": "PDF page, from 1" },
+								"pageLabel": { "type": "string", "description": "The page number printed on the page, for citing" },
+								"tags": { "type": "array", "items": { "type": "string" } },
+								"link": { "type": "string", "description": "zotero:// link that opens the file at the annotation" },
+								"imagePath": { "type": "string", "description": "For an image or ink annotation Zotero has rendered, a PNG of it. Read it now rather than keep the path: Zotero replaces the file when the annotation changes." }
+							},
+							"required": ["key", "attachmentKey", "type", "tags", "link"]
+						}
+					},
+					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" }
 				},
-				"required": ["itemTypes"]
+				"required": ["libraryID", "notes", "annotations"]
 			},
 			"annotations": {
 				"readOnlyHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_render_annotation_images",
+			"title": "Render Zotero annotation images",
+			"description": "Get PNG files of image and ink annotations in PDFs (areas or drawings the user marked), rendering the ones Zotero hasn't rendered yet. Use it for annotations zotero_get_notes gives no imagePath for, e.g. to see a figure the user marked. Rendering can outlast the call.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50, "description": "Annotation keys" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["itemKeys"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"images": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"key": { "type": "string" },
+								"path": { "type": "string", "description": "A PNG. Read it now rather than keep the path: Zotero replaces it when the annotation changes." },
+								"status": { "enum": ["rendered", "pending", "failed"], "description": "pending: Zotero is still rendering it" }
+							},
+							"required": ["key", "status"]
+						}
+					},
+					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" },
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
+				},
+				"required": ["libraryID", "images"]
+			},
+			"annotations": {
+				"readOnlyHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_add_note",
+			"title": "Add a Zotero note",
+			"description": "Add a note, written in Markdown, under an item (a child note) or as a standalone note, optionally in a collection. Supports CommonMark with tables, ~~strikethrough~~ and TeX math: $…$ inline, and display math between lines of just $$. As when Markdown is pasted into a Zotero note, dollar signs only become math around something that looks like math (a TeX command, braces or an operator), so $x$ alone or $5 stays text. Raw HTML is shown as text, and images become links.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"markdown": { "type": "string", "minLength": 1, "description": "The note. Its first line becomes its title, so start with a heading." },
+					"parentKey": { "type": "string", "description": "The regular item (e.g. a journal article) to add the note under" },
+					"collectionKey": { "type": "string", "description": "For a standalone note, a collection to put it in" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["markdown"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string" },
+					"parentKey": { "type": "string" },
+					"title": { "type": "string" },
+					"dateModified": { "type": "string", "description": "For zotero_edit_note" },
+					"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
+				},
+				"required": ["libraryID", "key", "title", "dateModified", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_edit_note",
+			"title": "Edit a Zotero note",
+			"description": "Add Markdown to the end of a note, or replace its content, with the same Markdown as zotero_add_note. Give the note's dateModified from zotero_get_notes: if the note changed since, e.g. because the user edited it, nothing is changed and you get it again first. Replacing works only on notes without highlights, citations or images, which Markdown can't hold; append to the others.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"itemKey": { "type": "string", "description": "The note's key" },
+					"markdown": { "type": "string", "minLength": 1 },
+					"mode": { "enum": ["append", "replace"], "default": "append", "description": "replace: the Markdown becomes the whole note, and its first line the note's title" },
+					"dateModified": { "type": "string", "description": "The note's dateModified from zotero_get_notes" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["itemKey", "markdown", "dateModified"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string" },
+					"parentKey": { "type": "string" },
+					"title": { "type": "string" },
+					"dateModified": { "type": "string", "description": "For a further edit" },
+					"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
+				},
+				"required": ["libraryID", "key", "title", "dateModified", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": false,
 				"openWorldHint": false
 			}
 		},
@@ -538,20 +1219,13 @@
 			}
 		},
 		{
-			"name": "zotero_get_notes",
-			"title": "Get Zotero notes and annotations",
-			"description": "Get notes and annotations (highlights, underlines, comments and so on made in Zotero's reader). For an item, returns its notes and the annotations in its files; for an attachment, its annotations; or give note or annotation keys. Image and ink annotations (areas or drawings the user marked) have an imagePath once Zotero has rendered them; get the others' with zotero_render_annotation_images. Images in notes show as [image] in Markdown, and come in images in the same order, with their files.",
+			"name": "zotero_find_fulltext_attachments",
+			"title": "Find full text in Zotero",
+			"description": "Look for a PDF or EPUB of items that have none, as Zotero's Find Full Text menu command does: by DOI, URL or PMCID, from open-access sources and from the publisher's site, through the user's institution where they have access. Use it for items added without files, e.g. by zotero_import. Items that already have a PDF or EPUB, or have no DOI, URL or PMCID, are skipped.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"itemKeys": {
-						"type": "array",
-						"items": { "type": "string" },
-						"minItems": 1,
-						"maxItems": 50,
-						"description": "Item, attachment, note or annotation keys"
-					},
-					"format": { "enum": ["markdown", "html"], "default": "markdown", "description": "For notes" },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50 },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
 				"required": ["itemKeys"],
@@ -561,88 +1235,143 @@
 				"type": "object",
 				"properties": {
 					"libraryID": { "type": "integer" },
-					"notes": {
+					"results": {
 						"type": "array",
 						"items": {
 							"type": "object",
 							"properties": {
 								"key": { "type": "string" },
-								"parentKey": { "type": "string" },
 								"title": { "type": "string" },
-								"tags": { "type": "array", "items": { "type": "string" } },
-								"dateModified": { "type": "string" },
-								"content": { "type": "string" },
-								"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" },
-								"images": { "type": "array", "description": "Images in the note, in order", "items": { "type": "object", "properties": { "key": { "type": "string" }, "path": { "type": "string", "description": "The image file, if it's on this computer" } }, "required": ["key"] } }
+								"status": { "enum": ["found", "notFound", "pending", "skipped"], "description": "pending: Zotero is still looking" },
+								"reason": { "type": "string", "description": "Why it was skipped" },
+								"attachment": {
+									"description": "The file found",
+									"type": "object",
+									"properties": {
+										"key": { "type": "string" },
+										"title": { "type": "string" },
+										"contentType": { "type": "string" },
+										"linkMode": { "type": "string" },
+										"fileExists": { "type": "boolean" },
+										"path": { "type": "string", "description": "The file on this computer" },
+										"annotationCount": { "type": "integer" }
+									}
+								}
 							},
-							"required": ["key", "title", "tags", "dateModified", "content", "link"]
+							"required": ["key", "title", "status"]
 						}
 					},
-					"annotations": {
-						"type": "array",
-						"items": {
-							"type": "object",
-							"properties": {
-								"key": { "type": "string" },
-								"attachmentKey": { "type": "string" },
-								"type": { "enum": ["highlight", "underline", "note", "text", "image", "ink"] },
-								"text": { "type": "string", "description": "The highlighted or underlined text" },
-								"comment": { "type": "string" },
-								"color": { "type": "string" },
-								"page": { "type": "integer", "description": "PDF page, from 1" },
-								"pageLabel": { "type": "string", "description": "The page number printed on the page, for citing" },
-								"tags": { "type": "array", "items": { "type": "string" } },
-								"link": { "type": "string", "description": "zotero:// link that opens the file at the annotation" },
-								"imagePath": { "type": "string", "description": "For an image or ink annotation Zotero has rendered, a PNG of it. Read it now rather than keep the path: Zotero replaces the file when the annotation changes." }
-							},
-							"required": ["key", "attachmentKey", "type", "tags", "link"]
-						}
-					},
-					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" }
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
-				"required": ["libraryID", "notes", "annotations"]
+				"required": ["libraryID", "results"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
 			},
 			"annotations": {
-				"readOnlyHint": true,
-				"openWorldHint": false
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false,
+				"openWorldHint": true
 			}
 		},
 		{
-			"name": "zotero_render_annotation_images",
-			"title": "Render Zotero annotation images",
-			"description": "Get PNG files of image and ink annotations in PDFs (areas or drawings the user marked), rendering the ones Zotero hasn't rendered yet. Use it for annotations zotero_get_notes gives no imagePath for, e.g. to see a figure the user marked. Rendering can outlast the call.",
+			"name": "zotero_add_attachment",
+			"title": "Attach a file in Zotero",
+			"description": "Attach a local file, or download a PDF/EPUB to a parent item. Without a parent, Zotero adds a local file on its own and tries to identify it.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50, "description": "Annotation keys" },
+					"parentKey": { "type": "string", "description": "The regular item (e.g. a journal article) to attach the file to. Omit to add a file from path as a standalone attachment that Zotero identifies." },
+					"url": { "type": "string", "description": "http or https, with parentKey: a PDF or EPUB, or a page that links to one. Downloaded from the user's computer, so their institution's access applies. Not with path." },
+					"path": { "type": "string", "description": "The absolute path of a file on this computer" },
+					"linkFile": { "type": "boolean", "default": false, "description": "Link to the file at path where it is, instead of copying it into Zotero" },
+					"collectionKey": { "type": "string", "description": "Without parentKey, a collection to add the file and the item Zotero creates for it to" },
+					"title": { "type": "string", "description": "The attachment's title. By default Zotero names it, e.g. \"Full Text PDF\"." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["itemKeys"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
 				"type": "object",
 				"properties": {
 					"libraryID": { "type": "integer" },
-					"images": {
-						"type": "array",
-						"items": {
-							"type": "object",
-							"properties": {
-								"key": { "type": "string" },
-								"path": { "type": "string", "description": "A PNG. Read it now rather than keep the path: Zotero replaces it when the annotation changes." },
-								"status": { "enum": ["rendered", "pending", "failed"], "description": "pending: Zotero is still rendering it" }
+					"parentKey": { "type": "string" },
+					"status": { "enum": ["attached", "pending"], "description": "pending: Zotero is still downloading the file" },
+					"identified": { "type": "boolean", "description": "Without parentKey, whether Zotero identified the file and created its parent item. Absent while Zotero is still identifying it." },
+					"parent": {
+						"type": "object",
+						"description": "The item Zotero created for the file",
+						"properties": {
+							"key": { "type": "string" },
+							"itemType": { "type": "string" },
+							"title": { "type": "string" },
+							"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
+							"date": { "type": "string" },
+							"bestAttachment": {
+								"type": "object",
+								"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
+								"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
+								"required": ["key"]
 							},
-							"required": ["key", "status"]
+							"attachmentCount": { "type": "integer" },
+							"noteCount": { "type": "integer" },
+							"annotationCount": { "type": "integer", "description": "In all its files" },
+							"link": { "type": "string" }
 						}
 					},
-					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" },
+					"key": { "type": "string" },
+					"title": { "type": "string" },
+					"contentType": { "type": "string" },
+					"linkMode": { "type": "string" },
+					"fileExists": { "type": "boolean" },
+					"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
+					"annotationCount": { "type": "integer" },
+					"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" },
 					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
-				"required": ["libraryID", "images"]
+				"required": ["libraryID", "status"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
 			},
 			"annotations": {
-				"readOnlyHint": true,
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false,
+				"openWorldHint": true
+			}
+		},
+		{
+			"name": "zotero_trash",
+			"title": "Move to or restore from the Zotero trash",
+			"description": "Move items (with their notes and attachments), collections (with their subcollections) or saved searches to the trash, or restore them from it. Items in a trashed collection stay in the library. The user can restore them from the trash until it's emptied.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100, "description": "Items, notes or attachments" },
+					"collectionKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100 },
+					"savedSearchKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100 },
+					"restore": { "type": "boolean", "default": false, "description": "Restore from the trash instead" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"restored": { "type": "boolean" },
+					"itemKeys": { "type": "array", "items": { "type": "string" } },
+					"collectionKeys": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
+					"savedSearchKeys": { "type": "array", "items": { "type": "string" } }
+				},
+				"required": ["libraryID", "restored", "itemKeys", "collectionKeys", "savedSearchKeys"]
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": true,
 				"openWorldHint": false
 			}
 		},
@@ -986,735 +1715,6 @@
 				"readOnlyHint": false,
 				"destructiveHint": false,
 				"idempotentHint": true,
-				"openWorldHint": true
-			}
-		},
-		{
-			"name": "zotero_update_items",
-			"title": "Edit Zotero items",
-			"description": "Change items' metadata, tags and collections: set or clear fields (title, date, DOI, abstractNote and so on), replace creators, add or remove tags, and add items to or remove them from collections. To change an item's type, use zotero_change_item_types. All or nothing: one invalid change fails the call.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"changes": {
-						"type": "array",
-						"items": {
-							"type": "object",
-							"properties": {
-								"key": { "type": "string", "description": "The item's key" },
-								"fields": {
-									"type": "object",
-									"description": "Fields to set, by Zotero field name (zotero_list_item_types lists each item type's), e.g. {\"title\": \"…\", \"date\": \"2020-05\"}. An empty string clears a field.",
-									"additionalProperties": { "type": "string" }
-								},
-								"creators": {
-									"type": "array",
-									"description": "Replaces all of the item's creators, in order",
-									"items": {
-										"type": "object",
-										"properties": {
-											"creatorType": { "type": "string", "description": "e.g. \"author\" or \"editor\"; zotero_list_item_types lists each item type's" },
-											"firstName": { "type": "string" },
-											"lastName": { "type": "string" },
-											"name": { "type": "string", "description": "Instead of firstName and lastName, for an organization or a one-part name" }
-										},
-										"required": ["creatorType"],
-										"oneOf": [
-											{ "required": ["lastName"], "not": { "required": ["name"] } },
-											{ "required": ["name"], "not": { "anyOf": [{ "required": ["firstName"] }, { "required": ["lastName"] }] } }
-										],
-										"additionalProperties": false
-									}
-								},
-								"addTags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-								"removeTags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-								"addToCollections": { "type": "array", "items": { "type": "string" }, "description": "Collection keys. An item stays in the collections it's already in." },
-								"removeFromCollections": { "type": "array", "items": { "type": "string" }, "description": "Collection keys. The item stays in the library." }
-							},
-							"required": ["key"],
-							"additionalProperties": false
-						},
-						"minItems": 1,
-						"maxItems": 50
-					},
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"required": ["changes"],
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"items": {
-						"type": "array",
-						"description": "The items as they are now",
-						"items": {
-							"type": "object",
-							"properties": {
-								"key": { "type": "string" },
-								"itemType": { "type": "string" },
-								"parentKey": { "type": "string" },
-								"title": { "type": "string" },
-								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
-								"date": { "type": "string" },
-								"bestAttachment": {
-									"type": "object",
-									"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
-									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
-									"required": ["key"]
-								},
-								"attachmentCount": { "type": "integer" },
-								"noteCount": { "type": "integer" },
-								"annotationCount": { "type": "integer", "description": "In all its files" },
-								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
-							},
-							"required": ["key", "itemType", "title", "link"]
-						}
-					}
-				},
-				"required": ["libraryID", "items"]
-			},
-			"_meta": {
-				"org.zotero/permission": "editLibrary"
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": true,
-				"idempotentHint": true,
-				"openWorldHint": false
-			}
-		},
-		{
-			"name": "zotero_change_item_types",
-			"title": "Change Zotero item types",
-			"description": "Change items' types, e.g. from journalArticle to bookSection. Fields the new type also has keep their values. A field with a counterpart in the new type moves to it (e.g. publicationTitle becomes bookTitle; zotero_list_item_types lists each field's baseField). Fields the new type doesn't have are removed, and the result gives their values, so you can tell the user or put them elsewhere. Use zotero_update_items afterwards to fill the new type's fields. Notes, attachments and annotations can't change type. All or nothing: one invalid change fails the call.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"changes": {
-						"type": "array",
-						"items": {
-							"type": "object",
-							"properties": {
-								"key": { "type": "string", "description": "The item's key" },
-								"itemType": { "enum": ["artwork", "audioRecording", "bill", "blogPost", "book", "bookSection", "case", "computerProgram", "conferencePaper", "dataset", "dictionaryEntry", "document", "email", "encyclopediaArticle", "film", "forumPost", "hearing", "instantMessage", "interview", "journalArticle", "letter", "magazineArticle", "manuscript", "map", "newspaperArticle", "patent", "podcast", "preprint", "presentation", "radioBroadcast", "report", "standard", "statute", "thesis", "tvBroadcast", "videoRecording", "webpage"], "description": "The new type" }
-							},
-							"required": ["key", "itemType"],
-							"additionalProperties": false
-						},
-						"minItems": 1,
-						"maxItems": 50
-					},
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"required": ["changes"],
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"items": {
-						"type": "array",
-						"description": "The items as they are now, with what the change did to them",
-						"items": {
-							"type": "object",
-							"properties": {
-								"key": { "type": "string" },
-								"itemType": { "type": "string" },
-								"parentKey": { "type": "string" },
-								"title": { "type": "string" },
-								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
-								"date": { "type": "string" },
-								"bestAttachment": {
-									"type": "object",
-									"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
-									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
-									"required": ["key"]
-								},
-								"attachmentCount": { "type": "integer" },
-								"noteCount": { "type": "integer" },
-								"annotationCount": { "type": "integer", "description": "In all its files" },
-								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" },
-								"oldItemType": { "type": "string" },
-								"movedFields": { "type": "object", "description": "Old field → the new type's field its value moved to", "additionalProperties": { "type": "string" } },
-								"removedFields": { "type": "object", "description": "Old field → the value it had, which the item no longer has", "additionalProperties": { "type": "string" } },
-								"changedCreatorTypes": {
-									"type": "array",
-									"items": {
-										"type": "object",
-										"properties": {
-											"name": { "type": "string" },
-											"from": { "type": "string" },
-											"to": { "type": "string" }
-										},
-										"required": ["name", "from", "to"]
-									}
-								}
-							},
-							"required": ["key", "itemType", "title", "link", "oldItemType", "movedFields", "removedFields", "changedCreatorTypes"]
-						}
-					}
-				},
-				"required": ["libraryID", "items"]
-			},
-			"_meta": {
-				"org.zotero/permission": "editLibrary"
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": true,
-				"idempotentHint": true,
-				"openWorldHint": false
-			}
-		},
-		{
-			"name": "zotero_manage_collections",
-			"title": "Create, rename or move a Zotero collection",
-			"description": "Create a collection, rename one, or move one into another collection or to the top level. To put items in a collection, use zotero_update_items. To delete one, use zotero_trash.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"action": { "enum": ["create", "update"] },
-					"collectionKey": { "type": "string", "description": "For update" },
-					"name": { "type": "string", "minLength": 1, "description": "Needed for create" },
-					"parentKey": {
-						"type": ["string", "null"],
-						"description": "The collection to create or move it in, or null to move it to the top level. For create, defaults to the top level; for update, to where it is."
-					},
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"required": ["action"],
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"key": { "type": "string" },
-					"name": { "type": "string" },
-					"parentKey": { "type": "string" },
-					"link": { "type": "string", "description": "zotero:// link that shows the collection in Zotero" }
-				},
-				"required": ["libraryID", "key", "name", "link"]
-			},
-			"_meta": {
-				"org.zotero/permission": "editLibrary"
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": true,
-				"idempotentHint": false,
-				"openWorldHint": false
-			}
-		},
-		{
-			"name": "zotero_manage_saved_searches",
-			"title": "Manage Zotero saved searches",
-			"description": "Create a saved search, or rename one or change its conditions. To delete one, use zotero_trash.",
-			"inputSchema": {
-				"type": "object",
-				"$defs": {
-					"condition": {
-						"type": "object",
-						"properties": {
-							"condition": { "enum": ["abstractNote", "accessDate", "annotationAuthor", "annotationColor", "annotationComment", "annotationText", "annotationType", "anyField", "applicationNumber", "archive", "archiveLocation", "artworkSize", "assignee", "attachmentStorageType", "author", "authority", "bookAuthor", "callNumber", "citationKey", "code", "codeNumber", "collection", "committee", "conferenceName", "country", "creator", "date", "dateAdded", "dateModified", "DOI", "edition", "editor", "eventPlace", "extra", "fileTypeID", "filingDate", "fulltextContent", "history", "ISBN", "ISSN", "issue", "itemType", "journalAbbreviation", "language", "lastRead", "libraryCatalog", "medium", "meetingName", "note", "numAnnotations", "numAttachments", "number", "numberOfVolumes", "numNotes", "numPages", "numTags", "originalDate", "originalPlace", "originalPublisher", "pages", "partNumber", "partTitle", "place", "PMCID", "PMID", "priorityNumbers", "programmingLanguage", "publicationTitle", "publisher", "references", "reporter", "rights", "runningTime", "savedSearch", "scale", "section", "series", "seriesNumber", "seriesText", "seriesTitle", "session", "shortTitle", "status", "system", "tag", "title", "titleCreatorYear", "type", "url", "versionNumber", "volume"], "description": "As in Zotero's Advanced Search: item fields (see zotero_list_item_types), creator types, tags, notes, annotations, counts and more" },
-							"operator": { "enum": ["is", "isNot", "contains", "doesNotContain", "beginsWith", "isLessThan", "isGreaterThan", "isBefore", "isAfter", "isInTheLast", "isEmpty", "isNotEmpty"], "description": "Each condition takes some of these; an error lists which" },
-							"value": { "type": "string", "description": "Not for isEmpty and isNotEmpty. itemType: a name from zotero_list_item_types. Dates: e.g. 2020 or 2020-05-01; for isInTheLast, e.g. 7 days. collection and savedSearch: a key. annotationType: highlight, underline, note, text, image or ink. annotationColor: a hex color, as zotero_get_notes gives." },
-							"level": { "enum": ["attachment", "note", "annotation"], "description": "Match only on the item's children of this kind, e.g. a tag on its annotations and not on the item" }
-						},
-						"required": ["condition", "operator"],
-						"additionalProperties": false
-					}
-				},
-				"properties": {
-					"action": { "enum": ["create", "update"] },
-					"savedSearchKey": { "type": "string", "description": "For update" },
-					"name": { "type": "string", "description": "Needed for create" },
-					"conditions": {
-						"type": "array",
-						"description": "Needed for create. As for zotero_search; they replace the search's conditions.",
-						"items": {
-							"anyOf": [
-								{ "$ref": "#/$defs/condition" },
-								{
-									"type": "object",
-									"description": "A group, which matches if all or any of its conditions do",
-									"properties": {
-										"joinMode": { "enum": ["all", "any"] },
-										"conditions": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "minItems": 1 }
-									},
-									"required": ["joinMode", "conditions"],
-									"additionalProperties": false
-								}
-							]
-						}
-					},
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"required": ["action"],
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"key": { "type": "string" },
-					"name": { "type": "string" },
-					"conditions": { "type": "array", "items": { "type": "object" } },
-					"itemCount": { "type": "integer" },
-					"link": { "type": "string", "description": "zotero:// link that shows it in Zotero" }
-				},
-				"required": ["libraryID", "key", "name", "conditions", "itemCount", "link"]
-			},
-			"_meta": {
-				"org.zotero/permission": "editLibrary"
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": true,
-				"idempotentHint": false,
-				"openWorldHint": false
-			}
-		},
-		{
-			"name": "zotero_add_note",
-			"title": "Add a Zotero note",
-			"description": "Add a note, written in Markdown, under an item (a child note) or as a standalone note, optionally in a collection. Supports CommonMark with tables, ~~strikethrough~~ and TeX math: $…$ inline, and display math between lines of just $$. As when Markdown is pasted into a Zotero note, dollar signs only become math around something that looks like math (a TeX command, braces or an operator), so $x$ alone or $5 stays text. Raw HTML is shown as text, and images become links.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"markdown": { "type": "string", "minLength": 1, "description": "The note. Its first line becomes its title, so start with a heading." },
-					"parentKey": { "type": "string", "description": "The regular item (e.g. a journal article) to add the note under" },
-					"collectionKey": { "type": "string", "description": "For a standalone note, a collection to put it in" },
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"required": ["markdown"],
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"key": { "type": "string" },
-					"parentKey": { "type": "string" },
-					"title": { "type": "string" },
-					"dateModified": { "type": "string", "description": "For zotero_edit_note" },
-					"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
-				},
-				"required": ["libraryID", "key", "title", "dateModified", "link"]
-			},
-			"_meta": {
-				"org.zotero/permission": "editLibrary"
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": false,
-				"idempotentHint": false,
-				"openWorldHint": false
-			}
-		},
-		{
-			"name": "zotero_manage_tags",
-			"title": "Manage Zotero tags",
-			"description": "Change tags across a whole library: rename a tag, merge several into one by renaming them all to the same name (which may be an existing tag), delete tags from every item that has them, or set or remove a tag's color. Tag names match exactly, including case, as zotero_list_tags lists them. To change the tags of particular items, use zotero_update_items. Color changes can't be undone.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"action": { "enum": ["rename", "delete", "setColor"] },
-					"tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100, "description": "For setColor, one tag" },
-					"newName": { "type": "string", "description": "For rename" },
-					"color": { "enum": ["red", "orange", "gray", "green", "teal", "blue", "indigo", "purple", "plum", null], "description": "For setColor: one of the colors Zotero offers, or null to remove the color. Leave it out to keep the tag's color, e.g. to give it another position. Colored tags show first in the tag selector and as colored dots on items; at most 9 tags can have colors." },
-					"position": { "type": "integer", "minimum": 1, "maximum": 9, "description": "For setColor: the number key that toggles the tag on selected items. Defaults to its current one, or the next free one." },
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"required": ["action", "tags"],
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"action": { "type": "string" },
-					"itemCount": { "type": "integer", "description": "For rename and delete, the items changed" },
-					"tag": { "type": "string" },
-					"color": { "type": "string", "description": "For setColor: the color's name, or its #rrggbb value if it isn't one Zotero offers; absent if removed" },
-					"position": { "type": "integer" }
-				},
-				"required": ["libraryID", "action"]
-			},
-			"_meta": {
-				"org.zotero/permission": "editLibrary"
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": true,
-				"idempotentHint": false,
-				"openWorldHint": false
-			}
-		},
-		{
-			"name": "zotero_edit_note",
-			"title": "Edit a Zotero note",
-			"description": "Add Markdown to the end of a note, or replace its content, with the same Markdown as zotero_add_note. Give the note's dateModified from zotero_get_notes: if the note changed since, e.g. because the user edited it, nothing is changed and you get it again first. Replacing works only on notes without highlights, citations or images, which Markdown can't hold; append to the others.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"itemKey": { "type": "string", "description": "The note's key" },
-					"markdown": { "type": "string", "minLength": 1 },
-					"mode": { "enum": ["append", "replace"], "default": "append", "description": "replace: the Markdown becomes the whole note, and its first line the note's title" },
-					"dateModified": { "type": "string", "description": "The note's dateModified from zotero_get_notes" },
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"required": ["itemKey", "markdown", "dateModified"],
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"key": { "type": "string" },
-					"parentKey": { "type": "string" },
-					"title": { "type": "string" },
-					"dateModified": { "type": "string", "description": "For a further edit" },
-					"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
-				},
-				"required": ["libraryID", "key", "title", "dateModified", "link"]
-			},
-			"_meta": {
-				"org.zotero/permission": "editLibrary"
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": true,
-				"idempotentHint": false,
-				"openWorldHint": false
-			}
-		},
-		{
-			"name": "zotero_list_duplicates",
-			"title": "List duplicate Zotero items",
-			"description": "List the sets of items Zotero considers duplicates, as its Duplicate Items view does: items with the same DOI or ISBN, or with similar titles, the same creators and years close together. Check that a set really is one work, e.g. not a preprint and its published version the user keeps apart, before merging it with zotero_merge_items. Each set is oldest first.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "Sets per page" },
-					"offset": { "type": "integer", "minimum": 0, "default": 0 },
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"total": { "type": "integer", "description": "Sets in the library" },
-					"sets": {
-						"type": "array",
-						"items": {
-							"type": "array",
-							"items": {
-								"type": "object",
-								"properties": {
-									"key": { "type": "string" },
-									"itemType": { "type": "string" },
-									"title": { "type": "string" },
-									"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
-									"date": { "type": "string" },
-									"DOI": { "type": "string" },
-									"ISBN": { "type": "string" },
-									"dateAdded": { "type": "string" },
-									"bestAttachment": {
-										"type": "object",
-										"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
-										"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
-										"required": ["key"]
-									},
-									"attachmentCount": { "type": "integer" },
-									"noteCount": { "type": "integer" },
-									"annotationCount": { "type": "integer", "description": "In all its files" },
-									"link": { "type": "string" }
-								},
-								"required": ["key", "itemType", "title", "dateAdded", "attachmentCount", "noteCount"]
-							}
-						}
-					},
-					"nextOffset": { "type": "integer" }
-				},
-				"required": ["libraryID", "total", "sets"]
-			},
-			"annotations": {
-				"readOnlyHint": true,
-				"openWorldHint": false
-			}
-		},
-		{
-			"name": "zotero_merge_items",
-			"title": "Merge duplicate Zotero items",
-			"description": "Merge items that are the same work, as Zotero's merge button does: the master item keeps its own fields and gets the others' notes, files, annotations, tags, collections and related items, and the others go to the trash. Duplicate PDFs are combined, keeping the annotations of each. To use a field value from another copy, set it on the master with zotero_update_items. The items must be regular items of the same type.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 20 },
-					"masterKey": { "type": "string", "description": "The item to keep, one of itemKeys. Defaults to the oldest." },
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"required": ["itemKeys"],
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"key": { "type": "string", "description": "The master item" },
-					"trashed": { "type": "array", "items": { "type": "string" } },
-					"link": { "type": "string", "description": "zotero:// link that shows the master item in Zotero" }
-				},
-				"required": ["libraryID", "key", "trashed", "link"]
-			},
-			"_meta": {
-				"org.zotero/permission": "delete"
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": true,
-				"idempotentHint": false,
-				"openWorldHint": false
-			}
-		},
-		{
-			"name": "zotero_trash",
-			"title": "Move to or restore from the Zotero trash",
-			"description": "Move items (with their notes and attachments), collections (with their subcollections) or saved searches to the trash, or restore them from it. Items in a trashed collection stay in the library. The user can restore them from the trash until it's emptied.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"itemKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100, "description": "Items, notes or attachments" },
-					"collectionKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100 },
-					"savedSearchKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100 },
-					"restore": { "type": "boolean", "default": false, "description": "Restore from the trash instead" },
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"restored": { "type": "boolean" },
-					"itemKeys": { "type": "array", "items": { "type": "string" } },
-					"collectionKeys": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
-					"savedSearchKeys": { "type": "array", "items": { "type": "string" } }
-				},
-				"required": ["libraryID", "restored", "itemKeys", "collectionKeys", "savedSearchKeys"]
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": true,
-				"idempotentHint": true,
-				"openWorldHint": false
-			}
-		},
-		{
-			"name": "zotero_add_items",
-			"title": "Add items to Zotero",
-			"description": "Add items to a Zotero library, with their metadata looked up, and look for their PDFs. For BibTeX, RIS or another import format, use zotero_import. Ways to add, best first:\n- identifiers: DOIs, ISBNs, arXiv IDs or PubMed IDs, or URLs that contain one (doi.org, a publisher's article page with the DOI in its URL, arxiv.org, pubmed.ncbi.nlm.nih.gov). Zotero doesn't add other web pages: the user saves those with the Zotero Connector in their browser.\n- items: item JSON, for something without an identifier whose metadata you found yourself.\nBy default Zotero then looks for each new item's PDF or EPUB as its Find Full Text does, from the user's computer, so access through their institution works.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"identifiers": {
-						"type": "array",
-						"items": { "type": "string" },
-						"maxItems": 10,
-						"description": "e.g. [\"10.1038/nature12373\", \"978-0-262-03384-8\", \"arXiv:1706.03762\", \"PMID: 23903748\"]"
-					},
-					"items": {
-						"type": "array",
-						"maxItems": 50,
-						"description": "Item JSON in the Zotero web API format, as zotero_get_items returns, e.g. {\"itemType\": \"report\", \"title\": \"…\", \"creators\": [{\"creatorType\": \"author\", \"firstName\": \"Ann\", \"lastName\": \"Lee\"}], \"date\": \"2024\", \"institution\": \"…\", \"url\": \"…\"}. Only fields of the item type are accepted; zotero_list_item_types lists each type's fields and creator types. Notes and files aren't items here: add them with zotero_add_note and zotero_add_attachment.",
-						"items": {
-							"type": "object",
-							"properties": {
-								"itemType": { "enum": ["artwork", "audioRecording", "bill", "blogPost", "book", "bookSection", "case", "computerProgram", "conferencePaper", "dataset", "dictionaryEntry", "document", "email", "encyclopediaArticle", "film", "forumPost", "hearing", "instantMessage", "interview", "journalArticle", "letter", "magazineArticle", "manuscript", "map", "newspaperArticle", "patent", "podcast", "preprint", "presentation", "radioBroadcast", "report", "standard", "statute", "thesis", "tvBroadcast", "videoRecording", "webpage"] }
-							},
-							"required": ["itemType"]
-						}
-					},
-					"collectionKey": { "type": "string", "description": "A collection to add the items to" },
-					"findFiles": { "type": "boolean", "default": true, "description": "Look for PDFs and EPUBs" },
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"results": {
-						"type": "array",
-						"description": "One per item, in the order given. An identifier can give several.",
-						"items": {
-							"type": "object",
-							"properties": {
-								"input": { "type": "string", "description": "The identifier given, or \"items[i]\"" },
-								"status": { "enum": ["added", "failed", "pending"], "description": "pending: Zotero is still looking up the identifier, and adds its item when it finds it." },
-								"error": { "type": "string", "description": "Why it failed" },
-								"key": { "type": "string" },
-								"itemType": { "type": "string" },
-								"title": { "type": "string" },
-								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
-								"date": { "type": "string" },
-								"attachments": {
-									"type": "array",
-									"description": "The new item's attachments, e.g. the PDF Zotero found",
-									"items": {
-										"type": "object",
-										"properties": { "key": { "type": "string" }, "title": { "type": "string" }, "contentType": { "type": "string" } },
-										"required": ["key", "title"]
-									}
-								},
-								"fileSearch": { "enum": ["pending", "notFound"], "description": "For a new item without a file: whether Zotero is still looking for one" },
-								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
-							},
-							"required": ["input", "status"]
-						}
-					},
-					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
-				},
-				"required": ["libraryID", "results"]
-			},
-			"_meta": {
-				"org.zotero/permission": "editLibrary"
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": false,
-				"idempotentHint": false,
-				"openWorldHint": true
-			}
-		},
-		{
-			"name": "zotero_find_fulltext_attachments",
-			"title": "Find full text in Zotero",
-			"description": "Look for a PDF or EPUB of items that have none, as Zotero's Find Full Text menu command does: by DOI, URL or PMCID, from open-access sources and from the publisher's site, through the user's institution where they have access. Use it for items added without files, e.g. by zotero_import. Items that already have a PDF or EPUB, or have no DOI, URL or PMCID, are skipped.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50 },
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"required": ["itemKeys"],
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"results": {
-						"type": "array",
-						"items": {
-							"type": "object",
-							"properties": {
-								"key": { "type": "string" },
-								"title": { "type": "string" },
-								"status": { "enum": ["found", "notFound", "pending", "skipped"], "description": "pending: Zotero is still looking" },
-								"reason": { "type": "string", "description": "Why it was skipped" },
-								"attachment": {
-									"description": "The file found",
-									"type": "object",
-									"properties": {
-										"key": { "type": "string" },
-										"title": { "type": "string" },
-										"contentType": { "type": "string" },
-										"linkMode": { "type": "string" },
-										"fileExists": { "type": "boolean" },
-										"path": { "type": "string", "description": "The file on this computer" },
-										"annotationCount": { "type": "integer" }
-									}
-								}
-							},
-							"required": ["key", "title", "status"]
-						}
-					},
-					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
-				},
-				"required": ["libraryID", "results"]
-			},
-			"_meta": {
-				"org.zotero/permission": "editLibrary"
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": false,
-				"idempotentHint": false,
-				"openWorldHint": true
-			}
-		},
-		{
-			"name": "zotero_add_attachment",
-			"title": "Attach a file in Zotero",
-			"description": "Attach a local file, or download a PDF/EPUB to a parent item. Without a parent, Zotero adds a local file on its own and tries to identify it.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"parentKey": { "type": "string", "description": "The regular item (e.g. a journal article) to attach the file to. Omit to add a file from path as a standalone attachment that Zotero identifies." },
-					"url": { "type": "string", "description": "http or https, with parentKey: a PDF or EPUB, or a page that links to one. Downloaded from the user's computer, so their institution's access applies. Not with path." },
-					"path": { "type": "string", "description": "The absolute path of a file on this computer" },
-					"linkFile": { "type": "boolean", "default": false, "description": "Link to the file at path where it is, instead of copying it into Zotero" },
-					"collectionKey": { "type": "string", "description": "Without parentKey, a collection to add the file and the item Zotero creates for it to" },
-					"title": { "type": "string", "description": "The attachment's title. By default Zotero names it, e.g. \"Full Text PDF\"." },
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
-				},
-				"additionalProperties": false
-			},
-			"outputSchema": {
-				"type": "object",
-				"properties": {
-					"libraryID": { "type": "integer" },
-					"parentKey": { "type": "string" },
-					"status": { "enum": ["attached", "pending"], "description": "pending: Zotero is still downloading the file" },
-					"identified": { "type": "boolean", "description": "Without parentKey, whether Zotero identified the file and created its parent item. Absent while Zotero is still identifying it." },
-					"parent": {
-						"type": "object",
-						"description": "The item Zotero created for the file",
-						"properties": {
-							"key": { "type": "string" },
-							"itemType": { "type": "string" },
-							"title": { "type": "string" },
-							"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
-							"date": { "type": "string" },
-							"bestAttachment": {
-								"type": "object",
-								"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
-								"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
-								"required": ["key"]
-							},
-							"attachmentCount": { "type": "integer" },
-							"noteCount": { "type": "integer" },
-							"annotationCount": { "type": "integer", "description": "In all its files" },
-							"link": { "type": "string" }
-						}
-					},
-					"key": { "type": "string" },
-					"title": { "type": "string" },
-					"contentType": { "type": "string" },
-					"linkMode": { "type": "string" },
-					"fileExists": { "type": "boolean" },
-					"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
-					"annotationCount": { "type": "integer" },
-					"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" },
-					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
-				},
-				"required": ["libraryID", "status"]
-			},
-			"_meta": {
-				"org.zotero/permission": "editLibrary"
-			},
-			"annotations": {
-				"readOnlyHint": false,
-				"destructiveHint": false,
-				"idempotentHint": false,
 				"openWorldHint": true
 			}
 		},
