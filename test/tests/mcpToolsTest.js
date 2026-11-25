@@ -192,7 +192,7 @@ describe("MCP tools", function () {
 			await createDataObject('collection');
 			await createArticle({ collections: [grandchild.id] });
 			
-			let { collections } = await call('zotero_list_collections', { parentKey: parent.key });
+			let { collections } = await call('zotero_list_collections', { collectionKey: parent.key });
 			assert.sameDeepMembers(collections, [
 				{ key: child.key, name: child.name, parentKey: parent.key, itemCount: 0 },
 				{ key: grandchild.key, name: grandchild.name, parentKey: child.key, itemCount: 1 },
@@ -201,14 +201,14 @@ describe("MCP tools", function () {
 			// Whatever the user's setting for showing items from subcollections
 			Zotero.Prefs.set('recursiveCollections', true);
 			try {
-				({ collections } = await call('zotero_list_collections', { parentKey: parent.key }));
+				({ collections } = await call('zotero_list_collections', { collectionKey: parent.key }));
 				assert.equal(collections.find(c => c.key == child.key).itemCount, 0);
 				assert.lengthOf((await call('zotero_search', { collectionKey: child.key })).items, 0);
 			}
 			finally {
 				Zotero.Prefs.clear('recursiveCollections');
 			}
-			({ collections } = await call('zotero_list_collections', { parentKey: parent.key, includeSubcollectionItems: true }));
+			({ collections } = await call('zotero_list_collections', { collectionKey: parent.key, includeSubcollectionItems: true }));
 			assert.equal(collections.find(c => c.key == child.key).itemCount, 1);
 			assert.lengthOf(
 				(await call('zotero_search', { collectionKey: child.key, includeSubcollectionItems: true })).items, 1
@@ -391,7 +391,7 @@ describe("MCP tools", function () {
 			});
 			
 			// The parent's key reads its PDF
-			let result = await call('zotero_read_text', { key: item.key, maxChars: 1000 });
+			let result = await call('zotero_read_text', { itemKey: item.key, maxChars: 1000 });
 			assert.equal(result.key, attachment.key);
 			assert.equal(result.totalPages, 3);
 			assert.deepEqual(result.pages, [
@@ -404,7 +404,7 @@ describe("MCP tools", function () {
 			]);
 			assert.notProperty(result, 'notice');
 			
-			result = await call('zotero_read_text', { key: attachment.key, startPage: 3 });
+			result = await call('zotero_read_text', { itemKey: attachment.key, startPage: 3 });
 			assert.deepEqual(result.pages, [{ page: 3, label: '2', text: pages[2] }]);
 			assert.notProperty(result, 'nextPage');
 			assert.notProperty(result, 'outline');
@@ -419,14 +419,14 @@ describe("MCP tools", function () {
 			let generated = Zotero.Promise.delay(1000).then(() => ({ getCatalog: async () => catalog }));
 			getReader.returns(generated);
 			
-			let result = await call('zotero_read_text', { key: attachment.key, startPage: 2 });
+			let result = await call('zotero_read_text', { itemKey: attachment.key, startPage: 2 });
 			assert.deepEqual(result.pages, [{ page: 2, text: 'Two' }]);
 			assert.match(result.notice, /Page labels .* aren't available yet/);
 			assert.isTrue(getReader.calledWith(attachment.id, sinon.match({ isPriority: true })));
 			
 			// Generation went on, so a later call has the labels
 			await generated;
-			result = await call('zotero_read_text', { key: attachment.key, startPage: 2 });
+			result = await call('zotero_read_text', { itemKey: attachment.key, startPage: 2 });
 			assert.deepEqual(result.pages, [{ page: 2, label: 'ii', text: 'Two' }]);
 			assert.notProperty(result, 'notice');
 		});
@@ -440,7 +440,7 @@ describe("MCP tools", function () {
 				let expected = (await Zotero.PDFWorker.getFullText(attachment.id, [1, 2])).text
 					.split('\f').map(text => text.trim());
 				
-				let result = await call('zotero_read_text', { key: attachment.key, startPage: 2, endPage: 3 });
+				let result = await call('zotero_read_text', { itemKey: attachment.key, startPage: 2, endPage: 3 });
 				assert.equal(result.totalPages, 29);
 				assert.deepEqual(result.pages, [{ page: 2, text: expected[0] }, { page: 3, text: expected[1] }]);
 				assert.isNotEmpty(expected[0]);
@@ -457,13 +457,13 @@ describe("MCP tools", function () {
 			let extracted = Zotero.Promise.defer();
 			sinon.stub(Zotero.PDFWorker, 'getFullText').returns(extracted.promise);
 			
-			let result = await withBudget(300, () => call('zotero_read_text', { key: attachment.key }));
+			let result = await withBudget(300, () => call('zotero_read_text', { itemKey: attachment.key }));
 			assert.deepEqual(result.pages, [{ page: 1, text: 'One' }, { page: 2, text: 'Two' }]);
 			assert.equal(result.nextPage, 3);
 			assert.match(result.notice, /still getting the text/);
 			
 			extracted.resolve({ text: 'Three\fFour', totalPages: 4 });
-			result = await call('zotero_read_text', { key: attachment.key, startPage: 3 });
+			result = await call('zotero_read_text', { itemKey: attachment.key, startPage: 3 });
 			assert.deepEqual(result.pages, [{ page: 3, text: 'Three' }, { page: 4, text: 'Four' }]);
 			assert.notProperty(result, 'notice');
 		});
@@ -474,7 +474,7 @@ describe("MCP tools", function () {
 			let indexing = Zotero.Promise.defer();
 			sinon.stub(Zotero.FullText, 'indexItems').returns(indexing.promise);
 			
-			let result = await withBudget(300, () => call('zotero_read_text', { key: attachment.key }));
+			let result = await withBudget(300, () => call('zotero_read_text', { itemKey: attachment.key }));
 			assert.notProperty(result, 'text');
 			assert.match(result.notice, /still getting the text/);
 			indexing.resolve();
@@ -494,7 +494,7 @@ describe("MCP tools", function () {
 			let chunks = [];
 			let offset = 0;
 			while (offset !== undefined) {
-				let result = await call('zotero_read_text', { key: attachment.key, offset, maxChars: 1000 });
+				let result = await call('zotero_read_text', { itemKey: attachment.key, offset, maxChars: 1000 });
 				assert.equal(result.totalChars, content.length);
 				assert.isAtMost(result.text.length, 1000);
 				chunks.push(result.text);
@@ -507,9 +507,9 @@ describe("MCP tools", function () {
 		
 		it("should reject items without a readable file", async function () {
 			let note = await createDataObject('item', { itemType: 'note' });
-			assert.match(await callForError('zotero_read_text', { key: note.key }), /isn't a file Zotero can get text from/);
+			assert.match(await callForError('zotero_read_text', { itemKey: note.key }), /isn't a file Zotero can get text from/);
 			let item = await createArticle();
-			assert.match(await callForError('zotero_read_text', { key: item.key }), /has no PDF/);
+			assert.match(await callForError('zotero_read_text', { itemKey: item.key }), /has no PDF/);
 		});
 	});
 	
@@ -724,17 +724,17 @@ describe("MCP tools", function () {
 			};
 			
 			// By its parent item's key
-			let opened = await call('zotero_open', { key: item.key, page: 5 });
+			let opened = await call('zotero_open', { itemKey: item.key, page: 5 });
 			assert.equal(opened.key, attachment.key);
 			assert.equal(opened.windowID, win.Zotero_Tabs.windowID);
 			await waitForCallback(() => pageIndex(opened.tabID) === 4, 50, 20);
 			
 			// Already open, so its tab scrolls
-			let again = await call('zotero_open', { key: attachment.key, page: 2 });
+			let again = await call('zotero_open', { itemKey: attachment.key, page: 2 });
 			assert.equal(again.tabID, opened.tabID);
 			await waitForCallback(() => pageIndex(opened.tabID) === 1, 50, 20);
 			
-			let second = await call('zotero_open', { key: attachment.key, newTab: true });
+			let second = await call('zotero_open', { itemKey: attachment.key, newTab: true });
 			assert.notEqual(second.tabID, opened.tabID);
 			
 			let context = await call('zotero_get_context', {});
@@ -749,10 +749,10 @@ describe("MCP tools", function () {
 		
 		it("should open a file in a new window even if a tab in another window has it", async function () {
 			let attachment = await importFileAttachment('test.pdf');
-			let opened = await call('zotero_open', { key: attachment.key });
+			let opened = await call('zotero_open', { itemKey: attachment.key });
 			assert.equal(opened.windowID, win.Zotero_Tabs.windowID);
 			
-			let inWindow = await call('zotero_open', { key: attachment.key, newWindow: true });
+			let inWindow = await call('zotero_open', { itemKey: attachment.key, newWindow: true });
 			assert.notEqual(inWindow.windowID, win.Zotero_Tabs.windowID);
 			let newWin = Zotero.getMainWindows().find(other => other.Zotero_Tabs?.windowID == inWindow.windowID);
 			assert.deepEqual(newWin.Zotero_Tabs.getTabIDsByItemID(attachment.id), [inWindow.tabID]);
@@ -766,7 +766,7 @@ describe("MCP tools", function () {
 		
 		it("should not open what Zotero can't show, or close an unknown tab", async function () {
 			let item = await createArticle();
-			assert.match(await callForError('zotero_open', { key: item.key }), /has no PDF, EPUB or snapshot/);
+			assert.match(await callForError('zotero_open', { itemKey: item.key }), /has no PDF, EPUB or snapshot/);
 			assert.match(await callForError('zotero_close', { tabIDs: ['nope'] }), /No tab nope/);
 		});
 		
@@ -781,7 +781,7 @@ describe("MCP tools", function () {
 		it("should say when a file is still opening at the deadline", async function () {
 			let attachment = await importFileAttachment('test.pdf');
 			sinon.stub(Zotero.Reader, 'open').resolves();
-			let opened = await withBudget(300, () => call('zotero_open', { key: attachment.key }));
+			let opened = await withBudget(300, () => call('zotero_open', { itemKey: attachment.key }));
 			assert.notProperty(opened, 'tabID');
 			assert.match(opened.notice, /still opening/);
 		});
@@ -1155,11 +1155,11 @@ describe("MCP tools", function () {
 			assert.equal(collection.parentKey, parent.key);
 			assert.equal(created.link, `zotero://select/library/collections/${created.key}`);
 			
-			await call('zotero_manage_collections', { action: 'rename', key: created.key, name: 'Read' });
+			await call('zotero_manage_collections', { action: 'rename', collectionKey: created.key, name: 'Read' });
 			assert.equal(collection.name, 'Read');
 			assert.equal(collection.parentKey, parent.key);
 			
-			await call('zotero_manage_collections', { action: 'move', key: created.key, parentKey: null });
+			await call('zotero_manage_collections', { action: 'move', collectionKey: created.key, parentKey: null });
 			assert.isFalse(collection.parentKey);
 			assert.equal(collection.name, 'Read');
 		});
@@ -1167,7 +1167,7 @@ describe("MCP tools", function () {
 		it("shouldn't move a collection into its own subcollection", async function () {
 			let parent = await createDataObject('collection');
 			let child = await createDataObject('collection', { parentID: parent.id });
-			let error = await callForError('zotero_manage_collections', { action: 'move', key: parent.key, parentKey: child.key });
+			let error = await callForError('zotero_manage_collections', { action: 'move', collectionKey: parent.key, parentKey: child.key });
 			assert.match(error, /can't be moved into itself or a subcollection/);
 			assert.isFalse(parent.parentKey);
 		});
@@ -1178,8 +1178,8 @@ describe("MCP tools", function () {
 			// Hold a transaction, so both calls queue for theirs
 			let release = Zotero.Promise.defer();
 			let held = Zotero.DB.executeTransaction(() => release.promise);
-			let first = call('zotero_manage_collections', { action: 'rename', key: collection.key, name: 'First' });
-			let second = call('zotero_manage_collections', { action: 'rename', key: collection.key, name: 'Second' });
+			let first = call('zotero_manage_collections', { action: 'rename', collectionKey: collection.key, name: 'First' });
+			let second = call('zotero_manage_collections', { action: 'rename', collectionKey: collection.key, name: 'Second' });
 			await Zotero.Promise.delay(100);
 			release.resolve();
 			await held;
@@ -1270,7 +1270,7 @@ describe("MCP tools", function () {
 			assert.deepInclude(listed.conditions, { condition: 'tag', operator: 'is', value: tag });
 			
 			let updated = await call('zotero_manage_saved_searches', {
-				action: 'update', key: created.key, query: `${title} tag:${tag}`, mode: 'titleCreatorYear',
+				action: 'update', savedSearchKey: created.key, query: `${title} tag:${tag}`, mode: 'titleCreatorYear',
 			});
 			assert.equal(updated.name, name);
 			assert.equal(updated.itemCount, 1);
@@ -1368,7 +1368,7 @@ describe("MCP tools", function () {
 				assert.notProperty(byKey[unrendered.key], 'imagePath');
 				assert.isFalse(render.called);
 				
-				let { images } = await call('zotero_render_annotation_images', { keys: [unrendered.key] });
+				let { images } = await call('zotero_render_annotation_images', { itemKeys: [unrendered.key] });
 				assert.isTrue(render.calledOnceWith(attachment.id));
 				assert.deepEqual(images, [{
 					key: unrendered.key,
@@ -1410,7 +1410,7 @@ describe("MCP tools", function () {
 			note.setNote(`<div ${citationItems} data-schema-version="8"><h1>Notes</h1><p>One</p></div>`);
 			await note.saveTx();
 			let [{ dateModified }] = (await call('zotero_get_notes', { itemKeys: [note.key] })).notes;
-			let result = await call('zotero_edit_note', { key: note.key, markdown: 'Two **more**', dateModified });
+			let result = await call('zotero_edit_note', { itemKey: note.key, markdown: 'Two **more**', dateModified });
 			assert.equal(result.title, 'Notes');
 			assert.equal(
 				note.getNote(),
@@ -1424,7 +1424,7 @@ describe("MCP tools", function () {
 			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
 			let dateModified = Zotero.Date.sqlToISO8601(note.dateModified);
 			sinon.stub(note, 'save').rejects(new Error('Save failed'));
-			let { error, result } = await callMCPTool('zotero_edit_note', { key: note.key, markdown: 'New', dateModified });
+			let { error, result } = await callMCPTool('zotero_edit_note', { itemKey: note.key, markdown: 'New', dateModified });
 			assert.isTrue(error !== undefined || result.isError);
 			assert.equal(note.getNote(), '<p>Old</p>');
 		});
@@ -1435,7 +1435,7 @@ describe("MCP tools", function () {
 			note.setNote('<p>The user\'s edit</p>');
 			note.setField('dateModified', '2099-01-01 00:00:00');
 			await note.saveTx({ skipDateModifiedUpdate: true });
-			let error = await callForError('zotero_edit_note', { key: note.key, markdown: 'New', mode: 'replace', dateModified });
+			let error = await callForError('zotero_edit_note', { itemKey: note.key, markdown: 'New', mode: 'replace', dateModified });
 			assert.match(error, /has changed since/);
 			assert.equal(note.getNote(), '<p>The user\'s edit</p>');
 		});
@@ -1443,13 +1443,13 @@ describe("MCP tools", function () {
 		it("should replace a note, but not one with highlights", async function () {
 			let note = await createDataObject('item', { itemType: 'note', note: '<p>Old</p>' });
 			let dateModified = Zotero.Date.sqlToISO8601(note.dateModified);
-			let result = await call('zotero_edit_note', { key: note.key, markdown: '# New', mode: 'replace', dateModified });
+			let result = await call('zotero_edit_note', { itemKey: note.key, markdown: '# New', mode: 'replace', dateModified });
 			assert.equal(note.getNote(), '<div data-schema-version="9"><h1>New</h1>\n</div>');
 			
 			note.setNote('<div data-schema-version="9"><p><span class="highlight" data-annotation="%7B%7D">Quote</span></p></div>');
 			await note.saveTx();
 			let error = await callForError('zotero_edit_note', {
-				key: note.key, markdown: 'New', mode: 'replace', dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
+				itemKey: note.key, markdown: 'New', mode: 'replace', dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
 			});
 			assert.match(error, /can't hold/);
 			assert.notEqual(result.dateModified, undefined);
@@ -1480,7 +1480,7 @@ describe("MCP tools", function () {
 			assert.include(html, '&lt;b&gt;raw&lt;/b&gt;');
 			
 			// Its dateModified is the one zotero_edit_note checks
-			await call('zotero_edit_note', { key: result.key, markdown: 'More', dateModified: result.dateModified });
+			await call('zotero_edit_note', { itemKey: result.key, markdown: 'More', dateModified: result.dateModified });
 			assert.include(note.getNote(), '<p>More</p>');
 		});
 		

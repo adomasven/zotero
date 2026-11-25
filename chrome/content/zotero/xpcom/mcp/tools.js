@@ -243,11 +243,11 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * All the library's collections, or all those inside a collection, at every depth
 	 */
-	this.listCollections = async function ({ libraryID, parentKey, includeSubcollectionItems = false }) {
+	this.listCollections = async function ({ libraryID, collectionKey, includeSubcollectionItems = false }) {
 		libraryID = getLibraryID(libraryID);
 		let collections;
-		if (parentKey) {
-			let parent = getCollection(libraryID, parentKey);
+		if (collectionKey) {
+			let parent = getCollection(libraryID, collectionKey);
 			collections = Zotero.Collections.getByParent(parent.id, true);
 		}
 		else {
@@ -465,10 +465,10 @@ Zotero.MCP.Tools = new function () {
 	 * An attachment's text: a PDF by page, other files by character offset
 	 */
 	this.readText = async function ({
-		key, libraryID, startPage, endPage, offset, maxChars = 20000,
+		itemKey, libraryID, startPage, endPage, offset, maxChars = 20000,
 	}, { deadline }) {
 		libraryID = getLibraryID(libraryID);
-		let attachment = await getTextAttachment(libraryID, key);
+		let attachment = await getTextAttachment(libraryID, itemKey);
 		let text = await getIndexedText(attachment, deadline);
 		let fileExists = await attachment.fileExists();
 		let result = {
@@ -677,10 +677,10 @@ Zotero.MCP.Tools = new function () {
 	 * Zotero renders all of a PDF's missing images at once, so asking for one also renders the
 	 * others in its PDF.
 	 */
-	this.renderAnnotationImages = async function ({ keys, libraryID }, { deadline }) {
+	this.renderAnnotationImages = async function ({ itemKeys, libraryID }, { deadline }) {
 		libraryID = getLibraryID(libraryID);
 		let annotations = [];
-		for (let key of new Set(keys)) {
+		for (let key of new Set(itemKeys)) {
 			let annotation = await getItem(libraryID, key);
 			if (!annotation.isAnnotation() || !IMAGE_ANNOTATION_TYPES.includes(annotation.annotationType)) {
 				throw new Zotero.MCP.ToolError(`${key} isn't an image or ink annotation`);
@@ -874,7 +874,7 @@ Zotero.MCP.Tools = new function () {
 	 * selected instead, unless newTab is given.
 	 */
 	this.open = async function ({
-		key, page, pageLabel, annotationKey, windowID, newWindow = false, newTab = false,
+		itemKey, page, pageLabel, annotationKey, windowID, newWindow = false, newTab = false,
 		focus = false, libraryID,
 	}, { deadline }) {
 		libraryID = getLibraryID(libraryID);
@@ -882,11 +882,11 @@ Zotero.MCP.Tools = new function () {
 		if ([page, pageLabel, annotationKey].filter(x => x !== undefined).length > 1) {
 			throw new Zotero.MCP.ToolError('Give page, pageLabel or annotationKey, not more than one');
 		}
-		let item = await getItem(libraryID, key);
+		let item = await getItem(libraryID, itemKey);
 		if (item.isRegularItem()) {
 			item = await item.getBestAttachment();
 			if (!item) {
-				throw new Zotero.MCP.ToolError(`${key} has no PDF, EPUB or snapshot to open`);
+				throw new Zotero.MCP.ToolError(`${itemKey} has no PDF, EPUB or snapshot to open`);
 			}
 		}
 		let location;
@@ -1268,7 +1268,7 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * Create, rename or move a collection
 	 */
-	this.manageCollections = async function ({ action, key, name, parentKey, libraryID }, { clientID }) {
+	this.manageCollections = async function ({ action, collectionKey, name, parentKey, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
 		name = name?.trim();
 		if (action != 'move' && !name) {
@@ -1281,11 +1281,11 @@ Zotero.MCP.Tools = new function () {
 		if (action == 'create') {
 			collection = new Zotero.Collection({ libraryID });
 		}
-		else if (key) {
-			collection = getCollection(libraryID, key);
+		else if (collectionKey) {
+			collection = getCollection(libraryID, collectionKey);
 		}
 		else {
-			throw new Zotero.MCP.ToolError(`${action} needs the key of the collection`);
+			throw new Zotero.MCP.ToolError(`${action} needs a collectionKey`);
 		}
 		let parent = parentKey ? getCollection(libraryID, parentKey) : null;
 		let result;
@@ -1329,7 +1329,7 @@ Zotero.MCP.Tools = new function () {
 	 * its query
 	 */
 	this.manageSavedSearches = async function ({
-		action, key, name, query, mode = 'titleCreatorYear', libraryID,
+		action, savedSearchKey, name, query, mode = 'titleCreatorYear', libraryID,
 	}, { clientID }) {
 		libraryID = getLibraryID(libraryID);
 		name = name?.trim();
@@ -1344,9 +1344,9 @@ Zotero.MCP.Tools = new function () {
 			search = new Zotero.Search({ libraryID });
 		}
 		else {
-			search = key && Zotero.Searches.getByLibraryAndKey(libraryID, key);
+			search = savedSearchKey && Zotero.Searches.getByLibraryAndKey(libraryID, savedSearchKey);
 			if (!search || search.deleted) {
-				throw new Zotero.MCP.ToolError(`No saved search ${key} in library ${libraryID}`);
+				throw new Zotero.MCP.ToolError(`No saved search ${savedSearchKey} in library ${libraryID}`);
 			}
 		}
 		if (!search.isEditable()) {
@@ -1548,12 +1548,12 @@ Zotero.MCP.Tools = new function () {
 	 * meantime isn't lost, and refuses to replace content Markdown can't hold: highlights and
 	 * citations linked to items, and images stored in Zotero.
 	 */
-	this.editNote = async function ({ key, markdown, mode = 'append', dateModified, libraryID }, { clientID }) {
+	this.editNote = async function ({ itemKey, markdown, mode = 'append', dateModified, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
 		if (!markdown.trim()) {
 			throw new Zotero.MCP.ToolError('The Markdown must not be empty');
 		}
-		let note = await getItem(libraryID, key);
+		let note = await getItem(libraryID, itemKey);
 		if (!note.isNote()) {
 			throw new Zotero.MCP.ToolError(`${note.key} isn't a note`);
 		}

@@ -190,7 +190,7 @@
 				"type": "object",
 				"properties": {
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
-					"parentKey": { "type": "string" },
+					"collectionKey": { "type": "string", "description": "List this collection's subcollections" },
 					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Count the items in each collection's subcollections too" }
 				},
 				"additionalProperties": false
@@ -442,14 +442,14 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"key": { "type": "string", "description": "An attachment's key, or an item's key for its best file" },
+					"itemKey": { "type": "string", "description": "An attachment's key, or an item's key for its best file" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
 					"startPage": { "type": "integer", "minimum": 1, "description": "PDF page to start at, from 1. Defaults to 1." },
 					"endPage": { "type": "integer", "minimum": 1, "description": "Last PDF page to read" },
 					"offset": { "type": "integer", "minimum": 0, "description": "Character offset to start at, for files without pages" },
 					"maxChars": { "type": "integer", "minimum": 1000, "maximum": 100000, "default": 20000 }
 				},
-				"required": ["key"],
+				"required": ["itemKey"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -577,10 +577,10 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"keys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50, "description": "Annotation keys" },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 50, "description": "Annotation keys" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["keys"],
+				"required": ["itemKeys"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -811,7 +811,7 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"key": { "type": "string", "description": "An attachment, a note, or a regular item to open its PDF, EPUB or snapshot" },
+					"itemKey": { "type": "string", "description": "An attachment, a note, or a regular item to open its PDF, EPUB or snapshot" },
 					"page": { "type": "integer", "minimum": 1, "description": "PDF page to scroll to, from 1, as zotero_read_text and zotero_search_fulltext give" },
 					"pageLabel": { "type": "string", "description": "The page number printed on the page, for a PDF or an EPUB with page numbers" },
 					"annotationKey": { "type": "string", "description": "An annotation of the file to scroll to and select" },
@@ -821,7 +821,7 @@
 					"focus": { "type": "boolean", "default": false, "description": "Bring Zotero to the front. By default it stays behind the app the user is in." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["key"],
+				"required": ["itemKey"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -1139,7 +1139,7 @@
 				"type": "object",
 				"properties": {
 					"action": { "enum": ["create", "rename", "move"] },
-					"key": { "type": "string", "description": "The collection to rename or move" },
+					"collectionKey": { "type": "string", "description": "The collection to rename or move" },
 					"name": { "type": "string", "minLength": 1, "description": "For create and rename" },
 					"parentKey": {
 						"type": ["string", "null"],
@@ -1179,7 +1179,7 @@
 				"type": "object",
 				"properties": {
 					"action": { "enum": ["create", "update"] },
-					"key": { "type": "string", "description": "For update, the saved search's key" },
+					"savedSearchKey": { "type": "string", "description": "For update" },
 					"name": { "type": "string" },
 					"query": { "type": "string", "description": "As for zotero_search, e.g. `tag:\"to read\" no notes`" },
 					"mode": { "enum": ["titleCreatorYear", "fields", "everything"], "default": "titleCreatorYear", "description": "How free text in the query matches, as for zotero_search" },
@@ -1293,13 +1293,13 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"key": { "type": "string", "description": "The note's key" },
+					"itemKey": { "type": "string", "description": "The note's key" },
 					"markdown": { "type": "string", "minLength": 1 },
 					"mode": { "enum": ["append", "replace"], "default": "append", "description": "replace: the Markdown becomes the whole note, and its first line the note's title" },
 					"dateModified": { "type": "string", "description": "The note's dateModified from zotero_get_notes" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["key", "markdown", "dateModified"],
+				"required": ["itemKey", "markdown", "dateModified"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
