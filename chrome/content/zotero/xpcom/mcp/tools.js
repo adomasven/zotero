@@ -912,6 +912,15 @@ Zotero.MCP.Tools = new function () {
 				?? (newTab ? null : Zotero.getMainWindows().find(win => getTabIDs(win, item).length))
 				?? Zotero.getMainWindow(),
 		};
+		// Zotero gives an item a window of its own only if no window has a tab for it, and
+		// otherwise selects that tab. A tab in another window isn't a duplicate, so a new window
+		// is opened first and the item opened in it.
+		if (newWindow && Zotero.getMainWindows().some(win => win.Zotero_Tabs && getTabIDs(win, item).length)) {
+			let win = Zotero.openMainWindow();
+			await new Promise(resolve => win.addEventListener('load', resolve, { once: true }));
+			await win.ZoteroPane.loadedPromise;
+			options = { window: win };
+		}
 		if (item.isNote()) {
 			if (location) {
 				throw new Zotero.MCP.ToolError(`${item.key} is a note, which has no pages or annotations`);

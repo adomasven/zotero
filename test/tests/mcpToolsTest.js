@@ -711,6 +711,23 @@ describe("MCP tools", function () {
 			assert.lengthOf(win.Zotero_Tabs.getTabIDsByItemID(attachment.id), 0);
 		});
 		
+		it("should open a file in a new window even if a tab in another window has it", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			let opened = await call('zotero_open', { key: attachment.key });
+			assert.equal(opened.windowID, win.Zotero_Tabs.windowID);
+			
+			let inWindow = await call('zotero_open', { key: attachment.key, newWindow: true });
+			assert.notEqual(inWindow.windowID, win.Zotero_Tabs.windowID);
+			let newWin = Zotero.getMainWindows().find(other => other.Zotero_Tabs?.windowID == inWindow.windowID);
+			assert.deepEqual(newWin.Zotero_Tabs.getTabIDsByItemID(attachment.id), [inWindow.tabID]);
+			assert.equal(newWin.Zotero_Tabs.selectedID, inWindow.tabID);
+			// The first tab stays where it was
+			assert.deepEqual(win.Zotero_Tabs.getTabIDsByItemID(attachment.id), [opened.tabID]);
+			
+			await call('zotero_close', { windowIDs: [inWindow.windowID], tabIDs: [opened.tabID] });
+			await waitForCallback(() => newWin.closed);
+		});
+		
 		it("should not open what Zotero can't show, or close an unknown tab", async function () {
 			let item = await createArticle();
 			assert.match(await callForError('zotero_open', { key: item.key }), /has no PDF, EPUB or snapshot/);

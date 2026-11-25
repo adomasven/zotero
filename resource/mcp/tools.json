@@ -815,7 +815,7 @@
 					"annotationKey": { "type": "string", "description": "An annotation of the file to scroll to and select" },
 					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
 					"newTab": { "type": "boolean", "default": false, "description": "Open another tab even if it's already open" },
-					"newWindow": { "type": "boolean", "default": false, "description": "Open it in a new window" },
+					"newWindow": { "type": "boolean", "default": false, "description": "Open it in a new window, even if it's open in another" },
 					"focus": { "type": "boolean", "default": false, "description": "Bring Zotero to the front. By default it stays behind the app the user is in." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
