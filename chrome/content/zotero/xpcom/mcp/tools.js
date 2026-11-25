@@ -1143,38 +1143,29 @@ Zotero.MCP.Tools = new function () {
 		}
 		
 		let items = [...new Set(checked.map(({ item }) => item))];
-		try {
-			await edit(clientID, async () => {
-				for (let { item, change, addTo, removeFrom } of checked) {
-					for (let [field, value] of Object.entries(change.fields ?? {})) {
-						item.setField(field, value);
-					}
-					if (change.creators) {
-						item.setCreators(change.creators, { strict: true });
-					}
-					for (let tag of change.addTags ?? []) {
-						item.addTag(tag.trim());
-					}
-					for (let tag of change.removeTags ?? []) {
-						item.removeTag(tag.trim());
-					}
-					for (let collection of addTo) {
-						item.addToCollection(collection.id);
-					}
-					for (let collection of removeFrom) {
-						item.removeFromCollection(collection.id);
-					}
-					await item.save();
+		await edit(clientID, async () => {
+			for (let { item, change, addTo, removeFrom } of checked) {
+				for (let [field, value] of Object.entries(change.fields ?? {})) {
+					item.setField(field, value);
 				}
-			});
-		}
-		catch (e) {
-			// The transaction was rolled back, but the items still have the changes in memory
-			for (let item of items) {
-				await item.reload(null, true);
+				if (change.creators) {
+					item.setCreators(change.creators, { strict: true });
+				}
+				for (let tag of change.addTags ?? []) {
+					item.addTag(tag.trim());
+				}
+				for (let tag of change.removeTags ?? []) {
+					item.removeTag(tag.trim());
+				}
+				for (let collection of addTo) {
+					item.addToCollection(collection.id);
+				}
+				for (let collection of removeFrom) {
+					item.removeFromCollection(collection.id);
+				}
+				await item.save();
 			}
-			throw e;
-		}
+		}, items);
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			items: await Promise.all(items.map(describeItem)),
@@ -1207,57 +1198,47 @@ Zotero.MCP.Tools = new function () {
 		let fieldValues = item => Object.fromEntries(
 			item.getUsedFields(true).map(field => [field, item.getField(field)])
 		);
-		let changed;
-		try {
-			changed = await edit(clientID, async () => {
-				let changed = [];
-				for (let [i, item] of items.entries()) {
-					let oldItemType = item.itemType;
-					let oldFields = fieldValues(item);
-					let oldCreators = item.getCreators();
-					item.setType(Zotero.ItemTypes.getID(changes[i].itemType));
-					await item.save();
-					
-					// setType() copies values to the new type's fields, by base field and for
-					// book <-> bookSection, so a value that left one field and is now in another moved
-					let newFields = fieldValues(item);
-					let filled = Object.keys(newFields).filter(field => newFields[field] !== oldFields[field]);
-					let movedFields = {};
-					let removedFields = {};
-					for (let [field, value] of Object.entries(oldFields)) {
-						if (newFields[field] === value) {
-							continue;
-						}
-						let to = filled.find(newField => newFields[newField] === value);
-						if (to) {
-							movedFields[field] = to;
-							filled.splice(filled.indexOf(to), 1);
-						}
-						else {
-							removedFields[field] = value;
-						}
+		let changed = await edit(clientID, async () => {
+			let changed = [];
+			for (let [i, item] of items.entries()) {
+				let oldItemType = item.itemType;
+				let oldFields = fieldValues(item);
+				let oldCreators = item.getCreators();
+				item.setType(Zotero.ItemTypes.getID(changes[i].itemType));
+				await item.save();
+				
+				// setType() copies values to the new type's fields, by base field and for
+				// book <-> bookSection, so a value that left one field and is now in another moved
+				let newFields = fieldValues(item);
+				let filled = Object.keys(newFields).filter(field => newFields[field] !== oldFields[field]);
+				let movedFields = {};
+				let removedFields = {};
+				for (let [field, value] of Object.entries(oldFields)) {
+					if (newFields[field] === value) {
+						continue;
 					}
-					let changedCreatorTypes = item.getCreators().flatMap((creator, j) => (
-						creator.creatorTypeID == oldCreators[j].creatorTypeID
-							? []
-							: [{
-								name: [creator.firstName, creator.lastName].filter(Boolean).join(' '),
-								from: Zotero.CreatorTypes.getName(oldCreators[j].creatorTypeID),
-								to: Zotero.CreatorTypes.getName(creator.creatorTypeID),
-							}]
-					));
-					changed.push({ item, oldItemType, movedFields, removedFields, changedCreatorTypes });
+					let to = filled.find(newField => newFields[newField] === value);
+					if (to) {
+						movedFields[field] = to;
+						filled.splice(filled.indexOf(to), 1);
+					}
+					else {
+						removedFields[field] = value;
+					}
 				}
-				return changed;
-			});
-		}
-		catch (e) {
-			// The transaction was rolled back, but the items still have the changes in memory
-			for (let item of items) {
-				await item.reload(null, true);
+				let changedCreatorTypes = item.getCreators().flatMap((creator, j) => (
+					creator.creatorTypeID == oldCreators[j].creatorTypeID
+						? []
+						: [{
+							name: [creator.firstName, creator.lastName].filter(Boolean).join(' '),
+							from: Zotero.CreatorTypes.getName(oldCreators[j].creatorTypeID),
+							to: Zotero.CreatorTypes.getName(creator.creatorTypeID),
+						}]
+				));
+				changed.push({ item, oldItemType, movedFields, removedFields, changedCreatorTypes });
 			}
-			throw e;
-		}
+			return changed;
+		}, items);
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			items: await Promise.all(changed.map(async ({ item, ...change }) => ({
@@ -1291,38 +1272,29 @@ Zotero.MCP.Tools = new function () {
 		}
 		let parent = parentKey ? getCollection(libraryID, parentKey) : null;
 		let result;
-		try {
-			// Checked and changed inside the transaction, so that concurrent calls can't
-			// interleave, e.g. two moves that together put a collection inside itself
-			await edit(clientID, async () => {
-				if (parent && collection.id
-						&& (parent.id == collection.id || collection.hasDescendent('collection', parent.id))) {
-					throw new Zotero.MCP.ToolError(`${collection.key} can't be moved into itself or a subcollection`);
-				}
-				if (name) {
-					collection.name = name;
-				}
-				if (parentKey !== undefined) {
-					collection.parentKey = parent?.key ?? false;
-				}
-				// New collections aren't selected, so as not to disturb the user
-				await collection.save({ skipSelect: true });
-				result = {
-					libraryID,
-					key: collection.key,
-					name: collection.name,
-					parentKey: collection.parentKey || undefined,
-					link: `zotero://select/${Zotero.API.getLibraryPrefix(libraryID)}/collections/${collection.key}`,
-				};
-			});
-		}
-		catch (e) {
-			// The transaction was rolled back, but the collection still has the changes in memory
-			if (collection.id) {
-				await collection.reload(null, true);
+		// Checked and changed inside the transaction, so that concurrent calls can't
+		// interleave, e.g. two moves that together put a collection inside itself
+		await edit(clientID, async () => {
+			if (parent && collection.id
+					&& (parent.id == collection.id || collection.hasDescendent('collection', parent.id))) {
+				throw new Zotero.MCP.ToolError(`${collection.key} can't be moved into itself or a subcollection`);
 			}
-			throw e;
-		}
+			if (name) {
+				collection.name = name;
+			}
+			if (parentKey !== undefined) {
+				collection.parentKey = parent?.key ?? false;
+			}
+			// New collections aren't selected, so as not to disturb the user
+			await collection.save({ skipSelect: true });
+			result = {
+				libraryID,
+				key: collection.key,
+				name: collection.name,
+				parentKey: collection.parentKey || undefined,
+				link: `zotero://select/${Zotero.API.getLibraryPrefix(libraryID)}/collections/${collection.key}`,
+			};
+		}, [collection]);
 		return Zotero.MCP.jsonResult(result);
 	};
 	
@@ -1354,22 +1326,14 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError(`${search.key} can't be changed`);
 		}
 		let built = conditions?.length && buildSearch(libraryID, conditions).search;
-		try {
-			await edit(clientID, async () => {
-				search.fromJSON({
-					name: name || search.name,
-					conditions: (built || search).toJSON().conditions,
-				});
-				// Not selected, so as not to disturb the user
-				await search.save({ skipSelect: true });
+		await edit(clientID, async () => {
+			search.fromJSON({
+				name: name || search.name,
+				conditions: (built || search).toJSON().conditions,
 			});
-		}
-		catch (e) {
-			if (search.id) {
-				await search.reload(null, true);
-			}
-			throw e;
-		}
+			// Not selected, so as not to disturb the user
+			await search.save({ skipSelect: true });
+		}, [search]);
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			key: search.key,
@@ -1575,17 +1539,10 @@ Zotero.MCP.Tools = new function () {
 				?? [null, '<div data-schema-version="9">', note.getNote()];
 			html = wrapper + content + html.replace(/^<div[^>]*>|<\/div>$/g, '') + '</div>';
 		}
-		try {
-			await edit(clientID, () => {
-				note.setNote(html);
-				return note.save({ skipSelect: true });
-			});
-		}
-		catch (e) {
-			// The transaction was rolled back, but the note still has the change in memory
-			await note.reload(null, true);
-			throw e;
-		}
+		await edit(clientID, () => {
+			note.setNote(html);
+			return note.save({ skipSelect: true });
+		}, [note]);
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			key: note.key,
@@ -1808,7 +1765,7 @@ Zotero.MCP.Tools = new function () {
 			}
 		};
 		let lookedUp = Promise.all(Array.from({ length: LOOKUP_CONCURRENCY }, lookUpNext));
-		await Promise.race([lookedUp, Zotero.Promise.delay(Math.max(0, deadline - Date.now()))]);
+		await untilDeadline(lookedUp, deadline);
 		let pending = lookups.filter(lookup => !lookup.results);
 		results = results.flatMap(({ lookup, ...result }) => {
 			if (!lookup) {
@@ -1844,12 +1801,8 @@ Zotero.MCP.Tools = new function () {
 			let items = [...translated, ...jsonItems].filter(item => Zotero.Attachments.canFindFileForItem(item));
 			items.forEach(item => searched.add(item));
 			if (items.length) {
-				let search = Zotero.Attachments.addAvailableFiles(items);
-				search.catch(e => Zotero.logError(e));
-				searching = await Promise.race([
-					search.then(() => false, () => false),
-					Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => true),
-				]);
+				let search = Zotero.Attachments.addAvailableFiles(items).catch(e => Zotero.logError(e));
+				searching = await untilDeadline(search, deadline) === TIMED_OUT;
 			}
 		}
 		
@@ -1998,12 +1951,8 @@ Zotero.MCP.Tools = new function () {
 				})
 				// Finished also when the download outlasts the call
 				.then(attachment => attachment && finish(attachment));
-			download.catch(e => Zotero.logError(e));
-			attachment = await Promise.race([
-				download,
-				Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => null),
-			]);
-			if (attachment === null) {
+			attachment = await untilDeadline(download, deadline);
+			if (attachment === TIMED_OUT) {
 				return Zotero.MCP.jsonResult({
 					libraryID,
 					parentKey: parent.key,
@@ -2165,25 +2114,21 @@ Zotero.MCP.Tools = new function () {
 			});
 			return parent || false;
 		})();
-		identifying.catch(e => Zotero.logError(e));
-		let parent = await Promise.race([
-			identifying,
-			Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => null),
-		]);
+		let parent = await untilDeadline(identifying, deadline);
 		let result = {
 			libraryID,
 			status: 'attached',
 			...await describeAttachment(attachment),
 			link: getOpenLink(attachment),
 		};
-		if (parent) {
+		if (parent === TIMED_OUT) {
+			result.notice = 'Zotero is still identifying the file. Call zotero_get_items on the '
+				+ 'attachment later to see whether it has a parent item.';
+		}
+		else if (parent) {
 			result.identified = true;
 			result.parent = await describeItem(parent);
 			result.parentKey = parent.key;
-		}
-		else if (parent === null) {
-			result.notice = 'Zotero is still identifying the file. Call zotero_get_items on the '
-				+ 'attachment later to see whether it has a parent item.';
 		}
 		else {
 			result.identified = false;
@@ -3240,16 +3185,30 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * Run an app's changes in one transaction, which the user undoes in one step (Edit → Undo
 	 * Changes by <app>). Undo moves new items and collections to the trash.
+	 *
+	 * @param {Zotero.DataObject[]} [objects] - Objects fn changes, reloaded from the database if
+	 *     the transaction fails, as the rollback leaves their changes in memory
 	 */
-	function edit(clientID, fn) {
-		return Zotero.DB.executeTransaction(async () => {
-			let result = await fn();
-			// After fn(), as the last label staged wins over e.g. Zotero.Items.trash()'s own
-			Zotero.UndoHistory.stageAction('undo-action-mcp-changes', {
-				app: Zotero.MCP.Apps.getDisplayName(clientID)
+	async function edit(clientID, fn, objects = []) {
+		try {
+			return await Zotero.DB.executeTransaction(async () => {
+				let result = await fn();
+				// After fn(), as the last label staged wins over e.g. Zotero.Items.trash()'s own
+				Zotero.UndoHistory.stageAction('undo-action-mcp-changes', {
+					app: Zotero.MCP.Apps.getDisplayName(clientID)
+				});
+				return result;
 			});
-			return result;
-		});
+		}
+		catch (e) {
+			// The transaction was rolled back, but the objects still have the changes in memory
+			for (let object of objects) {
+				if (object.id) {
+					await object.reload(null, true);
+				}
+			}
+			throw e;
+		}
 	}
 	
 	async function getItem(libraryID, key) {
