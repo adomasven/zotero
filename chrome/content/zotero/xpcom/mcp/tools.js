@@ -1443,7 +1443,7 @@ Zotero.MCP.Tools = new function () {
 		}
 		tags = [...new Set(tags.map(tag => tag.trim()))];
 		newName = newName?.trim();
-		if (tags.some(tag => !tag) || action == 'rename' && !newName) {
+		if (tags.some(tag => !tag) || newName === '') {
 			throw new Zotero.MCP.ToolError('Tags must not be empty');
 		}
 		if ((action == 'rename') != (newName !== undefined)) {

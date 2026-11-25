@@ -1312,6 +1312,10 @@ describe("MCP tools", function () {
 					await callForError('zotero_manage_tags', { action: 'rename', tags: ['no such tag'], newName: c }),
 					/No items in .* have the tags "no such tag"/
 				);
+				assert.match(
+					await callForError('zotero_manage_tags', { action: 'rename', tags: [c] }),
+					/Give newName to rename/
+				);
 			}
 			finally {
 				await Zotero.Tags.setColor(libraryID, a, false);
