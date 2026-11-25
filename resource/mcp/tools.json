@@ -140,6 +140,7 @@
 						"items": {
 							"type": "object",
 							"description": "The item's fields, creators, tags, collections and so on, plus these",
+							"additionalProperties": true,
 							"properties": {
 								"key": { "type": "string" },
 								"itemType": { "type": "string" },
@@ -1362,8 +1363,15 @@
 									"DOI": { "type": "string" },
 									"ISBN": { "type": "string" },
 									"dateAdded": { "type": "string" },
+									"bestAttachment": {
+										"type": "object",
+										"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
+										"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
+										"required": ["key"]
+									},
 									"attachmentCount": { "type": "integer" },
 									"noteCount": { "type": "integer" },
+									"annotationCount": { "type": "integer", "description": "In all its files" },
 									"link": { "type": "string" }
 								},
 								"required": ["key", "itemType", "title", "dateAdded", "attachmentCount", "noteCount"]
@@ -1556,7 +1564,11 @@
 									"properties": {
 										"key": { "type": "string" },
 										"title": { "type": "string" },
-										"contentType": { "type": "string" }
+										"contentType": { "type": "string" },
+										"linkMode": { "type": "string" },
+										"fileExists": { "type": "boolean" },
+										"path": { "type": "string", "description": "The file on this computer" },
+										"annotationCount": { "type": "integer" }
 									}
 								}
 							},
@@ -1610,6 +1622,15 @@
 							"title": { "type": "string" },
 							"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 							"date": { "type": "string" },
+							"bestAttachment": {
+								"type": "object",
+								"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
+								"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
+								"required": ["key"]
+							},
+							"attachmentCount": { "type": "integer" },
+							"noteCount": { "type": "integer" },
+							"annotationCount": { "type": "integer", "description": "In all its files" },
 							"link": { "type": "string" }
 						}
 					},
@@ -1669,6 +1690,15 @@
 								"title": { "type": "string" },
 								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
+								"bestAttachment": {
+									"type": "object",
+									"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
+									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
+									"required": ["key"]
+								},
+								"attachmentCount": { "type": "integer" },
+								"noteCount": { "type": "integer" },
+								"annotationCount": { "type": "integer", "description": "In all its files" },
 								"link": { "type": "string" }
 							},
 							"required": ["key", "itemType", "title", "link"]

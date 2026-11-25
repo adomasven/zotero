@@ -1634,8 +1634,6 @@ Zotero.MCP.Tools = new function () {
 				DOI: item.getField('DOI') || undefined,
 				ISBN: item.getField('ISBN') || undefined,
 				dateAdded: Zotero.Date.sqlToISO8601(item.dateAdded),
-				attachmentCount: item.numAttachments(),
-				noteCount: item.numNotes(),
 			}))))),
 			nextOffset: offset + limit < sets.length ? offset + limit : undefined,
 		});
