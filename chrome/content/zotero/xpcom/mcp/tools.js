@@ -317,7 +317,7 @@ Zotero.MCP.Tools = new function () {
 	 */
 	this.getItemTypes = async function ({ itemTypes }) {
 		let types = getRegularItemTypes();
-		if (itemTypes) {
+		if (itemTypes?.length) {
 			types = types.filter(type => itemTypes.includes(type.name));
 		}
 		return Zotero.MCP.jsonResult({

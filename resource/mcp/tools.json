@@ -314,7 +314,7 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"itemTypes": { "type": "array", "items": { "enum": ["artwork", "audioRecording", "bill", "blogPost", "book", "bookSection", "case", "computerProgram", "conferencePaper", "dataset", "dictionaryEntry", "document", "email", "encyclopediaArticle", "film", "forumPost", "hearing", "instantMessage", "interview", "journalArticle", "letter", "magazineArticle", "manuscript", "map", "newspaperArticle", "patent", "podcast", "preprint", "presentation", "radioBroadcast", "report", "standard", "statute", "thesis", "tvBroadcast", "videoRecording", "webpage"] }, "minItems": 1, "description": "Defaults to all" }
+					"itemTypes": { "type": "array", "items": { "enum": ["artwork", "audioRecording", "bill", "blogPost", "book", "bookSection", "case", "computerProgram", "conferencePaper", "dataset", "dictionaryEntry", "document", "email", "encyclopediaArticle", "film", "forumPost", "hearing", "instantMessage", "interview", "journalArticle", "letter", "magazineArticle", "manuscript", "map", "newspaperArticle", "patent", "podcast", "preprint", "presentation", "radioBroadcast", "report", "standard", "statute", "thesis", "tvBroadcast", "videoRecording", "webpage"] }, "description": "Defaults to all" }
 				},
 				"additionalProperties": false
 			},
@@ -573,7 +573,7 @@
 		{
 			"name": "zotero_render_annotation_images",
 			"title": "Render Zotero annotation images",
-			"description": "Get PNG files of image and ink annotations in PDFs (areas or drawings the user marked), rendering the ones Zotero hasn't rendered yet. Use it for annotations zotero_get_notes gives no imagePath for, e.g. to see a figure the user marked. Rendering opens the PDF, and renders its other missing images too. Read the files now rather than keep the paths: Zotero replaces a file when its annotation changes.",
+			"description": "Get PNG files of image and ink annotations in PDFs (areas or drawings the user marked), rendering the ones Zotero hasn't rendered yet. Use it for annotations zotero_get_notes gives no imagePath for, e.g. to see a figure the user marked. Zotero renders all of a PDF's missing images at once, in the background, so a PDF with many can take a while; images not ready yet come back pending. Read the files now rather than keep the paths: Zotero replaces a file when its annotation changes.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -774,7 +774,7 @@
 				"properties": {
 					"collectionKey": { "type": "string", "description": "Defaults to the whole library" },
 					"savedSearchKey": { "type": "string" },
-					"itemKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 500, "description": "Items to select. Only items in the collection or saved search can be selected." },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 500, "description": "Items to select. Only items in the collection or saved search can be selected. Without itemKeys or allItems, nothing is selected, even if the collection was already shown with a selection." },
 					"allItems": { "type": "boolean", "default": false, "description": "Select every item shown" },
 					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
 					"tabID": { "type": "string", "description": "A library tab from zotero_get_context. Defaults to the window's library tab used last. Tab IDs are unique only within a window: each window's first library tab is zotero-pane. If the ID is in several windows, give windowID too." },
