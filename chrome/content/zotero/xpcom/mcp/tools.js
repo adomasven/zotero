@@ -3056,8 +3056,13 @@ Zotero.MCP.Tools = new function () {
 	async function waitForLibraryView(win, tabID, deadline) {
 		let view;
 		while (!(view = tabID ? win.ZoteroPane?.getLibraryView(tabID) : win.ZoteroPane?.libraryView)?.loaded) {
-			if (win.closed || Date.now() > deadline) {
-				throw new Error("Zotero's library tab didn't open in time");
+			if (win.closed) {
+				throw new Zotero.MCP.ToolError('The window was closed before the library tab opened');
+			}
+			if (Date.now() > deadline) {
+				throw new Zotero.MCP.ToolError(
+					'Zotero is still opening the library tab. Call zotero_get_context later for it.'
+				);
 			}
 			await Zotero.Promise.delay(20);
 		}

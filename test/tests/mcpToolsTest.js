@@ -770,6 +770,14 @@ describe("MCP tools", function () {
 			assert.match(await callForError('zotero_close', { tabIDs: ['nope'] }), /No tab nope/);
 		});
 		
+		it("should say when a library tab is still opening at the deadline", async function () {
+			sinon.stub(win.ZoteroPane, 'getLibraryView').returns(null);
+			let error = await withBudget(300, () => callForError('zotero_select', { allItems: true, newTab: true }));
+			assert.match(error, /still opening the library tab/);
+			sinon.restore();
+			win.Zotero_Tabs.close(win.Zotero_Tabs.selectedID);
+		});
+		
 		it("should say when a file is still opening at the deadline", async function () {
 			let attachment = await importFileAttachment('test.pdf');
 			sinon.stub(Zotero.Reader, 'open').resolves();
