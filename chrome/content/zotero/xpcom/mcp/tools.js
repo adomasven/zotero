@@ -203,14 +203,9 @@ Zotero.MCP.Tools = new function () {
 	 */
 	this.getItems = async function ({ itemKeys, includeTrashed = false, libraryID }) {
 		libraryID = getLibraryID(libraryID);
+		let { items: found, missing } = await getItemsByKey(libraryID, itemKeys, { includeTrashed });
 		let items = [];
-		let missing = [];
-		for (let key of new Set(itemKeys)) {
-			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
-			if (!item || item.deleted && !includeTrashed) {
-				missing.push(key);
-				continue;
-			}
+		for (let item of found) {
 			let json = item.toJSON();
 			json.link = getSelectLink(item);
 			if (item.isRegularItem()) {
@@ -257,7 +252,7 @@ Zotero.MCP.Tools = new function () {
 					? new Set([collection, ...Zotero.Collections.getByParent(collection.id, true)]
 						.flatMap(c => c.getChildItems(true))).size
 					: collection.getChildItems(true).length,
-				link: `zotero://select/${Zotero.API.getLibraryPrefix(libraryID)}/collections/${collection.key}`,
+				link: getSelectLink(collection),
 			})),
 		});
 	};
@@ -275,7 +270,7 @@ Zotero.MCP.Tools = new function () {
 				key: search.key,
 				name: search.name,
 				conditions: search.toJSON().conditions,
-				link: `zotero://select/${Zotero.API.getLibraryPrefix(libraryID)}/searches/${search.key}`,
+				link: getSelectLink(search),
 			})),
 		});
 	};
@@ -371,8 +366,7 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError('query has no words to search for');
 		}
 		// Attachments with every term, as in the search box
-		let missing = [];
-		let ids = await getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems }, missing);
+		let { ids, missing } = await getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems });
 		for (let term of terms) {
 			if (ids && !ids.length) {
 				break;
@@ -596,13 +590,9 @@ Zotero.MCP.Tools = new function () {
 		libraryID = getLibraryID(libraryID);
 		let notes = new Set();
 		let annotations = new Set();
-		let missing = [];
-		for (let key of new Set(itemKeys)) {
-			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
-			if (!item || item.deleted) {
-				missing.push(key);
-			}
-			else if (item.isNote()) {
+		let { items, missing } = await getItemsByKey(libraryID, itemKeys);
+		for (let item of items) {
+			if (item.isNote()) {
 				notes.add(item);
 			}
 			else if (item.isAnnotation()) {
@@ -675,21 +665,15 @@ Zotero.MCP.Tools = new function () {
 	 */
 	this.renderAnnotationImages = async function ({ itemKeys, libraryID }, { deadline }) {
 		libraryID = getLibraryID(libraryID);
-		let annotations = [];
-		let missing = [];
-		for (let key of new Set(itemKeys)) {
-			let annotation = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
-			if (!annotation || annotation.deleted) {
-				missing.push(key);
-				continue;
-			}
+		let { items: annotations, missing } = await getItemsByKey(libraryID, itemKeys);
+		for (let annotation of annotations) {
+			let { key } = annotation;
 			if (!annotation.isAnnotation() || !IMAGE_ANNOTATION_TYPES.includes(annotation.annotationType)) {
 				throw new Zotero.MCP.ToolError(`${key} isn't an image or ink annotation`);
 			}
 			if (!annotation.parentItem.isPDFAttachment()) {
 				throw new Zotero.MCP.ToolError(`${key} isn't in a PDF, and only PDFs' annotations can be rendered`);
 			}
-			annotations.push(annotation);
 		}
 		let attachmentIDs = new Set();
 		for (let annotation of annotations) {
@@ -815,17 +799,7 @@ Zotero.MCP.Tools = new function () {
 		else if (savedSearchKey) {
 			rowID = 'S' + getSavedSearch(libraryID, savedSearchKey).id;
 		}
-		let items = [];
-		let missing = [];
-		for (let key of new Set(itemKeys)) {
-			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
-			if (!item || item.deleted) {
-				missing.push(key);
-			}
-			else {
-				items.push(item);
-			}
-		}
+		let { items, missing } = await getItemsByKey(libraryID, itemKeys);
 		// As a library tab saves what it shows (see LibraryView#captureLibraryTabState())
 		let state = { collections: [rowID], focusedCollection: rowID, items: items.map(item => item.id) };
 		
@@ -1292,7 +1266,7 @@ Zotero.MCP.Tools = new function () {
 				key: collection.key,
 				name: collection.name,
 				parentKey: collection.parentKey || undefined,
-				link: `zotero://select/${Zotero.API.getLibraryPrefix(libraryID)}/collections/${collection.key}`,
+				link: getSelectLink(collection),
 			};
 		}, [collection]);
 		return Zotero.MCP.jsonResult(result);
@@ -1340,7 +1314,7 @@ Zotero.MCP.Tools = new function () {
 			name: search.name,
 			conditions: search.toJSON().conditions,
 			itemCount: await countSearchItems(search),
-			link: `zotero://select/${Zotero.API.getLibraryPrefix(libraryID)}/searches/${search.key}`,
+			link: getSelectLink(search),
 		});
 	};
 	
@@ -2527,23 +2501,19 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * The attachments of the items given by keys or in a collection, or null for the whole
-	 * library
+	 * The attachments of the items given by keys or in a collection, with ids null for the whole
+	 * library, and the keys with no item
+	 *
+	 * @return {Promise<Object>} { ids, missing }
 	 */
-	async function getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems }, missing) {
+	async function getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems }) {
 		if (itemKeys && collectionKey) {
 			throw new Zotero.MCP.ToolError('Give itemKeys or collectionKey, not both');
 		}
 		let items = [];
+		let missing = [];
 		if (itemKeys) {
-			for (let key of itemKeys) {
-				let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
-				if (!item || item.deleted) {
-					missing.push(key);
-					continue;
-				}
-				items.push(item);
-			}
+			({ items, missing } = await getItemsByKey(libraryID, itemKeys));
 		}
 		else if (collectionKey) {
 			let collection = getCollection(libraryID, collectionKey);
@@ -2558,7 +2528,7 @@ Zotero.MCP.Tools = new function () {
 			}
 		}
 		else {
-			return null;
+			return { ids: null, missing };
 		}
 		let ids = new Set();
 		for (let item of items) {
@@ -2569,7 +2539,7 @@ Zotero.MCP.Tools = new function () {
 				ids.add(item.id);
 			}
 		}
-		return [...ids];
+		return { ids: [...ids], missing };
 	}
 	
 	/**
@@ -3095,10 +3065,12 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * A link that selects the item in Zotero, for the AI app to show the user
+	 * A link that selects an item, collection or saved search in Zotero, for the AI app to show
+	 * the user
 	 */
-	function getSelectLink(item) {
-		return `zotero://select/${Zotero.API.getLibraryPrefix(item.libraryID)}/items/${item.key}`;
+	function getSelectLink(object) {
+		return `zotero://select/${Zotero.API.getLibraryPrefix(object.libraryID)}/`
+			+ `${object._objectTypePlural}/${object.key}`;
 	}
 	
 	/**
@@ -3209,6 +3181,25 @@ Zotero.MCP.Tools = new function () {
 			}
 			throw e;
 		}
+	}
+	
+	/**
+	 * The items of keys, and the keys with no item, or with one in the trash unless
+	 * includeTrashed, for tools that read several and return the others as missing
+	 */
+	async function getItemsByKey(libraryID, keys, { includeTrashed = false } = {}) {
+		let items = [];
+		let missing = [];
+		for (let key of new Set(keys)) {
+			let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
+			if (!item || item.deleted && !includeTrashed) {
+				missing.push(key);
+			}
+			else {
+				items.push(item);
+			}
+		}
+		return { items, missing };
 	}
 	
 	async function getItem(libraryID, key) {
