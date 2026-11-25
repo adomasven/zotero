@@ -62,7 +62,7 @@
 					},
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
 					"collectionKey": { "type": "string", "description": "Only items in this collection" },
-					"includeSubcollections": { "type": "boolean", "default": false, "description": "Also items in the collection's subcollections, at any depth" },
+					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also items in the collection's subcollections, at any depth" },
 					"savedSearchKey": { "type": "string", "description": "Only items this saved search finds. total is how many it finds." },
 					"sortField": { "enum": ["dateModified", "dateAdded", "date", "title", "creator"], "default": "dateModified", "description": "What to order items by" },
 					"sortDirection": { "enum": ["asc", "desc"], "description": "Defaults to newest first for dates, A to Z otherwise" },
@@ -192,7 +192,7 @@
 				"properties": {
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
 					"parentKey": { "type": "string" },
-					"includeSubcollections": { "type": "boolean", "default": false, "description": "Count the items in each collection's subcollections too" }
+					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Count the items in each collection's subcollections too" }
 				},
 				"additionalProperties": false
 			},
@@ -208,7 +208,7 @@
 								"key": { "type": "string" },
 								"name": { "type": "string" },
 								"parentKey": { "type": "string" },
-								"itemCount": { "type": "integer", "description": "Top-level items in the collection, and in its subcollections with includeSubcollections" }
+								"itemCount": { "type": "integer", "description": "Top-level items in the collection, and in its subcollections with includeSubcollectionItems" }
 							},
 							"required": ["key", "name", "itemCount"]
 						}
@@ -382,7 +382,7 @@
 						"description": "Only these items' files, given by item or attachment keys"
 					},
 					"collectionKey": { "type": "string", "description": "Only the files of items in this collection" },
-					"includeSubcollections": { "type": "boolean", "default": false, "description": "Also items in the collection's subcollections, at any depth" },
+					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also items in the collection's subcollections, at any depth" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
 					"limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Files per call" },
 					"offset": { "type": "integer", "minimum": 0, "default": 0 },

@@ -188,10 +188,10 @@ describe("MCP tools", function () {
 			finally {
 				Zotero.Prefs.clear('recursiveCollections');
 			}
-			({ collections } = await call('zotero_list_collections', { parentKey: parent.key, includeSubcollections: true }));
+			({ collections } = await call('zotero_list_collections', { parentKey: parent.key, includeSubcollectionItems: true }));
 			assert.equal(collections.find(c => c.key == child.key).itemCount, 1);
 			assert.lengthOf(
-				(await call('zotero_search', { collectionKey: child.key, includeSubcollections: true })).items, 1
+				(await call('zotero_search', { collectionKey: child.key, includeSubcollectionItems: true })).items, 1
 			);
 		});
 	});

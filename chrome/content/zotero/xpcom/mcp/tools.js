@@ -132,7 +132,7 @@ Zotero.MCP.Tools = new function () {
 	 * the item they belong to
 	 */
 	this.search = async function ({
-		query = '', mode = 'titleCreatorYear', libraryID, collectionKey, includeSubcollections = false,
+		query = '', mode = 'titleCreatorYear', libraryID, collectionKey, includeSubcollectionItems = false,
 		savedSearchKey, sortField = 'dateModified', sortDirection, limit = 25, offset = 0,
 	}) {
 		libraryID = getLibraryID(libraryID);
@@ -152,7 +152,7 @@ Zotero.MCP.Tools = new function () {
 			if (collectionKey) {
 				let collection = getCollection(libraryID, collectionKey);
 				scope.addCondition('collectionID', 'is', collection.id);
-				if (includeSubcollections) {
+				if (includeSubcollectionItems) {
 					scope.addCondition('recursive', 'true');
 				}
 			}
@@ -231,7 +231,7 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * All the library's collections, or all those inside a collection, at every depth
 	 */
-	this.listCollections = async function ({ libraryID, parentKey, includeSubcollections = false }) {
+	this.listCollections = async function ({ libraryID, parentKey, includeSubcollectionItems = false }) {
 		libraryID = getLibraryID(libraryID);
 		let collections;
 		if (parentKey) {
@@ -247,7 +247,7 @@ Zotero.MCP.Tools = new function () {
 				key: collection.key,
 				name: collection.name,
 				parentKey: collection.parentKey || undefined,
-				itemCount: includeSubcollections
+				itemCount: includeSubcollectionItems
 					? new Set([collection, ...Zotero.Collections.getByParent(collection.id, true)]
 						.flatMap(c => c.getChildItems(true))).size
 					: collection.getChildItems(true).length,
@@ -350,7 +350,7 @@ Zotero.MCP.Tools = new function () {
 	 * are found again in the text the index was built from.
 	 */
 	this.searchFulltext = async function ({
-		query, keys, collectionKey, includeSubcollections = false, libraryID, limit = 10, offset = 0,
+		query, keys, collectionKey, includeSubcollectionItems = false, libraryID, limit = 10, offset = 0,
 		passagesPerFile = 3,
 	}, { deadline }) {
 		let structureDeadline = Math.min(deadline, Date.now() + Zotero.MCP.Tools._structureWait);
@@ -364,7 +364,7 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError('query has no words to search for');
 		}
 		// Attachments with every term, as in the search box
-		let ids = await getScopeAttachmentIDs(libraryID, { keys, collectionKey, includeSubcollections });
+		let ids = await getScopeAttachmentIDs(libraryID, { keys, collectionKey, includeSubcollectionItems });
 		for (let term of terms) {
 			if (ids && !ids.length) {
 				break;
@@ -2546,7 +2546,7 @@ Zotero.MCP.Tools = new function () {
 	 * The attachments of the items given by keys or in a collection, or null for the whole
 	 * library
 	 */
-	async function getScopeAttachmentIDs(libraryID, { keys, collectionKey, includeSubcollections }) {
+	async function getScopeAttachmentIDs(libraryID, { keys, collectionKey, includeSubcollectionItems }) {
 		if (keys && collectionKey) {
 			throw new Zotero.MCP.ToolError('Give keys or collectionKey, not both');
 		}
@@ -2563,7 +2563,7 @@ Zotero.MCP.Tools = new function () {
 		else if (collectionKey) {
 			let collection = getCollection(libraryID, collectionKey);
 			let collections = [collection];
-			if (includeSubcollections) {
+			if (includeSubcollectionItems) {
 				collections.push(...Zotero.Collections.get(
 					collection.getDescendents(false, 'collection').map(descendant => descendant.id)
 				));
