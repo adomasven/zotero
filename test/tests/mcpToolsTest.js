@@ -52,6 +52,26 @@ describe("MCP tools", function () {
 	}
 	
 	describe("zotero_search", function () {
+		it("should give each item's best attachment, and how many attachments, notes and annotations it has", async function () {
+			let collection = await createDataObject('collection');
+			let item = await createArticle({ collections: [collection.id] });
+			let link = await Zotero.Attachments.linkFromURL({ url: 'https://example.com/', parentItemID: item.id });
+			let pdf = await importFileAttachment('test.pdf', { parentID: item.id });
+			await createAnnotation('highlight', pdf);
+			await createAnnotation('note', pdf);
+			await createDataObject('item', { itemType: 'note', parentID: item.id });
+			
+			let { items } = await call('zotero_search', { collectionKey: collection.key });
+			assert.deepInclude(items[0], {
+				bestAttachment: { key: pdf.key, contentType: 'application/pdf' },
+				attachmentCount: 2,
+				noteCount: 1,
+				annotationCount: 2,
+			});
+			assert.notProperty(items[0], 'citationKey');
+			assert.isOk(link);
+		});
+		
 		it("should filter by creator with by:, and match titles only as free text", async function () {
 			let name = Zotero.Utilities.randomString();
 			let byName = await createArticle({ lastName: name });
@@ -1657,6 +1677,8 @@ describe("MCP tools", function () {
 			let result = await call('zotero_add_items', { items: [item], findFiles: true });
 			assert.equal(search.firstCall.args[0][0].key, result.results[0].key);
 			assert.equal(result.results[0].fileSearch, 'notFound');
+			assert.deepEqual(result.results[0].attachments, []);
+			assert.notProperty(result.results[0], 'bestAttachment');
 			assert.match(result.notice, /zotero_add_attachment/);
 			
 			// The time the user takes to answer the permission dialog comes out of the call's
@@ -1704,7 +1726,7 @@ describe("MCP tools", function () {
 			});
 			assert.isTrue(search.calledOnce);
 			assert.deepEqual(results.map(result => result.status), ['found', 'notFound', 'skipped']);
-			assert.equal(results[0].file.key, attachment.key);
+			assert.equal(results[0].attachment.key, attachment.key);
 			assert.match(results[2].reason, /no DOI, URL or PMCID/);
 			assert.match(notice, /zotero_add_attachment/);
 			

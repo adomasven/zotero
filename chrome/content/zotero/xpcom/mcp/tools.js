@@ -1859,8 +1859,17 @@ Zotero.MCP.Tools = new function () {
 				output.push({ input, status, error });
 				continue;
 			}
-			let summary = await summarize(item);
-			if (searched.has(item) && !summary.file) {
+			// All of a new item's attachments, rather than the best one and counts
+			let {
+				bestAttachment: _bestAttachment, attachmentCount: _attachmentCount, noteCount: _noteCount,
+				annotationCount: _annotationCount, ...summary
+			} = await summarize(item);
+			summary.attachments = Zotero.Items.get(item.getAttachments()).map(attachment => ({
+				key: attachment.key,
+				title: attachment.getField('title'),
+				contentType: attachment.attachmentContentType || undefined,
+			}));
+			if (searched.has(item) && !summary.attachments.length) {
 				summary.fileSearch = searching ? 'pending' : 'notFound';
 				notices.add(searching ? FILES_PENDING : FILES_NOT_FOUND);
 			}
@@ -2091,7 +2100,7 @@ Zotero.MCP.Tools = new function () {
 			let [attachment] = added(item);
 			if (attachment) {
 				result.status = 'found';
-				result.file = await describeAttachment(attachment);
+				result.attachment = await describeAttachment(attachment);
 			}
 			else {
 				result.status = searching ? 'pending' : 'notFound';
@@ -3108,11 +3117,16 @@ Zotero.MCP.Tools = new function () {
 		if (item.isRegularItem()) {
 			summary.creators = item.getField('firstCreator') || undefined;
 			summary.date = item.getField('date', false, true) || undefined;
-			summary.citationKey = item.getField('citationKey') || undefined;
 			let attachment = await item.getBestAttachment();
 			if (attachment) {
-				summary.file = { key: attachment.key, contentType: attachment.attachmentContentType };
+				summary.bestAttachment = { key: attachment.key, contentType: attachment.attachmentContentType };
 			}
+			let attachments = Zotero.Items.get(item.getAttachments());
+			summary.attachmentCount = attachments.length;
+			summary.noteCount = item.numNotes();
+			summary.annotationCount = attachments
+				.filter(each => each.isFileAttachment())
+				.reduce((count, each) => count + each.numAnnotations(), 0);
 		}
 		return summary;
 	}

@@ -87,16 +87,15 @@
 								"title": { "type": "string" },
 								"creators": { "type": "string" },
 								"date": { "type": "string" },
-								"citationKey": { "type": "string" },
-								"file": {
+								"bestAttachment": {
 									"type": "object",
-									"description": "The best PDF, EPUB or snapshot attachment",
-									"properties": {
-										"key": { "type": "string" },
-										"contentType": { "type": "string" }
-									},
+									"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
+									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
 									"required": ["key"]
 								},
+								"attachmentCount": { "type": "integer" },
+								"noteCount": { "type": "integer" },
+								"annotationCount": { "type": "integer", "description": "In all its files" },
 								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
 							},
 							"required": ["key", "itemType", "title", "link"]
@@ -656,12 +655,15 @@
 								"title": { "type": "string" },
 								"creators": { "type": "string" },
 								"date": { "type": "string" },
-								"citationKey": { "type": "string" },
-								"file": {
+								"bestAttachment": {
 									"type": "object",
+									"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
 									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
 									"required": ["key"]
 								},
+								"attachmentCount": { "type": "integer" },
+								"noteCount": { "type": "integer" },
+								"annotationCount": { "type": "integer", "description": "In all its files" },
 								"link": { "type": "string" }
 							},
 							"required": ["key", "itemType", "title", "link"]
@@ -1015,15 +1017,15 @@
 								"title": { "type": "string" },
 								"creators": { "type": "string" },
 								"date": { "type": "string" },
-								"citationKey": { "type": "string" },
-								"file": {
+								"bestAttachment": {
 									"type": "object",
-									"properties": {
-										"key": { "type": "string" },
-										"contentType": { "type": "string" }
-									},
+									"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
+									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
 									"required": ["key"]
 								},
+								"attachmentCount": { "type": "integer" },
+								"noteCount": { "type": "integer" },
+								"annotationCount": { "type": "integer", "description": "In all its files" },
 								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
 							},
 							"required": ["key", "itemType", "title", "link"]
@@ -1084,15 +1086,15 @@
 								"title": { "type": "string" },
 								"creators": { "type": "string" },
 								"date": { "type": "string" },
-								"citationKey": { "type": "string" },
-								"file": {
+								"bestAttachment": {
 									"type": "object",
-									"properties": {
-										"key": { "type": "string" },
-										"contentType": { "type": "string" }
-									},
+									"description": "The attachment Zotero opens when the item is double-clicked: its PDF if it has one, or else its oldest file or snapshot",
+									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
 									"required": ["key"]
 								},
+								"attachmentCount": { "type": "integer" },
+								"noteCount": { "type": "integer" },
+								"annotationCount": { "type": "integer", "description": "In all its files" },
 								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" },
 								"oldItemType": { "type": "string" },
 								"movedFields": { "type": "object", "description": "Old field → the new type's field its value moved to", "additionalProperties": { "type": "string" } },
@@ -1485,15 +1487,14 @@
 								"title": { "type": "string" },
 								"creators": { "type": "string" },
 								"date": { "type": "string" },
-								"citationKey": { "type": "string" },
-								"file": {
-									"type": "object",
-									"description": "The item's PDF, EPUB or snapshot",
-									"properties": {
-										"key": { "type": "string" },
-										"contentType": { "type": "string" }
-									},
-									"required": ["key"]
+								"attachments": {
+									"type": "array",
+									"description": "The new item's attachments, e.g. the PDF Zotero found",
+									"items": {
+										"type": "object",
+										"properties": { "key": { "type": "string" }, "title": { "type": "string" }, "contentType": { "type": "string" } },
+										"required": ["key", "title"]
+									}
 								},
 								"fileSearch": { "enum": ["pending", "notFound"], "description": "For a new item without a file: whether Zotero is still looking for one" },
 								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
@@ -1541,7 +1542,8 @@
 								"title": { "type": "string" },
 								"status": { "enum": ["found", "notFound", "pending", "skipped"], "description": "pending: Zotero is still looking" },
 								"reason": { "type": "string", "description": "Why it was skipped" },
-								"file": {
+								"attachment": {
+									"description": "The file found",
 									"type": "object",
 									"properties": {
 										"key": { "type": "string" },
