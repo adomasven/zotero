@@ -50,11 +50,43 @@
 		{
 			"name": "zotero_search",
 			"title": "Search Zotero",
-			"description": "Find items in a Zotero library the way Zotero's search box does. A query is free text, which matches according to mode, and clauses, which filter:\n- By field: by:smith, year:2020, year:2015-2020, after:2019, before:2021, in:Nature (the publication), type:book, tag:\"to read\", abstract:crispr, fulltext:crispr (the files' text), added:2024, `added in the last 7 days`. Any other field by its name: doi:10.1038, `title starts with grounded`, `citation key:smith2020`.\n- Empty or missing: `no` before a field or a kind of child finds items without it, and `has` items with it: `no doi`, `has abstract`, `no tags`, `no attachments`, `no notes`, `has annotations`.\n- Counts: `number of notes > 2`.\n- Annotations: type:annotation, color:yellow, `annotation comment:unclear`.\nJoin clauses with and or or, and group them with parentheses: `tag:review and (year:2020 or year:2021)`. Matches in notes, attachments and annotations return the item they belong to, unless the query is type:note, type:attachment or type:annotation.",
+			"description": "Find items in a Zotero library by free text, as Zotero's search box matches it, and by conditions, as in its Advanced Search. Matches in notes, attachments and annotations return the item they belong to, unless a condition is itemType is note, attachment or annotation.",
 			"inputSchema": {
 				"type": "object",
+				"$defs": {
+					"condition": {
+						"type": "object",
+						"properties": {
+							"condition": { "enum": ["abstractNote", "accessDate", "annotationAuthor", "annotationColor", "annotationComment", "annotationText", "annotationType", "anyField", "applicationNumber", "archive", "archiveLocation", "artworkSize", "assignee", "attachmentStorageType", "author", "authority", "bookAuthor", "callNumber", "citationKey", "code", "codeNumber", "collection", "committee", "conferenceName", "country", "creator", "date", "dateAdded", "dateModified", "DOI", "edition", "editor", "eventPlace", "extra", "fileTypeID", "filingDate", "fulltextContent", "history", "ISBN", "ISSN", "issue", "itemType", "journalAbbreviation", "language", "lastRead", "libraryCatalog", "medium", "meetingName", "note", "numAnnotations", "numAttachments", "number", "numberOfVolumes", "numNotes", "numPages", "numTags", "originalDate", "originalPlace", "originalPublisher", "pages", "partNumber", "partTitle", "place", "PMCID", "PMID", "priorityNumbers", "programmingLanguage", "publicationTitle", "publisher", "references", "reporter", "rights", "runningTime", "savedSearch", "scale", "section", "series", "seriesNumber", "seriesText", "seriesTitle", "session", "shortTitle", "status", "system", "tag", "title", "titleCreatorYear", "type", "url", "versionNumber", "volume"], "description": "As in Zotero's Advanced Search: item fields (see zotero_list_item_types), creator types, tags, notes, annotations, counts and more" },
+							"operator": { "enum": ["is", "isNot", "contains", "doesNotContain", "beginsWith", "isLessThan", "isGreaterThan", "isBefore", "isAfter", "isInTheLast", "isEmpty", "isNotEmpty"], "description": "Each condition takes some of these; an error lists which" },
+							"value": { "type": "string", "description": "Not for isEmpty and isNotEmpty. itemType: a name from zotero_list_item_types. Dates: e.g. 2020 or 2020-05-01; for isInTheLast, e.g. 7 days. collection and savedSearch: a key. annotationType: highlight, underline, note, text, image or ink. annotationColor: a hex color, as zotero_get_notes gives." },
+							"level": { "enum": ["attachment", "note", "annotation"], "description": "Match only on the item's children of this kind, e.g. a tag on its annotations and not on the item" }
+						},
+						"required": ["condition", "operator"],
+						"additionalProperties": false
+					}
+				},
 				"properties": {
-					"query": { "type": "string", "description": "Empty lists all items in the scope" },
+					"query": { "type": "string", "description": "Free text, matched according to mode" },
+					"conditions": {
+						"type": "array",
+						"description": "Conditions items must all meet, e.g. [{\"condition\": \"creator\", \"operator\": \"contains\", \"value\": \"Smith\"}, {\"condition\": \"date\", \"operator\": \"isAfter\", \"value\": \"2019\"}, {\"joinMode\": \"any\", \"conditions\": [{\"condition\": \"tag\", \"operator\": \"is\", \"value\": \"to read\"}, {\"condition\": \"numNotes\", \"operator\": \"isLessThan\", \"value\": \"1\"}]}]. Without query or conditions, all items in the scope.",
+						"items": {
+							"anyOf": [
+								{ "$ref": "#/$defs/condition" },
+								{
+									"type": "object",
+									"description": "A group, which matches if all or any of its conditions do",
+									"properties": {
+										"joinMode": { "enum": ["all", "any"] },
+										"conditions": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "minItems": 1 }
+									},
+									"required": ["joinMode", "conditions"],
+									"additionalProperties": false
+								}
+							]
+						}
+					},
 					"mode": {
 						"enum": ["titleCreatorYear", "fields", "everything"],
 						"default": "titleCreatorYear",
@@ -1180,15 +1212,45 @@
 		{
 			"name": "zotero_manage_saved_searches",
 			"title": "Manage Zotero saved searches",
-			"description": "Create a saved search, or rename one or change its query. The query uses zotero_search's syntax. To delete one, use zotero_trash.",
+			"description": "Create a saved search, or rename one or change its conditions. To delete one, use zotero_trash.",
 			"inputSchema": {
 				"type": "object",
+				"$defs": {
+					"condition": {
+						"type": "object",
+						"properties": {
+							"condition": { "enum": ["abstractNote", "accessDate", "annotationAuthor", "annotationColor", "annotationComment", "annotationText", "annotationType", "anyField", "applicationNumber", "archive", "archiveLocation", "artworkSize", "assignee", "attachmentStorageType", "author", "authority", "bookAuthor", "callNumber", "citationKey", "code", "codeNumber", "collection", "committee", "conferenceName", "country", "creator", "date", "dateAdded", "dateModified", "DOI", "edition", "editor", "eventPlace", "extra", "fileTypeID", "filingDate", "fulltextContent", "history", "ISBN", "ISSN", "issue", "itemType", "journalAbbreviation", "language", "lastRead", "libraryCatalog", "medium", "meetingName", "note", "numAnnotations", "numAttachments", "number", "numberOfVolumes", "numNotes", "numPages", "numTags", "originalDate", "originalPlace", "originalPublisher", "pages", "partNumber", "partTitle", "place", "PMCID", "PMID", "priorityNumbers", "programmingLanguage", "publicationTitle", "publisher", "references", "reporter", "rights", "runningTime", "savedSearch", "scale", "section", "series", "seriesNumber", "seriesText", "seriesTitle", "session", "shortTitle", "status", "system", "tag", "title", "titleCreatorYear", "type", "url", "versionNumber", "volume"], "description": "As in Zotero's Advanced Search: item fields (see zotero_list_item_types), creator types, tags, notes, annotations, counts and more" },
+							"operator": { "enum": ["is", "isNot", "contains", "doesNotContain", "beginsWith", "isLessThan", "isGreaterThan", "isBefore", "isAfter", "isInTheLast", "isEmpty", "isNotEmpty"], "description": "Each condition takes some of these; an error lists which" },
+							"value": { "type": "string", "description": "Not for isEmpty and isNotEmpty. itemType: a name from zotero_list_item_types. Dates: e.g. 2020 or 2020-05-01; for isInTheLast, e.g. 7 days. collection and savedSearch: a key. annotationType: highlight, underline, note, text, image or ink. annotationColor: a hex color, as zotero_get_notes gives." },
+							"level": { "enum": ["attachment", "note", "annotation"], "description": "Match only on the item's children of this kind, e.g. a tag on its annotations and not on the item" }
+						},
+						"required": ["condition", "operator"],
+						"additionalProperties": false
+					}
+				},
 				"properties": {
 					"action": { "enum": ["create", "update"] },
 					"savedSearchKey": { "type": "string", "description": "For update" },
 					"name": { "type": "string", "description": "Needed for create" },
-					"query": { "type": "string", "description": "Needed for create. As for zotero_search, e.g. `tag:\"to read\" no notes`" },
-					"mode": { "enum": ["titleCreatorYear", "fields", "everything"], "default": "titleCreatorYear", "description": "How free text in the query matches, as for zotero_search" },
+					"conditions": {
+						"type": "array",
+						"description": "Needed for create. As for zotero_search; they replace the search's conditions.",
+						"items": {
+							"anyOf": [
+								{ "$ref": "#/$defs/condition" },
+								{
+									"type": "object",
+									"description": "A group, which matches if all or any of its conditions do",
+									"properties": {
+										"joinMode": { "enum": ["all", "any"] },
+										"conditions": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "minItems": 1 }
+									},
+									"required": ["joinMode", "conditions"],
+									"additionalProperties": false
+								}
+							]
+						}
+					},
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
 				"required": ["action"],

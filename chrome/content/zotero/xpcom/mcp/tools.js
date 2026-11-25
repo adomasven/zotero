@@ -145,8 +145,8 @@ Zotero.MCP.Tools = new function () {
 	 * the item they belong to
 	 */
 	this.search = async function ({
-		query = '', mode = 'titleCreatorYear', libraryID, collectionKey, includeSubcollectionItems = false,
-		savedSearchKey, sortField = 'dateModified', sortDirection, limit = 25, offset = 0,
+		query = '', mode = 'titleCreatorYear', conditions = [], libraryID, collectionKey,
+		includeSubcollectionItems = false, savedSearchKey, sortField = 'dateModified', sortDirection, limit = 25, offset = 0,
 	}) {
 		libraryID = getLibraryID(libraryID);
 		if (collectionKey && savedSearchKey) {
@@ -173,24 +173,17 @@ Zotero.MCP.Tools = new function () {
 		let search = new Zotero.Search();
 		search.libraryID = libraryID;
 		search.setScope(scope, true);
-		// A query that names a child type (e.g. "type:note") returns those, not their items
-		let childLevel = false;
+		// Conditions that name a child type (itemType is note) return those, not their items
+		let resultLevel = 'item';
 		query = query.trim();
-		if (query) {
-			let querySearch = Zotero.SearchQuery.getSearch(query, { libraryID, mode });
-			if (querySearch) {
-				let level = Object.values(querySearch.getConditions())
-					.find(condition => condition.condition == 'resultLevel')?.operator;
-				childLevel = level && level != 'item';
-				querySearch.setScope(search, true);
-				search = querySearch;
-			}
-			else {
-				search.addCondition('quicksearch-' + mode, 'contains', query);
-			}
+		if (query || conditions.length) {
+			let built;
+			({ search: built, resultLevel } = buildSearch(libraryID, conditions, query, mode));
+			built.setScope(search, true);
+			search = built;
 		}
 		let items = await Zotero.Items.getAsync(await search.search());
-		if (!childLevel) {
+		if (resultLevel == 'item') {
 			items = Zotero.Items.getTopLevel(items);
 		}
 		items = items.filter(item => !item.deleted);
@@ -1339,14 +1332,13 @@ Zotero.MCP.Tools = new function () {
 	 * its query
 	 */
 	this.manageSavedSearches = async function ({
-		action, savedSearchKey, name, query, mode = 'titleCreatorYear', libraryID,
+		action, savedSearchKey, name, conditions, libraryID,
 	}, { clientID }) {
 		libraryID = getLibraryID(libraryID);
 		name = name?.trim();
-		query = query?.trim();
-		if (action == 'create' ? !name || !query : !name && !query) {
+		if (action == 'create' ? !name || !conditions?.length : !name && !conditions?.length) {
 			throw new Zotero.MCP.ToolError(
-				action == 'create' ? 'create needs a name and a query' : 'update needs a name or a query'
+				action == 'create' ? 'create needs a name and conditions' : 'update needs a name or conditions'
 			);
 		}
 		let search;
@@ -1362,20 +1354,12 @@ Zotero.MCP.Tools = new function () {
 		if (!search.isEditable()) {
 			throw new Zotero.MCP.ToolError(`${search.key} can't be changed`);
 		}
-		let conditions;
-		if (query) {
-			let parsed = Zotero.SearchQuery.getSearch(query, { libraryID, mode });
-			if (!parsed) {
-				parsed = new Zotero.Search({ libraryID });
-				parsed.addCondition('quicksearch-' + mode, 'contains', query);
-			}
-			conditions = parsed.toJSON().conditions;
-		}
+		let built = conditions?.length && buildSearch(libraryID, conditions).search;
 		try {
 			await edit(clientID, async () => {
 				search.fromJSON({
 					name: name || search.name,
-					conditions: conditions || search.toJSON().conditions,
+					conditions: (built || search).toJSON().conditions,
 				});
 				// Not selected, so as not to disturb the user
 				await search.save({ skipSelect: true });
@@ -3104,6 +3088,49 @@ Zotero.MCP.Tools = new function () {
 			return undefined;
 		}
 		return Object.keys(TAG_COLORS).find(name => TAG_COLORS[name] == hex.toUpperCase()) ?? hex;
+	}
+	
+	/**
+	 * A search for the conditions zotero_search and zotero_manage_saved_searches take, with
+	 * free text matched by a quick search mode, built as Zotero.SearchQuery builds a query typed
+	 * in the search box: it returns items, with a match on a child (e.g. an annotation's comment)
+	 * mapped up to its item
+	 *
+	 * @return {Object} { search, resultLevel }, where resultLevel is the kind of item it returns
+	 */
+	function buildSearch(libraryID, conditions, query, mode) {
+		let toNode = (node) => {
+			if (node.conditions) {
+				return { joinMode: node.joinMode, children: node.conditions.map(toNode) };
+			}
+			let { condition, operator, value = '', level } = node;
+			if (!Zotero.SearchConditions.hasOperator(condition, operator)) {
+				let operators = Object.keys(Zotero.SearchConditions.get(condition).operators);
+				throw new Zotero.MCP.ToolError(`${condition} takes the operators ${operators.join(', ')}`);
+			}
+			// Annotation types are stored by number
+			if (condition == 'annotationType') {
+				value = String(Zotero.Annotations['ANNOTATION_TYPE_' + value.toUpperCase()] ?? value);
+			}
+			return { condition, operator, value, level };
+		};
+		let tree = { joinMode: 'all', children: conditions.map(toNode) };
+		// A child type names the rows to return rather than filtering items, as in
+		// Zotero.SearchQuery.getSearch()
+		let resultLevel = 'item';
+		let pins = tree.children.filter(node => node.condition == 'itemType' && node.operator == 'is'
+			&& ['attachment', 'note', 'annotation'].includes(node.value));
+		if (pins.length && new Set(pins.map(pin => pin.value)).size == 1) {
+			resultLevel = pins[0].value;
+			tree.children = tree.children.filter(node => !pins.includes(node));
+		}
+		let search = new Zotero.Search({ libraryID });
+		search.addCondition('resultLevel', resultLevel);
+		Zotero.SearchQuery.addToSearch(search, tree);
+		if (query) {
+			search.addCondition('quicksearch-' + mode, 'contains', query);
+		}
+		return { search, resultLevel };
 	}
 	
 	function getSavedSearch(libraryID, key) {

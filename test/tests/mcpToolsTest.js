@@ -72,12 +72,12 @@ describe("MCP tools", function () {
 			assert.isOk(link);
 		});
 		
-		it("should filter by creator with by:, and match titles only as free text", async function () {
+		it("should filter by conditions, and match titles only as free text", async function () {
 			let name = Zotero.Utilities.randomString();
 			let byName = await createArticle({ lastName: name });
 			let aboutName = await createArticle({ title: `On ${name}` });
 			
-			let { items } = await call('zotero_search', { query: `by:${name}` });
+			let { items } = await call('zotero_search', { conditions: [{ condition: 'creator', operator: 'contains', value: name }] });
 			assert.deepEqual(items.map(item => item.key), [byName.key]);
 			assert.equal(items[0].creatorSummary, name);
 			assert.equal(items[0].link, `zotero://select/library/items/${byName.key}`);
@@ -86,7 +86,7 @@ describe("MCP tools", function () {
 			assert.sameMembers(items.map(item => item.key), [byName.key, aboutName.key]);
 		});
 		
-		it("should return an item once for matches in its notes, and the notes for type:note", async function () {
+		it("should return an item once for matches in its notes, and the notes for itemType is note", async function () {
 			let word = Zotero.Utilities.randomString();
 			let item = await createArticle();
 			let notes = [];
@@ -97,14 +97,68 @@ describe("MCP tools", function () {
 			let { items } = await call('zotero_search', { query: word, mode: 'fields' });
 			assert.deepEqual(items.map(item => item.key), [item.key]);
 			
-			({ items } = await call('zotero_search', { query: `type:note ${word}`, mode: 'fields' }));
+			let notesOnly = [{ condition: 'itemType', operator: 'is', value: 'note' }];
+			({ items } = await call('zotero_search', { query: word, mode: 'fields', conditions: notesOnly }));
 			assert.sameMembers(items.map(item => item.key), notes.map(note => note.key));
 			assert.isTrue(items.every(note => note.parentKey == item.key));
 			
 			let pdf = await importFileAttachment('test.pdf', { parentID: item.id });
 			let annotation = await createAnnotation('note', pdf, { comment: word });
-			({ items } = await call('zotero_search', { query: `type:annotation ${word}`, mode: 'fields' }));
+			let annotationsOnly = [{ condition: 'itemType', operator: 'is', value: 'annotation' }];
+			({ items } = await call('zotero_search', { query: word, mode: 'fields', conditions: annotationsOnly }));
 			assert.deepEqual(items.map(each => [each.key, each.attachmentKey, each.parentKey]), [[annotation.key, pdf.key, undefined]]);
+		});
+		
+		it("should match an item by its own conditions and its children's together", async function () {
+			let tag = Zotero.Utilities.randomString();
+			let comment = Zotero.Utilities.randomString();
+			let annotated = await createArticle();
+			annotated.addTag(tag);
+			await annotated.saveTx();
+			let pdf = await importFileAttachment('test.pdf', { parentID: annotated.id });
+			let annotation = await createAnnotation('highlight', pdf, { comment });
+			annotation.addTag(comment);
+			await annotation.saveTx();
+			let other = await createArticle();
+			other.addTag(tag);
+			await other.saveTx();
+			let tagged = { condition: 'tag', operator: 'is', value: tag };
+			
+			// The tag is the item's and the annotation the PDF's, but both are the item's match
+			let { items } = await call('zotero_search', { conditions: [
+				tagged,
+				{ condition: 'annotationType', operator: 'is', value: 'highlight' },
+				{ condition: 'annotationComment', operator: 'contains', value: comment },
+			] });
+			assert.deepEqual(items.map(item => item.key), [annotated.key]);
+			
+			({ items } = await call('zotero_search', { conditions: [tagged, {
+				joinMode: 'any',
+				conditions: [
+					{ condition: 'annotationComment', operator: 'contains', value: comment },
+					{ condition: 'numAttachments', operator: 'is', value: '0' },
+				],
+			}] }));
+			assert.sameMembers(items.map(item => item.key), [annotated.key, other.key]);
+			
+			// A tag on an annotation, and not on the item itself
+			({ items } = await call('zotero_search', { conditions: [{ ...tagged, value: comment }] }));
+			assert.deepEqual(items.map(item => item.key), [annotated.key]);
+			({ items } = await call('zotero_search', { conditions: [{ ...tagged, level: 'annotation' }] }));
+			assert.lengthOf(items, 0);
+			
+			assert.match(
+				await callForError('zotero_search', { conditions: [{ condition: 'tag', operator: 'isBefore', value: '2020' }] }),
+				/tag takes the operators is, isNot, contains, doesNotContain/
+			);
+		});
+		
+		it("should take every condition Zotero's Advanced Search has, in each tool that takes conditions", async function () {
+			let expected = Zotero.SearchConditions.getStandardConditions().map(condition => condition.name);
+			for (let name of ['zotero_search', 'zotero_manage_saved_searches']) {
+				let tool = (await Zotero.MCP.getTools()).find(tool => tool.name == name);
+				assert.sameMembers(tool.inputSchema.$defs.condition.properties.condition.enum, expected, name);
+			}
 		});
 		
 		it("should list a collection's items, sorted and in pages", async function () {
@@ -1259,13 +1313,18 @@ describe("MCP tools", function () {
 			Zotero.UndoHistory.clear();
 		});
 		
-		it("should create a saved search from a query, list it, change it and trash it", async function () {
+		it("should create a saved search from conditions, list it, change it and trash it", async function () {
 			let tag = Zotero.Utilities.randomString();
 			let title = Zotero.Utilities.randomString();
 			await createDataObject('item', { title, tags: [{ tag }] });
 			await createDataObject('item', { tags: [{ tag }] });
 			let name = Zotero.Utilities.randomString();
-			let created = await call('zotero_manage_saved_searches', { action: 'create', name, query: `tag:${tag} no notes` });
+			let tagged = { condition: 'tag', operator: 'is', value: tag };
+			let created = await call('zotero_manage_saved_searches', {
+				action: 'create',
+				name,
+				conditions: [tagged, { condition: 'numNotes', operator: 'is', value: '0' }],
+			});
 			assert.equal(created.itemCount, 2);
 			let { savedSearches } = await call('zotero_list_saved_searches', {});
 			let listed = savedSearches.find(search => search.key == created.key);
@@ -1276,7 +1335,9 @@ describe("MCP tools", function () {
 			assert.deepInclude(listed.conditions, { condition: 'tag', operator: 'is', value: tag });
 			
 			let updated = await call('zotero_manage_saved_searches', {
-				action: 'update', savedSearchKey: created.key, query: `${title} tag:${tag}`, mode: 'titleCreatorYear',
+				action: 'update',
+				savedSearchKey: created.key,
+				conditions: [tagged, { condition: 'title', operator: 'contains', value: title }],
 			});
 			assert.equal(updated.name, name);
 			assert.equal(updated.itemCount, 1);
