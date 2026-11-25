@@ -428,6 +428,7 @@
 						}
 					},
 					"nextOffset": { "type": "integer", "description": "Present when there are more files" },
+					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" },
 					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "total", "files"]
@@ -601,6 +602,7 @@
 							"required": ["key", "status"]
 						}
 					},
+					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" },
 					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "images"]

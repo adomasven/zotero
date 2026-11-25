@@ -38,7 +38,8 @@ Zotero.MCP.ToolError for errors the model should see, such as a key that doesn't
 errors are logged and reported to the model by message.
 
 Items are referred to by key, in the library given by the libraryID argument, by default My
-Library, as in the Zotero web and local APIs.
+Library, as in the Zotero web and local APIs. A tool that reads several returns the keys that
+don't exist, or are in the trash, as missing; a tool that changes things throws for them.
 
 */
 
@@ -377,7 +378,8 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError('query has no words to search for');
 		}
 		// Attachments with every term, as in the search box
-		let ids = await getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems });
+		let missing = [];
+		let ids = await getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems }, missing);
 		for (let term of terms) {
 			if (ids && !ids.length) {
 				break;
@@ -454,6 +456,7 @@ Zotero.MCP.Tools = new function () {
 			total: attachments.length,
 			files: results,
 			nextOffset: offset + limit < attachments.length ? offset + limit : undefined,
+			missing: missing.length ? missing : undefined,
 			notice: [
 				textPending && 'Zotero is still getting the text of the files with pending: true, so their '
 					+ 'passages are missing. Search again shortly.',
@@ -681,8 +684,13 @@ Zotero.MCP.Tools = new function () {
 	this.renderAnnotationImages = async function ({ itemKeys, libraryID }, { deadline }) {
 		libraryID = getLibraryID(libraryID);
 		let annotations = [];
+		let missing = [];
 		for (let key of new Set(itemKeys)) {
-			let annotation = await getItem(libraryID, key);
+			let annotation = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
+			if (!annotation || annotation.deleted) {
+				missing.push(key);
+				continue;
+			}
 			if (!annotation.isAnnotation() || !IMAGE_ANNOTATION_TYPES.includes(annotation.annotationType)) {
 				throw new Zotero.MCP.ToolError(`${key} isn't an image or ink annotation`);
 			}
@@ -713,6 +721,7 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			images,
+			missing: missing.length ? missing : undefined,
 			notice: [
 				pending && 'Zotero is still rendering the images with status pending. Call again shortly.',
 				images.some(image => image.status == 'failed')
@@ -2594,7 +2603,7 @@ Zotero.MCP.Tools = new function () {
 	 * The attachments of the items given by keys or in a collection, or null for the whole
 	 * library
 	 */
-	async function getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems }) {
+	async function getScopeAttachmentIDs(libraryID, { itemKeys, collectionKey, includeSubcollectionItems }, missing) {
 		if (itemKeys && collectionKey) {
 			throw new Zotero.MCP.ToolError('Give itemKeys or collectionKey, not both');
 		}
@@ -2603,7 +2612,8 @@ Zotero.MCP.Tools = new function () {
 			for (let key of itemKeys) {
 				let item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
 				if (!item || item.deleted) {
-					throw new Zotero.MCP.ToolError(`No item ${key} in library ${libraryID}`);
+					missing.push(key);
+					continue;
 				}
 				items.push(item);
 			}

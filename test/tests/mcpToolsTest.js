@@ -349,8 +349,9 @@ describe("MCP tools", function () {
 			}
 			
 			assert.equal((await call('zotero_search_fulltext', { query: word })).total, 2);
-			let { files: results } = await call('zotero_search_fulltext', { query: word, itemKeys: [items[1].key] });
-			assert.deepEqual(results.map(result => result.parentKey), [items[1].key]);
+			let { files, missing } = await call('zotero_search_fulltext', { query: word, itemKeys: [items[1].key, 'AAAAAAAA'] });
+			assert.deepEqual(files.map(file => file.parentKey), [items[1].key]);
+			assert.deepEqual(missing, ['AAAAAAAA']);
 		});
 	});
 	
@@ -1373,7 +1374,8 @@ describe("MCP tools", function () {
 				assert.notProperty(byKey[unrendered.key], 'imagePath');
 				assert.isFalse(render.called);
 				
-				let { images } = await call('zotero_render_annotation_images', { itemKeys: [unrendered.key] });
+				let { images, missing } = await call('zotero_render_annotation_images', { itemKeys: [unrendered.key, 'AAAAAAAA'] });
+				assert.deepEqual(missing, ['AAAAAAAA']);
 				assert.isTrue(render.calledOnceWith(attachment.id));
 				assert.deepEqual(images, [{
 					key: unrendered.key,
