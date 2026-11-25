@@ -79,7 +79,7 @@ describe("MCP tools", function () {
 			
 			let { items } = await call('zotero_search', { query: `by:${name}` });
 			assert.deepEqual(items.map(item => item.key), [byName.key]);
-			assert.equal(items[0].creators, name);
+			assert.equal(items[0].creatorSummary, name);
 			assert.equal(items[0].link, `zotero://select/library/items/${byName.key}`);
 			
 			({ items } = await call('zotero_search', { query: name, mode: 'titleCreatorYear' }));

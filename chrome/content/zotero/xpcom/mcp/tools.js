@@ -3152,7 +3152,7 @@ Zotero.MCP.Tools = new function () {
 		}
 		summary.title = item.getDisplayTitle();
 		if (item.isRegularItem()) {
-			summary.creators = item.getField('firstCreator') || undefined;
+			summary.creatorSummary = item.getField('firstCreator') || undefined;
 			summary.date = item.getField('date', false, true) || undefined;
 			let attachment = await item.getBestAttachment();
 			if (attachment) {

@@ -86,7 +86,7 @@
 								"parentKey": { "type": "string", "description": "A note's or attachment's item" },
 								"attachmentKey": { "type": "string", "description": "An annotation's file" },
 								"title": { "type": "string" },
-								"creators": { "type": "string" },
+								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
 								"bestAttachment": {
 									"type": "object",
@@ -654,7 +654,7 @@
 								"itemType": { "type": "string" },
 								"parentKey": { "type": "string" },
 								"title": { "type": "string" },
-								"creators": { "type": "string" },
+								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
 								"bestAttachment": {
 									"type": "object",
@@ -1019,7 +1019,7 @@
 								"itemType": { "type": "string" },
 								"parentKey": { "type": "string" },
 								"title": { "type": "string" },
-								"creators": { "type": "string" },
+								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
 								"bestAttachment": {
 									"type": "object",
@@ -1088,7 +1088,7 @@
 								"itemType": { "type": "string" },
 								"parentKey": { "type": "string" },
 								"title": { "type": "string" },
-								"creators": { "type": "string" },
+								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
 								"bestAttachment": {
 									"type": "object",
@@ -1353,7 +1353,7 @@
 									"key": { "type": "string" },
 									"itemType": { "type": "string" },
 									"title": { "type": "string" },
-									"creators": { "type": "string" },
+									"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 									"date": { "type": "string" },
 									"DOI": { "type": "string" },
 									"ISBN": { "type": "string" },
@@ -1489,7 +1489,7 @@
 								"key": { "type": "string" },
 								"itemType": { "type": "string" },
 								"title": { "type": "string" },
-								"creators": { "type": "string" },
+								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
 								"attachments": {
 									"type": "array",
@@ -1604,7 +1604,7 @@
 							"key": { "type": "string" },
 							"itemType": { "type": "string" },
 							"title": { "type": "string" },
-							"creators": { "type": "string" },
+							"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 							"date": { "type": "string" },
 							"link": { "type": "string" }
 						}
@@ -1663,7 +1663,7 @@
 								"key": { "type": "string" },
 								"itemType": { "type": "string" },
 								"title": { "type": "string" },
-								"creators": { "type": "string" },
+								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
 								"link": { "type": "string" }
 							},
