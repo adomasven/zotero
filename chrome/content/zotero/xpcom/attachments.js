@@ -1507,7 +1507,8 @@ Zotero.Attachments = new function () {
 	 * @param {String[]} [options.methods] - See getFileResolvers()
 	 * @param {Number} [options.sameDomainRequestDelay=1000] - Minimum number of milliseconds
 	 *     between requests to the same domain (used in tests)
-	 * @return {Promise}
+	 * @return {Promise<Map<Zotero.Item, Zotero.Item|false>>} - The attachment added for each
+	 *     eligible item, or false if none was found
 	 */
 	this.addAvailableFiles = async function (items, options = {}) {
 		const MAX_CONSECUTIVE_DOMAIN_FAILURES = 5;
@@ -1542,6 +1543,10 @@ Zotero.Attachments = new function () {
 
 		queue = _findFileQueue;
 		
+		// The queue entry of each eligible item, which has its result once it's done
+		var entries = [];
+		var getResults = () => new Map(entries.map(entry => [entry.item, entry.result || false]));
+		
 		for (let item of items) {
 			// Skip items that aren't eligible. This is sort of weird, because it means some
 			// selected items just don't appear in the list, but there are several different reasons
@@ -1565,6 +1570,7 @@ Zotero.Attachments = new function () {
 				let current = queue[pos];
 				// Skip items that are already processing or that returned a result
 				if (current.processing || current.result) {
+					entries.push(current);
 					continue;
 				}
 				// Replace current queue entry
@@ -1574,6 +1580,7 @@ Zotero.Attachments = new function () {
 				// Add new items to queue
 				queue.push(entry);
 			}
+			entries.push(entry);
 			
 			progressQueue.addRow(item);
 		}
@@ -1590,7 +1597,7 @@ Zotero.Attachments = new function () {
 			progressWin.show();
 			itemProgress.setProgress(100);
 			progressWin.startCloseTimer(4000);
-			return;
+			return getResults();
 		}
 		
 		var dialog = progressQueue.getDialog();
@@ -1599,7 +1606,8 @@ Zotero.Attachments = new function () {
 		
 		// If queue was already in progress, just wait for it to finish
 		if (_findFileQueuePromise) {
-			return _findFileQueuePromise;
+			await _findFileQueuePromise;
+			return getResults();
 		}
 		
 		var queueResolve;
@@ -1819,6 +1827,7 @@ Zotero.Attachments = new function () {
 		_findFileQueue = [];
 		queueResolve();
 		_findFileQueuePromise = null;
+		return getResults();
 	};
 	
 	

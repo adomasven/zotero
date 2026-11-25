@@ -1232,6 +1232,10 @@ describe("Zotero.Attachments", function () {
 			// Make sure both items have attachments
 			assert.equal(item1.numAttachments(), 1);
 			assert.equal(item2.numAttachments(), 1);
+			// And that it returns them by item
+			assert.deepEqual([...attachments.keys()], [item1, item2]);
+			assert.equal(attachments.get(item1).id, item1.getAttachments()[0]);
+			assert.equal(attachments.get(item2).id, item2.getAttachments()[0]);
 		});
 		
 		it("should wait between requests that resolve to the same domain", async function () {
