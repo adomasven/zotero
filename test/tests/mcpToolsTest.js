@@ -1719,9 +1719,13 @@ describe("MCP tools", function () {
 			await notFound.saveTx();
 			let noIdentifier = await createArticle();
 			let attachment;
+			let usersFile;
 			let search = sinon.stub(Zotero.Attachments, 'addAvailableFiles').callsFake(async (items) => {
 				assert.sameMembers(items, [found, notFound]);
 				attachment = await importFileAttachment('test.pdf', { parentID: found.id });
+				// One the user adds meanwhile isn't the search's
+				usersFile = await importFileAttachment('test.pdf', { parentID: notFound.id });
+				return new Map([[found, attachment], [notFound, false]]);
 			});
 			
 			let { results, notice } = await call('zotero_find_fulltext_attachments', {
@@ -1735,6 +1739,7 @@ describe("MCP tools", function () {
 			
 			assert.isTrue(await Zotero.UndoHistory.undo());
 			assert.isTrue(attachment.deleted);
+			assert.isFalse(usersFile.deleted);
 		});
 		
 		it("should say which items it's still searching for at the deadline", async function () {

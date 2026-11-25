@@ -2079,14 +2079,15 @@ Zotero.MCP.Tools = new function () {
 		for (let key of new Set(itemKeys)) {
 			items.push(await getItem(libraryID, key));
 		}
-		let eligible = items.filter(item => Zotero.Attachments.canFindFileForItem(item));
-		let before = new Map(eligible.map(item => [item, new Set(item.getAttachments())]));
-		let added = item => Zotero.Items.get(item.getAttachments().filter(id => !before.get(item).has(id)));
+		let eligible = new Set(items.filter(item => Zotero.Attachments.canFindFileForItem(item)));
+		// The attachment found for each item, once the search ends
+		let found = new Map();
 		let finding = (async () => {
-			if (eligible.length) {
-				await Zotero.Attachments.addAvailableFiles(eligible);
+			if (!eligible.size) {
+				return;
 			}
-			let attachments = eligible.flatMap(added);
+			found = await Zotero.Attachments.addAvailableFiles([...eligible]);
+			let attachments = [...found.values()].filter(Boolean);
 			if (attachments.length) {
 				await edit(clientID, async () => {
 					for (let attachment of attachments) {
@@ -2099,7 +2100,7 @@ Zotero.MCP.Tools = new function () {
 		let searching = await untilDeadline(finding, deadline) === TIMED_OUT;
 		let results = await Promise.all(items.map(async (item) => {
 			let result = { key: item.key, title: item.getDisplayTitle() };
-			if (!before.has(item)) {
+			if (!eligible.has(item)) {
 				result.status = 'skipped';
 				result.reason = !item.isRegularItem()
 					? 'Only regular items, such as a journal article, can have files found'
@@ -2109,7 +2110,7 @@ Zotero.MCP.Tools = new function () {
 						: 'It has no DOI, URL or PMCID to look for a file by';
 				return result;
 			}
-			let [attachment] = added(item);
+			let attachment = found.get(item);
 			if (attachment) {
 				result.status = 'found';
 				result.attachment = await describeAttachment(attachment);
