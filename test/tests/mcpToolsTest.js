@@ -1258,6 +1258,16 @@ describe("MCP tools", function () {
 			assert.equal(result.color, '#5fb236');
 			assert.isAbove(result.position, 0);
 			
+			// A position alone moves the color to another number key and keeps it
+			let position = result.position == 9 ? 8 : 9;
+			result = await call('zotero_manage_tags', { action: 'setColor', tags: [tag], position });
+			assert.equal(result.color, '#5fb236');
+			assert.equal(Zotero.Tags.getColor(libraryID, tag).color, '#5fb236');
+			assert.match(
+				await callForError('zotero_manage_tags', { action: 'setColor', tags: ['kept'], position: 1 }),
+				/kept has no color/
+			);
+			
 			await call('zotero_manage_tags', { action: 'delete', tags: [tag] });
 			assert.deepEqual(item.getTags(), [{ tag: 'kept' }]);
 			assert.isFalse(Zotero.Tags.getColor(libraryID, tag));

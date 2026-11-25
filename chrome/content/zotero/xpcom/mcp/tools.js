@@ -1434,6 +1434,13 @@ Zotero.MCP.Tools = new function () {
 			if (tags.length != 1) {
 				throw new Zotero.MCP.ToolError('Give one tag to color');
 			}
+			// Without a color, the tag keeps its own, e.g. to move it to another number key
+			if (color === undefined) {
+				color = colors.get(tag)?.color;
+				if (!color) {
+					throw new Zotero.MCP.ToolError(`${tag} has no color. Give color as #rrggbb.`);
+				}
+			}
 			if (color && !/^#[0-9a-f]{6}$/i.test(color)) {
 				throw new Zotero.MCP.ToolError('Give color as #rrggbb, or null to remove it');
 			}
