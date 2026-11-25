@@ -100,6 +100,11 @@ describe("MCP tools", function () {
 			({ items } = await call('zotero_search', { query: `type:note ${word}`, mode: 'fields' }));
 			assert.sameMembers(items.map(item => item.key), notes.map(note => note.key));
 			assert.isTrue(items.every(note => note.parentKey == item.key));
+			
+			let pdf = await importFileAttachment('test.pdf', { parentID: item.id });
+			let annotation = await createAnnotation('note', pdf, { comment: word });
+			({ items } = await call('zotero_search', { query: `type:annotation ${word}`, mode: 'fields' }));
+			assert.deepEqual(items.map(each => [each.key, each.attachmentKey, each.parentKey]), [[annotation.key, pdf.key, undefined]]);
 		});
 		
 		it("should list a collection's items, sorted and in pages", async function () {
@@ -290,7 +295,7 @@ describe("MCP tools", function () {
 			await setText(other, [`Just ${word}.`]);
 			stubStructure({ pages: [{ label: 'i' }, { label: '1' }, { label: '2' }] });
 			
-			let { total, results } = await call('zotero_search_fulltext', { query: `${word} "soil organic"` });
+			let { total, files: results } = await call('zotero_search_fulltext', { query: `${word} "soil organic"` });
 			assert.equal(total, 1);
 			assert.equal(results[0].key, attachment.key);
 			assert.equal(results[0].parentKey, item.key);
@@ -326,7 +331,7 @@ describe("MCP tools", function () {
 			let filler = 'maße ipsum '.repeat(70);
 			await setText(attachment, [`${filler}${word} ${filler}`]);
 			
-			let { results } = await call('zotero_search_fulltext', { query: word });
+			let { files: results } = await call('zotero_search_fulltext', { query: word });
 			let [{ text }] = results[0].passages;
 			assert.match(text, new RegExp(`^…(maße|ipsum) .* ${word} .* (maße|ipsum)…$`));
 			// About 200 characters on each side
@@ -344,7 +349,7 @@ describe("MCP tools", function () {
 			}
 			
 			assert.equal((await call('zotero_search_fulltext', { query: word })).total, 2);
-			let { results } = await call('zotero_search_fulltext', { query: word, itemKeys: [items[1].key] });
+			let { files: results } = await call('zotero_search_fulltext', { query: word, itemKeys: [items[1].key] });
 			assert.deepEqual(results.map(result => result.parentKey), [items[1].key]);
 		});
 	});
@@ -360,7 +365,7 @@ describe("MCP tools", function () {
 			sinon.stub(Zotero.FullText, 'indexItems').returns(indexing.promise);
 			
 			let result = await withBudget(300, () => call('zotero_search_fulltext', { query: 'text' }));
-			assert.deepEqual(result.results.map(file => [file.key, file.pending]), [[attachment.key, true]]);
+			assert.deepEqual(result.files.map(file => [file.key, file.pending]), [[attachment.key, true]]);
 			assert.match(result.notice, /still getting the text of the files with pending/);
 			indexing.resolve();
 		});
@@ -395,8 +400,8 @@ describe("MCP tools", function () {
 			assert.equal(result.key, attachment.key);
 			assert.equal(result.totalPages, 3);
 			assert.deepEqual(result.pages, [
-				{ page: 1, label: 'i', text: pages[0] },
-				{ page: 2, label: '1', text: pages[1] },
+				{ page: 1, pageLabel: 'i', text: pages[0] },
+				{ page: 2, pageLabel: '1', text: pages[1] },
 			]);
 			assert.equal(result.nextPage, 3);
 			assert.deepEqual(result.outline, [
@@ -405,7 +410,7 @@ describe("MCP tools", function () {
 			assert.notProperty(result, 'notice');
 			
 			result = await call('zotero_read_text', { itemKey: attachment.key, startPage: 3 });
-			assert.deepEqual(result.pages, [{ page: 3, label: '2', text: pages[2] }]);
+			assert.deepEqual(result.pages, [{ page: 3, pageLabel: '2', text: pages[2] }]);
 			assert.notProperty(result, 'nextPage');
 			assert.notProperty(result, 'outline');
 		});
@@ -427,7 +432,7 @@ describe("MCP tools", function () {
 			// Generation went on, so a later call has the labels
 			await generated;
 			result = await call('zotero_read_text', { itemKey: attachment.key, startPage: 2 });
-			assert.deepEqual(result.pages, [{ page: 2, label: 'ii', text: 'Two' }]);
+			assert.deepEqual(result.pages, [{ page: 2, pageLabel: 'ii', text: 'Two' }]);
 			assert.notProperty(result, 'notice');
 		});
 		
@@ -581,7 +586,7 @@ describe("MCP tools", function () {
 			await win.ZoteroPane.selectItems([items[0].id, items[2].id]);
 			
 			let context = await call('zotero_get_context', {});
-			assert.equal(context.tab, 'library');
+			assert.equal(context.tabType, 'library');
 			assert.equal(context.libraryID, Zotero.Libraries.userLibraryID);
 			assert.deepEqual(context.collections, [{ key: collection.key, name: collection.name }]);
 			assert.equal(context.selectedItemCount, 2);
@@ -619,7 +624,7 @@ describe("MCP tools", function () {
 			}, readerWindow);
 			
 			let context = await call('zotero_get_context', {});
-			assert.equal(context.tab, 'reader');
+			assert.equal(context.tabType, 'reader');
 			let { selectedAnnotations, ...rest } = context.reader;
 			assert.deepEqual(rest, {
 				libraryID: attachment.libraryID,
@@ -680,13 +685,13 @@ describe("MCP tools", function () {
 				itemKeys: [items[0].key, items[2].key, elsewhere.key],
 			});
 			assert.equal(result.windowID, win.Zotero_Tabs.windowID);
-			assert.equal(result.selectedCount, 2);
+			assert.equal(result.selectedItemCount, 2);
 			assert.deepEqual(result.notShown, [elsewhere.key]);
 			let view = win.ZoteroPane.getLibraryView(result.tabID);
 			assert.sameMembers(selectedKeys(view), [items[0].key, items[2].key]);
 			
 			result = await call('zotero_select', { collectionKey: collection.key, allItems: true });
-			assert.equal(result.selectedCount, 3);
+			assert.equal(result.selectedItemCount, 3);
 			
 			result = await call('zotero_select', { collectionKey: collection.key, itemKeys: [items[1].key], newWindow: true });
 			assert.notEqual(result.windowID, win.Zotero_Tabs.windowID);
@@ -1279,7 +1284,7 @@ describe("MCP tools", function () {
 			assert.equal((await search.search()).length, 2);
 			
 			let result = await call('zotero_trash', { savedSearchKeys: [created.key] });
-			assert.deepEqual(result.savedSearches, [created.key]);
+			assert.deepEqual(result.savedSearchKeys, [created.key]);
 			assert.isTrue(search.deleted);
 		});
 	});
@@ -1542,8 +1547,8 @@ describe("MCP tools", function () {
 			let child = await createDataObject('collection', { parentID: parent.id });
 			let item = await createArticle({ collections: [child.id] });
 			
-			let { collections } = await call('zotero_trash', { collectionKeys: [child.key, parent.key] });
-			assert.deepEqual(collections, [parent.key]);
+			let { collectionKeys } = await call('zotero_trash', { collectionKeys: [child.key, parent.key] });
+			assert.deepEqual(collectionKeys, [parent.key]);
 			assert.isTrue(parent.deleted);
 			assert.isTrue(child.deleted);
 			assert.isFalse(item.deleted);

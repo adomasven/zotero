@@ -451,7 +451,7 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			total: attachments.length,
-			results,
+			files: results,
 			nextOffset: offset + limit < attachments.length ? offset + limit : undefined,
 			notice: [
 				textPending && 'Zotero is still getting the text of the files with pending: true, so their '
@@ -570,7 +570,7 @@ Zotero.MCP.Tools = new function () {
 			}
 			let pageText = (pages[page - 1] ?? '').trim();
 			chars += pageText.length;
-			pageResults.push({ page, label: structure?.labels?.[page - 1], text: pageText });
+			pageResults.push({ page, pageLabel: structure?.labels?.[page - 1], text: pageText });
 		}
 		let notice;
 		if (textPending) {
@@ -735,7 +735,7 @@ Zotero.MCP.Tools = new function () {
 			window: true,
 			windowID: Zotero_Tabs.windowID,
 			tabID: Zotero_Tabs.selectedID,
-			tab: Zotero_Tabs.selectedType,
+			tabType: Zotero_Tabs.selectedType,
 		};
 		// A window can have only reader and note tabs
 		if (ZoteroPane.libraryView?.loaded) {
@@ -861,7 +861,7 @@ Zotero.MCP.Tools = new function () {
 			windowID: win.Zotero_Tabs.windowID,
 			tabID: view.tabID,
 			libraryID,
-			selectedCount: selected.length,
+			selectedItemCount: selected.length,
 			// Items that aren't in the collection or saved search
 			notShown: items.filter(item => !selected.includes(item)).map(item => item.key),
 			missing: missing.length ? missing : undefined,
@@ -1760,9 +1760,9 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			restored: restore,
-			items: items.map(item => item.key),
-			collections: collections.map(collection => collection.key),
-			savedSearches: searches.map(search => search.key),
+			itemKeys: items.map(item => item.key),
+			collectionKeys: collections.map(collection => collection.key),
+			savedSearchKeys: searches.map(search => search.key),
 		});
 	};
 	
@@ -3146,6 +3146,7 @@ Zotero.MCP.Tools = new function () {
 			link: getSelectLink(item),
 		};
 		if (item.isAnnotation()) {
+			summary = { ...summary, parentKey: undefined, attachmentKey: item.parentKey };
 			summary.title = Zotero.Utilities.ellipsize(item.annotationText || item.annotationComment || '', 200);
 			return summary;
 		}

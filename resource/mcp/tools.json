@@ -83,7 +83,8 @@
 							"properties": {
 								"key": { "type": "string" },
 								"itemType": { "type": "string" },
-								"parentKey": { "type": "string" },
+								"parentKey": { "type": "string", "description": "A note's or attachment's item" },
+								"attachmentKey": { "type": "string", "description": "An annotation's file" },
 								"title": { "type": "string" },
 								"creators": { "type": "string" },
 								"date": { "type": "string" },
@@ -395,7 +396,7 @@
 				"properties": {
 					"libraryID": { "type": "integer" },
 					"total": { "type": "integer", "description": "Files that match" },
-					"results": {
+					"files": {
 						"type": "array",
 						"items": {
 							"type": "object",
@@ -428,7 +429,7 @@
 					"nextOffset": { "type": "integer", "description": "Present when there are more files" },
 					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
-				"required": ["libraryID", "total", "results"]
+				"required": ["libraryID", "total", "files"]
 			},
 			"annotations": {
 				"readOnlyHint": true,
@@ -479,7 +480,7 @@
 							"type": "object",
 							"properties": {
 								"page": { "type": "integer" },
-								"label": { "type": "string", "description": "The page number printed on the page" },
+								"pageLabel": { "type": "string", "description": "The page number printed on the page" },
 								"text": { "type": "string" }
 							},
 							"required": ["page", "text"]
@@ -622,7 +623,7 @@
 					"window": { "type": "boolean", "description": "Whether a Zotero window is open. The rest describes the one the user used last." },
 					"windowID": { "type": "string" },
 					"tabID": { "type": "string", "description": "The active tab" },
-					"tab": { "type": "string", "description": "The active tab's kind: library, reader, note or another kind" },
+					"tabType": { "type": "string", "description": "The active tab's kind: library, reader, note or another kind" },
 					"libraryTabID": { "type": "string", "description": "The library tab the selection below is from: the active one, or the one used last" },
 					"libraryID": { "type": "integer", "description": "The library selected in the library tab" },
 					"libraryName": { "type": "string" },
@@ -791,11 +792,11 @@
 					"windowID": { "type": "string" },
 					"tabID": { "type": "string" },
 					"libraryID": { "type": "integer" },
-					"selectedCount": { "type": "integer" },
+					"selectedItemCount": { "type": "integer" },
 					"notShown": { "type": "array", "items": { "type": "string" }, "description": "Items that aren't in the collection or saved search, so weren't selected" },
 					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" }
 				},
-				"required": ["windowID", "tabID", "libraryID", "selectedCount", "notShown"]
+				"required": ["windowID", "tabID", "libraryID", "selectedItemCount", "notShown"]
 			},
 			"annotations": {
 				"readOnlyHint": false,
@@ -1428,11 +1429,11 @@
 				"properties": {
 					"libraryID": { "type": "integer" },
 					"restored": { "type": "boolean" },
-					"items": { "type": "array", "items": { "type": "string" } },
-					"collections": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
-					"savedSearches": { "type": "array", "items": { "type": "string" } }
+					"itemKeys": { "type": "array", "items": { "type": "string" } },
+					"collectionKeys": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
+					"savedSearchKeys": { "type": "array", "items": { "type": "string" } }
 				},
-				"required": ["libraryID", "restored", "items", "collections", "savedSearches"]
+				"required": ["libraryID", "restored", "itemKeys", "collectionKeys", "savedSearchKeys"]
 			},
 			"annotations": {
 				"readOnlyHint": false,
