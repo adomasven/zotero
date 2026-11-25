@@ -1846,7 +1846,7 @@ Zotero.MCP.Tools = new function () {
 			lookedUp.then(() => addLookedUpLate(pending, clientID, findFiles)).catch(e => Zotero.logError(e));
 		}
 		
-		// Like Find Available PDF, for new items that can have one
+		// Like Find Full Text, for new items that can have one
 		let searched = new Set();
 		let searching = false;
 		if (findFiles) {
@@ -1999,7 +1999,7 @@ Zotero.MCP.Tools = new function () {
 			if (!/^https?:\/\//i.test(url)) {
 				throw new Zotero.MCP.ToolError('Only http and https URLs can be attached');
 			}
-			// A link to the file, or a page that links to it, as Find Available PDF follows
+			// A link to the file, or a page that links to it, as Find Full Text follows
 			let download = Zotero.Attachments.addFileFromURLs(parent, [{ pageURL: url }])
 				.catch((e) => {
 					Zotero.debug(e, 2);

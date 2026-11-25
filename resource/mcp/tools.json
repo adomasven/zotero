@@ -793,7 +793,7 @@
 					"libraryID": { "type": "integer" },
 					"selectedCount": { "type": "integer" },
 					"notShown": { "type": "array", "items": { "type": "string" }, "description": "Items that aren't in the collection or saved search, so weren't selected" },
-					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys of items that don't exist" }
+					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" }
 				},
 				"required": ["windowID", "tabID", "libraryID", "selectedCount", "notShown"]
 			},
@@ -1442,7 +1442,7 @@
 		{
 			"name": "zotero_add_items",
 			"title": "Add items to Zotero",
-			"description": "Add items to a Zotero library, with their metadata looked up, and look for their PDFs. For BibTeX, RIS or another import format, use zotero_import. Ways to add, best first:\n- identifiers: DOIs, ISBNs, arXiv IDs or PubMed IDs, or URLs that contain one (doi.org, a publisher's article page with the DOI in its URL, arxiv.org, pubmed.ncbi.nlm.nih.gov). Zotero doesn't add other web pages: the user saves those with the Zotero Connector in their browser.\n- items: item JSON, for something without an identifier whose metadata you found yourself.\nIf looking up identifiers takes too long, the call returns before they're all done: those still being looked up say pending, and Zotero adds them when their lookup finishes. By default Zotero then looks for each new item's PDF or EPUB as its Find Available PDF does, from the user's computer, so access through their institution works. If it finds none, find a copy elsewhere and attach it with zotero_add_attachment; as a last resort, ask the user to save it with the Zotero Connector. The user can undo the call in Zotero with Edit → Undo, which moves the new items to the trash. Zotero asks the user for permission unless it was already granted.",
+			"description": "Add items to a Zotero library, with their metadata looked up, and look for their PDFs. For BibTeX, RIS or another import format, use zotero_import. Ways to add, best first:\n- identifiers: DOIs, ISBNs, arXiv IDs or PubMed IDs, or URLs that contain one (doi.org, a publisher's article page with the DOI in its URL, arxiv.org, pubmed.ncbi.nlm.nih.gov). Zotero doesn't add other web pages: the user saves those with the Zotero Connector in their browser.\n- items: item JSON, for something without an identifier whose metadata you found yourself.\nIf looking up identifiers takes too long, the call returns before they're all done: those still being looked up say pending, and Zotero adds them when their lookup finishes. By default Zotero then looks for each new item's PDF or EPUB as its Find Full Text does, from the user's computer, so access through their institution works. If it finds none, find a copy elsewhere and attach it with zotero_add_attachment; as a last resort, ask the user to save it with the Zotero Connector. The user can undo the call in Zotero with Edit → Undo, which moves the new items to the trash. Zotero asks the user for permission unless it was already granted.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
