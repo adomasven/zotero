@@ -72,6 +72,18 @@ Zotero.MCP.Tools = new function () {
 	const IMAGE_ANNOTATION_TYPES = ['image', 'ink'];
 	// Most items zotero_export gives the BibTeX citation keys of
 	const MAX_CITATION_KEYS = 500;
+	// The tag colors Zotero's color picker offers (elements/colorPicker.js), by name
+	const TAG_COLORS = {
+		red: '#FF6666',
+		orange: '#FF8C19',
+		gray: '#999999',
+		green: '#5FB236',
+		teal: '#009980',
+		blue: '#2EA8E5',
+		indigo: '#576DD9',
+		purple: '#A28AE5',
+		plum: '#A6507B',
+	};
 	const BIBTEX_TRANSLATOR_ID = '9cb70025-a888-4a29-a210-93ec52da40d4';
 	const BIBLATEX_TRANSLATOR_ID = 'b6e39b57-8942-4d11-8259-342c46ce395f';
 	const LAST_RESORT = 'As a last resort, ask the user to save it with the Zotero Connector from a '
@@ -293,7 +305,7 @@ Zotero.MCP.Tools = new function () {
 		let tags = [...names].map(name => ({
 			name,
 			itemCount: counts.get(name) ?? 0,
-			color: colors.get(name)?.color,
+			color: getTagColorName(colors.get(name)?.color),
 		}));
 		if (query) {
 			query = Zotero.Utilities.Internal.normalizeForSearch(query);
@@ -1447,11 +1459,11 @@ Zotero.MCP.Tools = new function () {
 			if (color === undefined) {
 				color = colors.get(tag)?.color;
 				if (!color) {
-					throw new Zotero.MCP.ToolError(`${tag} has no color. Give color as #rrggbb.`);
+					throw new Zotero.MCP.ToolError(`${tag} has no color. Give color too.`);
 				}
 			}
-			if (color && !/^#[0-9a-f]{6}$/i.test(color)) {
-				throw new Zotero.MCP.ToolError('Give color as #rrggbb, or null to remove it');
+			else if (color) {
+				color = TAG_COLORS[color];
 			}
 			if (color && !colors.has(tag) && colors.size >= Zotero.Tags.MAX_COLORED_TAGS) {
 				throw new Zotero.MCP.ToolError(
@@ -1465,7 +1477,7 @@ Zotero.MCP.Tools = new function () {
 				libraryID,
 				action,
 				tag,
-				color: set ? set.color : undefined,
+				color: getTagColorName(set?.color),
 				position: set ? set.position + 1 : undefined,
 			});
 		}
@@ -3060,6 +3072,17 @@ Zotero.MCP.Tools = new function () {
 	async function countSearchItems(search) {
 		let items = await Zotero.Items.getAsync(await search.search());
 		return Zotero.Items.getTopLevel(items).filter(item => !item.deleted).length;
+	}
+	
+	/**
+	 * A tag color's name in TAG_COLORS, or its hex value if it isn't one of them, e.g. one
+	 * set by a plugin
+	 */
+	function getTagColorName(hex) {
+		if (!hex) {
+			return undefined;
+		}
+		return Object.keys(TAG_COLORS).find(name => TAG_COLORS[name] == hex.toUpperCase()) ?? hex;
 	}
 	
 	function getSavedSearch(libraryID, key) {

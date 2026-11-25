@@ -235,7 +235,7 @@ describe("MCP tools", function () {
 			let { tags, total } = await call('zotero_list_tags', { query: prefix.toLowerCase() });
 			assert.equal(total, 3);
 			assert.deepEqual(tags, [
-				{ name: colored, itemCount: 0, color: '#ff6666' },
+				{ name: colored, itemCount: 0, color: 'red' },
 				{ name: two, itemCount: 2 },
 				{ name: one, itemCount: 1 },
 			]);
@@ -1307,19 +1307,22 @@ describe("MCP tools", function () {
 			let tag = Zotero.Utilities.randomString();
 			let item = await createDataObject('item', { tags: [{ tag }, { tag: 'kept' }] });
 			let libraryID = Zotero.Libraries.userLibraryID;
-			let result = await call('zotero_manage_tags', { action: 'setColor', tags: [tag], color: '#5fb236' });
-			assert.equal(result.color, '#5fb236');
+			let result = await call('zotero_manage_tags', { action: 'setColor', tags: [tag], color: 'green' });
+			assert.equal(result.color, 'green');
+			assert.equal(Zotero.Tags.getColor(libraryID, tag).color, '#5FB236');
 			assert.isAbove(result.position, 0);
 			
 			// A position alone moves the color to another number key and keeps it
 			let position = result.position == 9 ? 8 : 9;
 			result = await call('zotero_manage_tags', { action: 'setColor', tags: [tag], position });
-			assert.equal(result.color, '#5fb236');
-			assert.equal(Zotero.Tags.getColor(libraryID, tag).color, '#5fb236');
+			assert.equal(result.color, 'green');
+			assert.equal(Zotero.Tags.getColor(libraryID, tag).color, '#5FB236');
 			assert.match(
 				await callForError('zotero_manage_tags', { action: 'setColor', tags: ['kept'], position: 1 }),
 				/kept has no color/
 			);
+			// Only the colors Zotero offers, by name
+			await callForError('zotero_manage_tags', { action: 'setColor', tags: [tag], color: '#5fb236' });
 			
 			await call('zotero_manage_tags', { action: 'delete', tags: [tag] });
 			assert.deepEqual(item.getTags(), [{ tag: 'kept' }]);

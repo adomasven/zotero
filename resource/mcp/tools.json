@@ -246,7 +246,7 @@
 							"properties": {
 								"name": { "type": "string" },
 								"itemCount": { "type": "integer" },
-								"color": { "type": "string" }
+								"color": { "type": "string", "description": "red, orange, gray, green, teal, blue, indigo, purple or plum, or #rrggbb if it isn't one of the colors Zotero offers" }
 							},
 							"required": ["name", "itemCount"]
 						}
@@ -1254,7 +1254,7 @@
 					"action": { "enum": ["rename", "delete", "setColor"] },
 					"tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100, "description": "For setColor, one tag" },
 					"newName": { "type": "string", "description": "For rename" },
-					"color": { "type": ["string", "null"], "description": "For setColor: #rrggbb, or null to remove the color. Leave it out to keep the tag's color, e.g. to give it another position. Colored tags show first in the tag selector and as colored dots on items; at most 9 tags can have colors." },
+					"color": { "enum": ["red", "orange", "gray", "green", "teal", "blue", "indigo", "purple", "plum", null], "description": "For setColor: one of the colors Zotero offers, or null to remove the color. Leave it out to keep the tag's color, e.g. to give it another position. Colored tags show first in the tag selector and as colored dots on items; at most 9 tags can have colors." },
 					"position": { "type": "integer", "minimum": 1, "maximum": 9, "description": "For setColor: the number key that toggles the tag on selected items. Defaults to its current one, or the next free one." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
@@ -1268,7 +1268,7 @@
 					"action": { "type": "string" },
 					"itemCount": { "type": "integer", "description": "For rename and delete, the items changed" },
 					"tag": { "type": "string" },
-					"color": { "type": "string", "description": "For setColor; absent if removed" },
+					"color": { "type": "string", "description": "For setColor: the color's name, or its #rrggbb value if it isn't one Zotero offers; absent if removed" },
 					"position": { "type": "integer" }
 				},
 				"required": ["libraryID", "action"]
