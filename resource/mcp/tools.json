@@ -870,7 +870,7 @@
 		{
 			"name": "zotero_generate_citation",
 			"title": "Generate Zotero citations",
-			"description": "Format items in a citation style: as one citation (with page or other locators), as a bibliography, or, with format document, all of a document's citations at once. Use format document when writing a document with several citations: give its citations in the order they appear, and get each one formatted and the bibliography, with numbering, disambiguation (Smith 2020a, 2020b) and ibid. or short forms worked out across the document, as Zotero's word processor plugins do. A citation formatted on its own always starts at [1] in a numeric style. For BibTeX, RIS and other export formats, use zotero_export. Defaults to the style the user copies citations with. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",
+			"description": "Format items in a citation style: as one citation (with page or other locators), as a bibliography, or, with format document, all of a document's citations at once. Use format document when writing a document with several citations: give its citations in the order they appear, and get each one formatted and the bibliography, with numbering, disambiguation (Smith 2020a, 2020b) and ibid. or short forms worked out across the document, as Zotero's word processor plugins do. A citation formatted on its own always starts at [1] in a numeric style. For BibTeX, RIS and other export formats, use zotero_export. Defaults to APA, in the language Zotero is in. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -917,8 +917,8 @@
 						"maxItems": 500
 					},
 					"format": { "enum": ["citation", "bibliography", "document"] },
-					"style": { "type": "string", "description": "A style's short name, e.g. \"apa\", or its ID" },
-					"locale": { "type": "string", "description": "e.g. \"en-GB\"" },
+					"style": { "type": "string", "default": "apa", "description": "A style's short name, e.g. \"apa\", or its ID" },
+					"locale": { "type": "string", "description": "e.g. \"en-GB\". Defaults to the language Zotero is in." },
 					"html": { "type": "boolean", "default": false, "description": "HTML instead of plain text" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
@@ -1461,7 +1461,7 @@
 						}
 					},
 					"collectionKey": { "type": "string", "description": "A collection to add the items to" },
-					"findFiles": { "type": "boolean", "description": "Look for PDFs and EPUBs. Defaults to the user's setting for attaching them when saving items." },
+					"findFiles": { "type": "boolean", "default": true, "description": "Look for PDFs and EPUBs" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
 				"additionalProperties": false

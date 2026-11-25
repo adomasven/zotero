@@ -744,6 +744,17 @@ describe("MCP tools", function () {
 			
 			result = await call('zotero_generate_citation', { items: [{ key: item.key }], format: 'citation', style: 'apa' });
 			assert.equal(result.output, '(Quuxly, 2020)');
+			
+			// APA by default, not the style the user copies citations with
+			Zotero.Prefs.set('export.quickCopy.setting', 'bibliography=http://www.zotero.org/styles/ieee');
+			try {
+				result = await call('zotero_generate_citation', { items: [{ key: item.key }], format: 'citation' });
+				assert.equal(result.style, 'http://www.zotero.org/styles/apa');
+				assert.equal(result.output, '(Quuxly, 2020)');
+			}
+			finally {
+				Zotero.Prefs.clear('export.quickCopy.setting');
+			}
 		});
 		
 		it("should format a bibliography as text or HTML", async function () {

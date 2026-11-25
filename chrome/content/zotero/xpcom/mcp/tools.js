@@ -1040,16 +1040,8 @@ Zotero.MCP.Tools = new function () {
 					+ 'can, not notes, attachments or annotations'
 			);
 		}
-		let quickCopy = Zotero.QuickCopy.unserializeSetting(Zotero.Prefs.get('export.quickCopy.setting'));
-		style = await getStyle(
-			style
-				?? (quickCopy.mode == 'bibliography' ? quickCopy.id : Zotero.Prefs.get('export.lastStyle')),
-			call
-		);
-		locale = locale
-			|| (quickCopy.mode == 'bibliography' && quickCopy.locale)
-			|| Zotero.Prefs.get('export.quickCopy.locale')
-			|| Zotero.locale;
+		style = await getStyle(style ?? 'apa', call);
+		locale = locale || Zotero.locale;
 		let outputFormat = html ? 'html' : 'text';
 		let engine = style.getCiteProc(locale, outputFormat);
 		let itemIDs = new Map(items.map(item => [item.key, item.id]));
@@ -1757,7 +1749,7 @@ Zotero.MCP.Tools = new function () {
 	 */
 	this.addItems = async function ({
 		identifiers = [], items: json = [], collectionKey,
-		findFiles = Zotero.Prefs.get('downloadAssociatedFiles'), libraryID,
+		findFiles = true, libraryID,
 	}, { clientID, deadline }) {
 		libraryID = getLibraryID(libraryID);
 		if (!identifiers.length && !json.length) {
