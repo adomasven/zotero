@@ -1828,6 +1828,14 @@ describe("MCP tools", function () {
 			);
 		});
 		
+		it("should say when it's still writing a file at the deadline", async function () {
+			sinon.stub(Zotero.Translate.Export.prototype, 'translate');
+			let path = PathUtils.join(await getTempDirectory(), 'export.ris');
+			let result = await withBudget(300, () => call('zotero_export', { format: 'RIS', itemKeys: [item.key], path }));
+			assert.equal(result.status, 'pending');
+			assert.match(result.notice, /still writing/);
+		});
+		
 		it("should give the citation key of each item in a BibTeX export", async function () {
 			let collection = await createDataObject('collection');
 			let subcollection = await createDataObject('collection', { parentID: collection.id });

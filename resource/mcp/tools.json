@@ -1708,7 +1708,8 @@
 					"path": { "type": "string", "description": "The file written" },
 					"folder": { "type": "string", "description": "The folder with the file and the items' files, for includeFiles" },
 					"status": { "enum": ["written", "pending"], "description": "pending: Zotero is still writing the file" },
-					"citationKeys": { "type": "object", "additionalProperties": { "type": "string" }, "description": "For BibTeX and BibLaTeX, of up to 500 items: the item keys of the regular items exported, each with its citation key in the export" }
+					"citationKeys": { "type": "object", "additionalProperties": { "type": "string" }, "description": "For BibTeX and BibLaTeX, of up to 500 items: the item keys of the regular items exported, each with its citation key in the export" },
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "format"]
 			},

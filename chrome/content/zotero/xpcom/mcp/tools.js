@@ -2409,6 +2409,10 @@ Zotero.MCP.Tools = new function () {
 				citationKeys: result === TIMED_OUT
 					? undefined
 					: getCitationKeys(translator, items, await IOUtils.readUTF8(file)),
+				notice: result === TIMED_OUT
+					? "Zotero is still writing the file, which is incomplete until it's done. Wait a "
+						+ 'minute before using it.'
+					: undefined,
 			});
 		}
 		if (result === TIMED_OUT || translation.string.length > MAX_EXPORT_CHARS) {
