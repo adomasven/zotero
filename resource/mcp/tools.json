@@ -425,10 +425,10 @@
 										"additionalProperties": false
 									}
 								},
-								"addTags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-								"removeTags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-								"addToCollections": { "type": "array", "items": { "type": "string" }, "description": "Collection keys. An item stays in the collections it's already in." },
-								"removeFromCollections": { "type": "array", "items": { "type": "string" }, "description": "Collection keys. The item stays in the library." }
+								"addTags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+								"removeTags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+								"addToCollections": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Collection keys. An item stays in the collections it's already in." },
+								"removeFromCollections": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Collection keys. The item stays in the library." }
 							},
 							"required": ["key"],
 							"additionalProperties": { "type": "string", "description": "Fields to set, by Zotero field name, as in item JSON (zotero_list_item_types lists each item type's), e.g. {\"key\": \"…\", \"title\": \"…\", \"date\": \"2020-05\"}. An empty string clears a field." }
@@ -1746,7 +1746,7 @@
 				"properties": {
 					"collectionKey": { "type": "string", "description": "Defaults to the whole library. Not with savedSearchKey." },
 					"savedSearchKey": { "type": "string" },
-					"itemKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 500, "description": "Items to select. Only items in the collection or saved search can be selected. Without itemKeys or allItems, nothing is selected, even if the collection was already shown with a selection." },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 500, "description": "Items to select. Only items in the collection or saved search can be selected. Without itemKeys or allItems, nothing is selected, even if the collection was already shown with a selection." },
 					"allItems": { "type": "boolean", "default": false, "description": "Select every item shown. Not with itemKeys." },
 					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
 					"tabID": { "type": "string", "description": "A library tab from zotero_get_context. Defaults to the window's library tab used last." },
