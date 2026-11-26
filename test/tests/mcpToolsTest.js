@@ -280,7 +280,6 @@ describe("MCP tools", function () {
 				linkMode: 'imported_file',
 				fileExists: true,
 				path: attachment.getFilePath(),
-				annotationCount: 0,
 				link: `zotero://open/library/items/${attachment.key}`,
 			}]);
 			assert.deepEqual(items[0].notes, [{ key: note.key, title: 'My note' }]);
@@ -494,7 +493,7 @@ describe("MCP tools", function () {
 			let result = await call('zotero_add_items', { items: [item], findFiles: true });
 			assert.equal(search.firstCall.args[0][0].key, result.results[0].key);
 			assert.equal(result.results[0].fileSearch, 'notFound');
-			assert.deepEqual(result.results[0].attachments, []);
+			assert.notProperty(result.results[0], 'attachments');
 			assert.notProperty(result.results[0], 'bestAttachment');
 			assert.match(result.notice, /zotero_add_attachment/);
 			
@@ -641,7 +640,6 @@ describe("MCP tools", function () {
 			assert.deepInclude(items[1], {
 				movedFields: { title: 'bookTitle' },
 				removedFields: { shortTitle: 'S' },
-				changedCreatorTypes: [],
 			});
 			assert.deepEqual(Zotero.UndoHistory.getUndoAction(), {
 				action: 'undo-action-mcp-changes',

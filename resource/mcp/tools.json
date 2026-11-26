@@ -179,9 +179,9 @@
 									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
 									"required": ["key"]
 								},
-								"attachmentCount": { "type": "integer" },
-								"noteCount": { "type": "integer" },
-								"annotationCount": { "type": "integer", "description": "In all its files" },
+								"attachmentCount": { "type": "integer", "description": "Absent when 0" },
+								"noteCount": { "type": "integer", "description": "Absent when 0" },
+								"annotationCount": { "type": "integer", "description": "In all its files. Absent when 0." },
 								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
 							},
 							"required": ["key", "itemType", "title", "link"]
@@ -241,7 +241,7 @@
 											"linkMode": { "type": "string" },
 											"fileExists": { "type": "boolean" },
 											"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
-											"annotationCount": { "type": "integer" },
+											"annotationCount": { "type": "integer", "description": "Absent when 0" },
 											"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
 										},
 										"required": ["key", "title", "linkMode", "link"]
@@ -310,12 +310,12 @@
 										"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
 										"required": ["key"]
 									},
-									"attachmentCount": { "type": "integer" },
-									"noteCount": { "type": "integer" },
-									"annotationCount": { "type": "integer", "description": "In all its files" },
+									"attachmentCount": { "type": "integer", "description": "Absent when 0" },
+									"noteCount": { "type": "integer", "description": "Absent when 0" },
+									"annotationCount": { "type": "integer", "description": "In all its files. Absent when 0." },
 									"link": { "type": "string" }
 								},
-								"required": ["key", "itemType", "title", "dateAdded", "attachmentCount", "noteCount", "annotationCount", "link"]
+								"required": ["key", "itemType", "title", "dateAdded", "link"]
 							}
 						}
 					},
@@ -391,7 +391,7 @@
 											"linkMode": { "type": "string" },
 											"fileExists": { "type": "boolean" },
 											"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
-											"annotationCount": { "type": "integer" },
+											"annotationCount": { "type": "integer", "description": "Absent when 0" },
 											"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
 										},
 										"required": ["key", "title", "linkMode", "link"]
@@ -487,9 +487,9 @@
 									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
 									"required": ["key"]
 								},
-								"attachmentCount": { "type": "integer" },
-								"noteCount": { "type": "integer" },
-								"annotationCount": { "type": "integer", "description": "In all its files" },
+								"attachmentCount": { "type": "integer", "description": "Absent when 0" },
+								"noteCount": { "type": "integer", "description": "Absent when 0" },
+								"annotationCount": { "type": "integer", "description": "In all its files. Absent when 0." },
 								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" }
 							},
 							"required": ["key", "itemType", "title", "link"]
@@ -555,9 +555,9 @@
 									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
 									"required": ["key"]
 								},
-								"attachmentCount": { "type": "integer" },
-								"noteCount": { "type": "integer" },
-								"annotationCount": { "type": "integer", "description": "In all its files" },
+								"attachmentCount": { "type": "integer", "description": "Absent when 0" },
+								"noteCount": { "type": "integer", "description": "Absent when 0" },
+								"annotationCount": { "type": "integer", "description": "In all its files. Absent when 0." },
 								"link": { "type": "string", "description": "zotero:// link that shows the item in Zotero" },
 								"oldItemType": { "type": "string" },
 								"movedFields": { "type": "object", "description": "Old field → the new type's field its value moved to", "additionalProperties": { "type": "string" } },
@@ -575,7 +575,7 @@
 									}
 								}
 							},
-							"required": ["key", "itemType", "title", "link", "oldItemType", "movedFields", "removedFields", "changedCreatorTypes"]
+							"required": ["key", "itemType", "title", "link", "oldItemType"]
 						}
 					}
 				},
@@ -1150,7 +1150,7 @@
 								"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" },
 								"images": { "type": "array", "description": "Images in the note, in order", "items": { "type": "object", "properties": { "key": { "type": "string" }, "path": { "type": "string", "description": "The image file, if it's on this computer" } }, "required": ["key"] } }
 							},
-							"required": ["key", "title", "tags", "dateModified", "content", "link"]
+							"required": ["key", "title", "dateModified", "content", "link"]
 						}
 					},
 					"annotations": {
@@ -1169,7 +1169,7 @@
 								"link": { "type": "string", "description": "zotero:// link that opens the file at the annotation" },
 								"imagePath": { "type": "string", "description": "For an image or ink annotation Zotero has rendered, a PNG of it. Read it now rather than keep the path: Zotero replaces the file when the annotation changes." }
 							},
-							"required": ["key", "parentItem", "annotationType", "tags", "link"]
+							"required": ["key", "parentItem", "annotationType", "link"]
 						}
 					},
 					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" }
@@ -1351,7 +1351,7 @@
 									}
 								}
 							},
-							"required": ["key", "title", "passages"]
+							"required": ["key", "title"]
 						}
 					},
 					"nextOffset": { "type": "integer", "description": "Present when there are more files" },
@@ -1466,7 +1466,7 @@
 										"linkMode": { "type": "string" },
 										"fileExists": { "type": "boolean" },
 										"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
-										"annotationCount": { "type": "integer" },
+										"annotationCount": { "type": "integer", "description": "Absent when 0" },
 										"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
 									},
 									"required": ["key", "title", "linkMode", "link"]
@@ -1528,12 +1528,12 @@
 								"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
 								"required": ["key"]
 							},
-							"attachmentCount": { "type": "integer" },
-							"noteCount": { "type": "integer" },
-							"annotationCount": { "type": "integer", "description": "In all its files" },
+							"attachmentCount": { "type": "integer", "description": "Absent when 0" },
+							"noteCount": { "type": "integer", "description": "Absent when 0" },
+							"annotationCount": { "type": "integer", "description": "In all its files. Absent when 0." },
 							"link": { "type": "string" }
 						},
-						"required": ["key", "itemType", "title", "attachmentCount", "noteCount", "annotationCount", "link"]
+						"required": ["key", "itemType", "title", "link"]
 					},
 					"attachment": {
 						"description": "The file attached. Absent with status pending.",
@@ -1545,7 +1545,7 @@
 							"linkMode": { "type": "string" },
 							"fileExists": { "type": "boolean" },
 							"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
-							"annotationCount": { "type": "integer" },
+							"annotationCount": { "type": "integer", "description": "Absent when 0" },
 							"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
 						},
 						"required": ["key", "title", "linkMode", "link"]
@@ -1586,7 +1586,7 @@
 					"collectionKeys": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
 					"savedSearchKeys": { "type": "array", "items": { "type": "string" } }
 				},
-				"required": ["libraryID", "itemKeys", "collectionKeys", "savedSearchKeys"]
+				"required": ["libraryID"]
 			},
 			"_meta": {
 				"org.zotero/permission": "delete"
@@ -1620,7 +1620,7 @@
 					"collectionKeys": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
 					"savedSearchKeys": { "type": "array", "items": { "type": "string" } }
 				},
-				"required": ["libraryID", "itemKeys", "collectionKeys", "savedSearchKeys"]
+				"required": ["libraryID"]
 			},
 			"_meta": {
 				"org.zotero/permission": "editLibrary"
@@ -1685,9 +1685,9 @@
 									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
 									"required": ["key"]
 								},
-								"attachmentCount": { "type": "integer" },
-								"noteCount": { "type": "integer" },
-								"annotationCount": { "type": "integer", "description": "In all its files" },
+								"attachmentCount": { "type": "integer", "description": "Absent when 0" },
+								"noteCount": { "type": "integer", "description": "Absent when 0" },
+								"annotationCount": { "type": "integer", "description": "In all its files. Absent when 0." },
 								"link": { "type": "string" }
 							},
 							"required": ["key", "itemType", "title", "link"]
@@ -1731,11 +1731,11 @@
 										"link": { "type": "string" },
 										"imagePath": { "type": "string", "description": "For an image or ink annotation Zotero has rendered, a PNG of it" }
 									},
-									"required": ["key", "parentItem", "annotationType", "tags", "link"]
+									"required": ["key", "parentItem", "annotationType", "link"]
 								}
 							}
 						},
-						"required": ["libraryID", "key", "title", "type", "link", "selectedAnnotations"]
+						"required": ["libraryID", "key", "title", "type", "link"]
 					},
 					"note": {
 						"type": "object",
@@ -1817,7 +1817,7 @@
 					"notShown": { "type": "array", "items": { "type": "string" }, "description": "Items that aren't in the collection or saved search, so weren't selected" },
 					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" }
 				},
-				"required": ["windowID", "tabID", "libraryID", "selectedItemCount", "notShown"]
+				"required": ["windowID", "tabID", "libraryID", "selectedItemCount"]
 			},
 			"annotations": {
 				"readOnlyHint": false,
@@ -1883,8 +1883,7 @@
 				"properties": {
 					"closedTabs": { "type": "array", "items": { "type": "string" } },
 					"closedWindows": { "type": "array", "items": { "type": "string" } }
-				},
-				"required": ["closedTabs", "closedWindows"]
+				}
 			},
 			"annotations": {
 				"readOnlyHint": false,
@@ -2004,9 +2003,9 @@
 									"properties": { "key": { "type": "string" }, "contentType": { "type": "string" } },
 									"required": ["key"]
 								},
-								"attachmentCount": { "type": "integer" },
-								"noteCount": { "type": "integer" },
-								"annotationCount": { "type": "integer", "description": "In all its files" },
+								"attachmentCount": { "type": "integer", "description": "Absent when 0" },
+								"noteCount": { "type": "integer", "description": "Absent when 0" },
+								"annotationCount": { "type": "integer", "description": "In all its files. Absent when 0." },
 								"link": { "type": "string" }
 							},
 							"required": ["key", "itemType", "title", "link"]

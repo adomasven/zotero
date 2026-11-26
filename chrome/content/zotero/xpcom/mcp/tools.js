@@ -216,14 +216,15 @@ Zotero.MCP.Tools = new function () {
 		for (let item of found) {
 			let json = item.toJSON();
 			json.link = getSelectLink(item);
+			json.relations = nonEmpty(json.relations);
 			if (item.isRegularItem()) {
-				json.attachments = await Promise.all(
+				json.attachments = nonEmpty(await Promise.all(
 					Zotero.Items.get(item.getAttachments()).map(describeAttachment)
-				);
-				json.notes = Zotero.Items.get(item.getNotes()).map(note => ({
+				));
+				json.notes = nonEmpty(Zotero.Items.get(item.getNotes()).map(note => ({
 					key: note.key,
 					title: note.getNoteTitle(),
-				}));
+				})));
 			}
 			else if (item.isFileAttachment()) {
 				let { link: _link, ...file } = await describeAttachment(item);
@@ -234,7 +235,7 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			items,
-			missing: missing.length ? missing : undefined,
+			missing: nonEmpty(missing),
 		});
 	};
 	
@@ -371,10 +372,10 @@ Zotero.MCP.Tools = new function () {
 				bestAttachment: _bestAttachment, attachmentCount: _attachmentCount, noteCount: _noteCount,
 				annotationCount: _annotationCount, ...summary
 			} = await describeItem(item);
-			summary.attachments = await Promise.all(
+			summary.attachments = nonEmpty(await Promise.all(
 				Zotero.Items.get(item.getAttachments()).map(describeAttachment)
-			);
-			if (searched.has(item) && !summary.attachments.length) {
+			));
+			if (searched.has(item) && !summary.attachments) {
 				summary.fileSearch = searching ? 'pending' : 'notFound';
 				notices.add(searching ? FILES_PENDING : FILES_NOT_FOUND);
 			}
@@ -520,7 +521,13 @@ Zotero.MCP.Tools = new function () {
 							to: Zotero.CreatorTypes.getName(creator.creatorTypeID),
 						}]
 				));
-				changed.push({ item, oldItemType, movedFields, removedFields, changedCreatorTypes });
+				changed.push({
+					item,
+					oldItemType,
+					movedFields: nonEmpty(movedFields),
+					removedFields: nonEmpty(removedFields),
+					changedCreatorTypes: nonEmpty(changedCreatorTypes),
+				});
 			}
 			return changed;
 		}, items);
@@ -1178,12 +1185,12 @@ Zotero.MCP.Tools = new function () {
 				key: note.key,
 				parentItem: note.parentKey || undefined,
 				title: note.getNoteTitle(),
-				tags: note.getTags(),
+				tags: nonEmpty(note.getTags()),
 				dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
 				content: format == 'html'
 					? note.getNote()
 					: await noteToMarkdown(note),
-				images: images.length ? images : undefined,
+				images: nonEmpty(images),
 				link: getSelectLink(note),
 			});
 		}
@@ -1195,7 +1202,7 @@ Zotero.MCP.Tools = new function () {
 			libraryID,
 			notes: noteResults,
 			annotations: await Promise.all(sorted.map(describeAnnotation)),
-			missing: missing.length ? missing : undefined,
+			missing: nonEmpty(missing),
 		});
 	};
 	
@@ -1240,7 +1247,7 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			images,
-			missing: missing.length ? missing : undefined,
+			missing: nonEmpty(missing),
 			notice: [
 				pending && 'Zotero is still rendering the images with status pending. Call again shortly.',
 				images.some(image => image.status == 'failed')
@@ -1546,7 +1553,7 @@ Zotero.MCP.Tools = new function () {
 			};
 			if (text === TIMED_OUT) {
 				textPending = true;
-				results.push({ ...summary, status: 'pending', passages: [] });
+				results.push({ ...summary, status: 'pending' });
 				continue;
 			}
 			text ??= '';
@@ -1580,7 +1587,7 @@ Zotero.MCP.Tools = new function () {
 			results.push({
 				...summary,
 				matchCount,
-				passages: passages.slice(0, passagesPerFile).map(({ termCount: _termCount, ...passage }) => passage),
+				passages: nonEmpty(passages.slice(0, passagesPerFile).map(({ termCount: _termCount, ...passage }) => passage)),
 			});
 		}
 		return Zotero.MCP.jsonResult({
@@ -1588,7 +1595,7 @@ Zotero.MCP.Tools = new function () {
 			total: attachments.length,
 			files: results,
 			nextOffset: offset + limit < attachments.length ? offset + limit : undefined,
-			missing: missing.length ? missing : undefined,
+			missing: nonEmpty(missing),
 			notice: [
 				textPending && 'Zotero is still getting the text of the files with status pending, so their '
 					+ 'passages are missing. Search again shortly.',
@@ -1724,7 +1731,7 @@ Zotero.MCP.Tools = new function () {
 			totalPages,
 			pages: pageResults,
 			nextPage: page <= endPage ? page : undefined,
-			outline: structure?.outline,
+			outline: nonEmpty(structure?.outline),
 			notice,
 		});
 		return Zotero.MCP.jsonResult(result);
@@ -2311,9 +2318,9 @@ Zotero.MCP.Tools = new function () {
 	function trashResult(libraryID, items, collections, searches) {
 		return Zotero.MCP.jsonResult({
 			libraryID,
-			itemKeys: items.map(item => item.key),
-			collectionKeys: collections.map(collection => collection.key),
-			savedSearchKeys: searches.map(search => search.key),
+			itemKeys: nonEmpty(items.map(item => item.key)),
+			collectionKeys: nonEmpty(collections.map(collection => collection.key)),
+			savedSearchKeys: nonEmpty(searches.map(search => search.key)),
 		});
 	}
 	
@@ -2348,16 +2355,16 @@ Zotero.MCP.Tools = new function () {
 				libraryTabID: ZoteroPane.libraryView.tabID,
 				libraryID,
 				libraryName: libraryID ? Zotero.Libraries.get(libraryID).name : undefined,
-				collections: ZoteroPane.getSelectedCollections().map(collection => ({
+				collections: nonEmpty(ZoteroPane.getSelectedCollections().map(collection => ({
 					key: collection.key,
 					name: collection.name,
-				})),
-				savedSearches: ZoteroPane.getSelectedSavedSearches().map(search => ({
+				}))),
+				savedSearches: nonEmpty(ZoteroPane.getSelectedSavedSearches().map(search => ({
 					key: search.key,
 					name: search.name,
-				})),
+				}))),
 				selectedItemCount: items.length,
-				selectedItems: await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(describeItem)),
+				selectedItems: nonEmpty(await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(describeItem))),
 			});
 		}
 		
@@ -2456,8 +2463,8 @@ Zotero.MCP.Tools = new function () {
 			libraryID,
 			selectedItemCount: selected.length,
 			// Items that aren't in the collection or saved search
-			notShown: items.filter(item => !selected.includes(item)).map(item => item.key),
-			missing: missing.length ? missing : undefined,
+			notShown: nonEmpty(items.filter(item => !selected.includes(item)).map(item => item.key)),
+			missing: nonEmpty(missing),
 		});
 	};
 	
@@ -2608,8 +2615,8 @@ Zotero.MCP.Tools = new function () {
 			win.close();
 		}
 		return Zotero.MCP.jsonResult({
-			closedTabs: [...tabs.values()].flat(),
-			closedWindows,
+			closedTabs: nonEmpty([...tabs.values()].flat()),
+			closedWindows: nonEmpty(closedWindows),
 		});
 	};
 	
@@ -2634,10 +2641,10 @@ Zotero.MCP.Tools = new function () {
 			type: reader.type,
 			page,
 			link: getOpenLink(attachment, { page, position }),
-			selectedAnnotations: await Promise.all(selectedAnnotationKeys
+			selectedAnnotations: nonEmpty(await Promise.all(selectedAnnotationKeys
 				.map(key => Zotero.Items.getByLibraryAndKey(attachment.libraryID, key))
 				.filter(annotation => annotation?.isAnnotation())
-				.map(describeAnnotation)),
+				.map(describeAnnotation))),
 		};
 		if (selection?.text) {
 			let selectionPageIndex = selection.position?.pageIndex;
@@ -2873,7 +2880,7 @@ Zotero.MCP.Tools = new function () {
 			);
 			result.noteStyle = noteStyle;
 			result.citations = formatted.map(([, , output]) => output);
-			result.bibliography = (Zotero.Cite.makeFormattedBibliography(engine, outputFormat) || '').trim();
+			result.bibliography = nonEmpty((Zotero.Cite.makeFormattedBibliography(engine, outputFormat) || '').trim());
 		}
 		else if (format == 'citation') {
 			engine.updateItems(items.map(item => item.id));
@@ -3315,6 +3322,16 @@ Zotero.MCP.Tools = new function () {
 	//
 	
 	/**
+	 * The value, or undefined if it's an empty array, object or string, which results leave out
+	 */
+	function nonEmpty(value) {
+		if (!value || (typeof value == 'object' && !Object.keys(value).length)) {
+			return undefined;
+		}
+		return value;
+	}
+	
+	/**
 	 * An item as a search result
 	 */
 	async function describeItem(item) {
@@ -3337,11 +3354,11 @@ Zotero.MCP.Tools = new function () {
 				summary.bestAttachment = { key: attachment.key, contentType: attachment.attachmentContentType };
 			}
 			let attachments = Zotero.Items.get(item.getAttachments());
-			summary.attachmentCount = attachments.length;
-			summary.noteCount = item.numNotes();
+			summary.attachmentCount = attachments.length || undefined;
+			summary.noteCount = item.numNotes() || undefined;
 			summary.annotationCount = attachments
 				.filter(each => each.isFileAttachment())
-				.reduce((count, each) => count + each.numAnnotations(), 0);
+				.reduce((count, each) => count + each.numAnnotations(), 0) || undefined;
 		}
 		return summary;
 	}
@@ -3357,7 +3374,7 @@ Zotero.MCP.Tools = new function () {
 			description.fileExists = await attachment.fileExists();
 			// For the AI app to open the file itself, e.g. to see a figure
 			description.path = description.fileExists ? attachment.getFilePath() : undefined;
-			description.annotationCount = attachment.getAnnotations().length;
+			description.annotationCount = attachment.getAnnotations().length || undefined;
 		}
 		// zotero://open opens only files
 		description.link = attachment.isFileAttachment()
@@ -3384,7 +3401,7 @@ Zotero.MCP.Tools = new function () {
 			annotationComment: annotation.annotationComment || undefined,
 			annotationColor: annotation.annotationColor,
 			page: Number.isInteger(pageIndex) ? pageIndex + 1 : undefined,
-			tags: annotation.getTags(),
+			tags: nonEmpty(annotation.getTags()),
 			link: getOpenLink(attachment, { annotation: annotation.key }),
 			imagePath,
 		};
