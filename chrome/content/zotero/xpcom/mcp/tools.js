@@ -2395,7 +2395,7 @@ Zotero.MCP.Tools = new function () {
 					key: search.key,
 					name: search.name,
 				}))),
-				selectedItemCount: items.length,
+				selectedItemCount: items.length || undefined,
 				// Only when the user is looking at them
 				selectedItems: Zotero_Tabs.selectedType == 'library'
 					? nonEmpty(await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(describeItem)))
@@ -2496,7 +2496,7 @@ Zotero.MCP.Tools = new function () {
 			windowID: win.Zotero_Tabs.windowID,
 			tabID: view.tabID,
 			libraryID,
-			selectedItemCount: selected.length,
+			selectedItemCount: selected.length || undefined,
 			// Items that aren't in the collection or saved search
 			notShown: nonEmpty(items.filter(item => !selected.includes(item)).map(item => item.key)),
 			missing: nonEmpty(missing),

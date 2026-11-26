@@ -1616,7 +1616,7 @@
 							"required": ["key", "name"]
 						}
 					},
-					"selectedItemCount": { "type": "integer" },
+					"selectedItemCount": { "type": "integer", "description": "Absent when 0" },
 					"selectedItems": {
 						"type": "array",
 						"description": "Items selected in the library tab, at most 50. Only when it's the active tab.",
@@ -1763,11 +1763,11 @@
 					"windowID": { "type": "string" },
 					"tabID": { "type": "string" },
 					"libraryID": { "type": "integer" },
-					"selectedItemCount": { "type": "integer" },
+					"selectedItemCount": { "type": "integer", "description": "Absent when 0" },
 					"notShown": { "type": "array", "items": { "type": "string" }, "description": "Items that aren't in the collection or saved search, so weren't selected" },
 					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" }
 				},
-				"required": ["windowID", "tabID", "libraryID", "selectedItemCount"]
+				"required": ["windowID", "tabID", "libraryID"]
 			},
 			"annotations": {
 				"readOnlyHint": false,
@@ -1901,7 +1901,7 @@
 					"locale": { "type": "string" },
 					"output": { "type": "string", "description": "For format citation or bibliography" },
 					"citations": { "type": "array", "items": { "type": "string" }, "description": "For format document, each citation in the order given" },
-					"bibliography": { "type": "string", "description": "For format document. Empty for a style without one." },
+					"bibliography": { "type": "string", "description": "For format document. Absent for a style without one." },
 					"noteStyle": { "type": "boolean", "description": "For format document: whether the style puts citations in footnotes, one footnote per citation" }
 				},
 				"required": ["libraryID", "format", "style", "styleTitle", "locale"]
