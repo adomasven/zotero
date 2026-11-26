@@ -662,22 +662,53 @@
 			}
 		},
 		{
-			"name": "zotero_manage_collections",
-			"title": "Create, rename or move a Zotero collection",
-			"description": "Create a collection, rename one, or move one into another collection or to the top level. To put items in a collection, use zotero_update_items. To delete one, use zotero_trash.",
+			"name": "zotero_add_collection",
+			"title": "Create a Zotero collection",
+			"description": "Create a collection, at the top level or in another collection. To put items in it, use zotero_update_items.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"action": { "enum": ["create", "update"] },
-					"collectionKey": { "type": "string", "description": "For update" },
-					"name": { "type": "string", "minLength": 1, "description": "Needed for create" },
-					"parentKey": {
-						"type": ["string", "null"],
-						"description": "The collection to create or move it in, or null to move it to the top level. For create, defaults to the top level; for update, to where it is."
-					},
+					"name": { "type": "string", "minLength": 1 },
+					"parentKey": { "type": "string", "description": "The collection to create it in. Defaults to the top level." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["action"],
+				"required": ["name"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string" },
+					"name": { "type": "string" },
+					"parentKey": { "type": "string" },
+					"link": { "type": "string", "description": "zotero:// link that shows the collection in Zotero" }
+				},
+				"required": ["libraryID", "key", "name", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_update_collection",
+			"title": "Rename or move a Zotero collection",
+			"description": "Rename a collection, or move it into another collection or to the top level. To put items in it, use zotero_update_items. To delete it, use zotero_trash.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"collectionKey": { "type": "string" },
+					"name": { "type": "string", "minLength": 1, "description": "A new name" },
+					"parentKey": { "type": ["string", "null"], "description": "The collection to move it into, or null for the top level" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["collectionKey"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -697,7 +728,7 @@
 			"annotations": {
 				"readOnlyHint": false,
 				"destructiveHint": true,
-				"idempotentHint": false,
+				"idempotentHint": true,
 				"openWorldHint": false
 			}
 		},
@@ -742,33 +773,26 @@
 			}
 		},
 		{
-			"name": "zotero_manage_tags",
-			"title": "Manage Zotero tags",
-			"description": "Change tags across a whole library: rename a tag, merge several into one by renaming them all to the same name (which may be an existing tag), delete tags from every item that has them, or set or remove a tag's color. Tag names match exactly, including case, as zotero_list_tags lists them. To change the tags of particular items, use zotero_update_items. Color changes can't be undone.",
+			"name": "zotero_rename_tags",
+			"title": "Rename or merge Zotero tags",
+			"description": "Rename tags on every item that has them, across a library. Renaming several to one name, which may be an existing tag, merges them. A renamed tag keeps its color. To change particular items' tags, use zotero_update_items.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"action": { "enum": ["rename", "delete", "setColor"] },
-					"tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "maxItems": 100, "description": "For setColor, one tag" },
-					"newName": { "type": "string", "minLength": 1, "description": "For rename" },
-					"color": { "enum": ["red", "orange", "gray", "green", "teal", "blue", "indigo", "purple", "plum", null], "description": "For setColor: one of the colors Zotero offers, or null to remove the color. Leave it out to keep the tag's color, e.g. to give it another position. Colored tags show first in the tag selector and as colored dots on items; at most 9 tags can have colors." },
-					"position": { "type": "integer", "minimum": 1, "maximum": 9, "description": "For setColor: the number key that toggles the tag on selected items. Defaults to its current one, or the next free one." },
+					"tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "maxItems": 100, "description": "As zotero_list_tags lists them: names match exactly, including case" },
+					"newName": { "type": "string", "minLength": 1 },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["action", "tags"],
+				"required": ["tags", "newName"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
 				"type": "object",
 				"properties": {
 					"libraryID": { "type": "integer" },
-					"action": { "type": "string" },
-					"itemCount": { "type": "integer", "description": "For rename and delete, the items changed" },
-					"tag": { "type": "string" },
-					"color": { "type": "string", "description": "For setColor: the color's name, or its #rrggbb value if it isn't one Zotero offers; absent if removed" },
-					"position": { "type": "integer" }
+					"itemCount": { "type": "integer", "description": "The items changed" }
 				},
-				"required": ["libraryID", "action"]
+				"required": ["libraryID", "itemCount"]
 			},
 			"_meta": {
 				"org.zotero/permission": "editLibrary"
@@ -776,7 +800,73 @@
 			"annotations": {
 				"readOnlyHint": false,
 				"destructiveHint": true,
-				"idempotentHint": false,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_delete_tags",
+			"title": "Delete Zotero tags",
+			"description": "Remove tags from every item that has them, across a library, with their colors. To change particular items' tags, use zotero_update_items.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "maxItems": 100, "description": "As zotero_list_tags lists them: names match exactly, including case" },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["tags"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"itemCount": { "type": "integer", "description": "The items changed" }
+				},
+				"required": ["libraryID", "itemCount"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_set_tag_color",
+			"title": "Set a Zotero tag's color",
+			"description": "Set or remove a tag's color, or move it to another number key. Colored tags show first in the tag selector and as colored dots on items; at most 9 tags can have colors. Color changes can't be undone.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"tag": { "type": "string", "minLength": 1, "description": "As zotero_list_tags lists it: names match exactly, including case" },
+					"color": { "enum": ["red", "orange", "gray", "green", "teal", "blue", "indigo", "purple", "plum", null], "description": "One of the colors Zotero offers, or null to remove the color. Leave it out to keep the tag's color, e.g. to give it another position." },
+					"position": { "type": "integer", "minimum": 1, "maximum": 9, "description": "The number key that toggles the tag on selected items. Defaults to its current one, or the next free one." },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["tag"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"tag": { "type": "string" },
+					"color": { "type": "string", "description": "The color's name, or its #rrggbb value if it isn't one Zotero offers; absent if removed" },
+					"position": { "type": "integer" }
+				},
+				"required": ["libraryID", "tag"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": true,
+				"idempotentHint": true,
 				"openWorldHint": false
 			}
 		},
@@ -823,7 +913,7 @@
 							"properties": {
 								"key": { "type": "string" },
 								"name": { "type": "string" },
-								"conditions": { "type": "array", "description": "As zotero_search and zotero_manage_saved_searches take them", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] } },
+								"conditions": { "type": "array", "description": "As zotero_search and zotero_add_saved_search take them", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] } },
 								"link": { "type": "string", "description": "zotero:// link that shows it in Zotero" }
 							},
 							"required": ["key", "name", "conditions", "link"]
@@ -838,9 +928,9 @@
 			}
 		},
 		{
-			"name": "zotero_manage_saved_searches",
-			"title": "Manage Zotero saved searches",
-			"description": "Create a saved search, or rename one or change its conditions. To delete one, use zotero_trash.",
+			"name": "zotero_add_saved_search",
+			"title": "Create a Zotero saved search",
+			"description": "Save conditions, as zotero_search takes them, as a saved search.",
 			"inputSchema": {
 				"type": "object",
 				"$defs": {
@@ -868,12 +958,10 @@
 					}
 				},
 				"properties": {
-					"action": { "enum": ["create", "update"] },
-					"savedSearchKey": { "type": "string", "description": "For update" },
-					"name": { "type": "string", "minLength": 1, "description": "Needed for create" },
+					"name": { "type": "string", "minLength": 1 },
 					"conditions": {
 						"type": "array",
-						"description": "Needed for create. As for zotero_search; they replace the search's conditions.",
+						"minItems": 1,
 						"items": {
 							"anyOf": [
 								{ "$ref": "#/$defs/condition" },
@@ -883,7 +971,7 @@
 					},
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
-				"required": ["action"],
+				"required": ["name", "conditions"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -913,7 +1001,99 @@
 					"libraryID": { "type": "integer" },
 					"key": { "type": "string" },
 					"name": { "type": "string" },
-					"conditions": { "type": "array", "description": "As zotero_search and zotero_manage_saved_searches take them", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] } },
+					"conditions": { "type": "array", "description": "As zotero_search and zotero_add_saved_search take them", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] } },
+					"itemCount": { "type": "integer" },
+					"link": { "type": "string", "description": "zotero:// link that shows it in Zotero" }
+				},
+				"required": ["libraryID", "key", "name", "conditions", "itemCount", "link"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
+				"idempotentHint": false,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_update_saved_search",
+			"title": "Change a Zotero saved search",
+			"description": "Rename a saved search, or replace its conditions. To delete it, use zotero_trash.",
+			"inputSchema": {
+				"type": "object",
+				"$defs": {
+					"condition": {
+						"type": "object",
+						"properties": {
+							"condition": { "enum": ["abstractNote", "accessDate", "annotationAuthor", "annotationColor", "annotationComment", "annotationText", "annotationType", "anyField", "applicationNumber", "archive", "archiveLocation", "artworkSize", "assignee", "attachmentStorageType", "author", "authority", "bookAuthor", "callNumber", "citationKey", "code", "codeNumber", "collection", "committee", "conferenceName", "country", "creator", "date", "dateAdded", "dateModified", "DOI", "edition", "editor", "eventPlace", "extra", "fileTypeID", "filingDate", "fulltextContent", "history", "ISBN", "ISSN", "issue", "itemType", "journalAbbreviation", "language", "lastRead", "libraryCatalog", "medium", "meetingName", "note", "numAnnotations", "numAttachments", "number", "numberOfVolumes", "numNotes", "numPages", "numTags", "originalDate", "originalPlace", "originalPublisher", "pages", "partNumber", "partTitle", "place", "PMCID", "PMID", "priorityNumbers", "programmingLanguage", "publicationTitle", "publisher", "references", "reporter", "rights", "runningTime", "savedSearch", "scale", "section", "series", "seriesNumber", "seriesText", "seriesTitle", "session", "shortTitle", "status", "system", "tag", "title", "titleCreatorYear", "type", "url", "versionNumber", "volume"], "description": "As in Zotero's Advanced Search: item fields (see zotero_list_item_types), creator types, tags, notes, annotations, counts and more" },
+							"operator": { "enum": ["is", "isNot", "contains", "doesNotContain", "beginsWith", "isLessThan", "isGreaterThan", "isBefore", "isAfter", "isInTheLast", "isEmpty", "isNotEmpty"], "description": "Each condition takes some of these; an error lists which" },
+							"value": { "type": "string", "description": "Not for isEmpty and isNotEmpty. itemType: a name from zotero_list_item_types, or note, attachment or annotation. Dates: e.g. 2020 or 2020-05-01; for isInTheLast, e.g. 7 days. collection and savedSearch: a key. annotationType: highlight, underline, note, text, image or ink. annotationColor: a hex color, as zotero_get_notes gives." },
+							"level": { "enum": ["attachment", "note", "annotation"], "description": "Match only on the item's children of this kind, e.g. a tag on its annotations and not on the item" }
+						},
+						"required": ["condition", "operator"],
+						"additionalProperties": false
+					},
+					"group": {
+						"type": "object",
+						"description": "A group, which matches if all or any of its conditions do",
+						"properties": {
+							"joinMode": { "enum": ["all", "any"] },
+							"level": { "enum": ["attachment", "note", "annotation"], "description": "Match all its conditions on the same child of the item" },
+							"conditions": { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] }, "minItems": 1 }
+						},
+						"required": ["joinMode", "conditions"],
+						"additionalProperties": false
+					}
+				},
+				"properties": {
+					"savedSearchKey": { "type": "string" },
+					"name": { "type": "string", "minLength": 1, "description": "A new name" },
+					"conditions": {
+						"type": "array",
+						"minItems": 1,
+						"description": "Conditions to replace the search's, as zotero_search takes them",
+						"items": {
+							"anyOf": [
+								{ "$ref": "#/$defs/condition" },
+								{ "$ref": "#/$defs/group" }
+							]
+						}
+					},
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"required": ["savedSearchKey"],
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"$defs": {
+					"condition": {
+						"type": "object",
+						"properties": {
+							"condition": { "type": "string" },
+							"operator": { "type": "string" },
+							"value": { "type": "string" },
+							"level": { "enum": ["attachment", "note", "annotation"] }
+						},
+						"required": ["condition", "operator"]
+					},
+					"group": {
+						"type": "object",
+						"properties": {
+							"joinMode": { "enum": ["all", "any"] },
+							"level": { "enum": ["attachment", "note", "annotation"] },
+							"conditions": { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] } }
+						},
+						"required": ["joinMode", "conditions"]
+					}
+				},
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"key": { "type": "string" },
+					"name": { "type": "string" },
+					"conditions": { "type": "array", "description": "As zotero_search and zotero_add_saved_search take them", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] } },
 					"itemCount": { "type": "integer" },
 					"link": { "type": "string", "description": "zotero:// link that shows it in Zotero" }
 				},
@@ -925,7 +1105,7 @@
 			"annotations": {
 				"readOnlyHint": false,
 				"destructiveHint": true,
-				"idempotentHint": false,
+				"idempotentHint": true,
 				"openWorldHint": false
 			}
 		},
@@ -1374,15 +1554,14 @@
 		},
 		{
 			"name": "zotero_trash",
-			"title": "Move to or restore from the Zotero trash",
-			"description": "Move items (with their notes and attachments), collections (with their subcollections) or saved searches to the trash, or restore them from it. Items in a trashed collection stay in the library. The user can restore them from the trash until it's emptied.",
+			"title": "Move to the Zotero trash",
+			"description": "Move items (with their notes and attachments), collections (with their subcollections) or saved searches to the trash. Items in a trashed collection stay in the library. The user, or zotero_restore_from_trash, can restore them until the trash is emptied.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100, "description": "Items, notes or attachments" },
 					"collectionKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100 },
 					"savedSearchKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100 },
-					"restore": { "type": "boolean", "default": false, "description": "Restore from the trash instead" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
 				"additionalProperties": false
@@ -1391,16 +1570,52 @@
 				"type": "object",
 				"properties": {
 					"libraryID": { "type": "integer" },
-					"restored": { "type": "boolean" },
 					"itemKeys": { "type": "array", "items": { "type": "string" } },
 					"collectionKeys": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
 					"savedSearchKeys": { "type": "array", "items": { "type": "string" } }
 				},
-				"required": ["libraryID", "restored", "itemKeys", "collectionKeys", "savedSearchKeys"]
+				"required": ["libraryID", "itemKeys", "collectionKeys", "savedSearchKeys"]
+			},
+			"_meta": {
+				"org.zotero/permission": "delete"
 			},
 			"annotations": {
 				"readOnlyHint": false,
 				"destructiveHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "zotero_restore_from_trash",
+			"title": "Restore from the Zotero trash",
+			"description": "Restore items, collections or saved searches from the trash, with the notes, attachments and subcollections that went to the trash with them.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100, "description": "Items, notes or attachments" },
+					"collectionKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100 },
+					"savedSearchKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100 },
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+				},
+				"additionalProperties": false
+			},
+			"outputSchema": {
+				"type": "object",
+				"properties": {
+					"libraryID": { "type": "integer" },
+					"itemKeys": { "type": "array", "items": { "type": "string" } },
+					"collectionKeys": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
+					"savedSearchKeys": { "type": "array", "items": { "type": "string" } }
+				},
+				"required": ["libraryID", "itemKeys", "collectionKeys", "savedSearchKeys"]
+			},
+			"_meta": {
+				"org.zotero/permission": "editLibrary"
+			},
+			"annotations": {
+				"readOnlyHint": false,
+				"destructiveHint": false,
 				"idempotentHint": true,
 				"openWorldHint": false
 			}

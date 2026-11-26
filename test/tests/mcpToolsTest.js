@@ -706,24 +706,24 @@ describe("MCP tools", function () {
 		});
 	});
 	
-	describe("zotero_manage_collections", function () {
+	describe("zotero_add_collection and zotero_update_collection", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');
 		});
 		
 		it("should create, rename and move collections", async function () {
 			let parent = await createDataObject('collection');
-			let created = await call('zotero_manage_collections', { action: 'create', name: 'Reading', parentKey: parent.key });
+			let created = await call('zotero_add_collection', { name: 'Reading', parentKey: parent.key });
 			let collection = Zotero.Collections.getByLibraryAndKey(Zotero.Libraries.userLibraryID, created.key);
 			assert.equal(collection.name, 'Reading');
 			assert.equal(collection.parentKey, parent.key);
 			assert.equal(created.link, `zotero://select/library/collections/${created.key}`);
 			
-			await call('zotero_manage_collections', { action: 'update', collectionKey: created.key, name: 'Read' });
+			await call('zotero_update_collection', { collectionKey: created.key, name: 'Read' });
 			assert.equal(collection.name, 'Read');
 			assert.equal(collection.parentKey, parent.key);
 			
-			await call('zotero_manage_collections', { action: 'update', collectionKey: created.key, parentKey: null });
+			await call('zotero_update_collection', { collectionKey: created.key, parentKey: null });
 			assert.isFalse(collection.parentKey);
 			assert.equal(collection.name, 'Read');
 		});
@@ -731,7 +731,7 @@ describe("MCP tools", function () {
 		it("shouldn't move a collection into its own subcollection", async function () {
 			let parent = await createDataObject('collection');
 			let child = await createDataObject('collection', { parentID: parent.id });
-			let error = await callForError('zotero_manage_collections', { action: 'update', collectionKey: parent.key, parentKey: child.key });
+			let error = await callForError('zotero_update_collection', { collectionKey: parent.key, parentKey: child.key });
 			assert.match(error, /can't be moved into itself or a subcollection/);
 			assert.isFalse(parent.parentKey);
 		});
@@ -742,8 +742,8 @@ describe("MCP tools", function () {
 			// Hold a transaction, so both calls queue for theirs
 			let release = Zotero.Promise.defer();
 			let held = Zotero.DB.executeTransaction(() => release.promise);
-			let first = call('zotero_manage_collections', { action: 'update', collectionKey: collection.key, name: 'First' });
-			let second = call('zotero_manage_collections', { action: 'update', collectionKey: collection.key, name: 'Second' });
+			let first = call('zotero_update_collection', { collectionKey: collection.key, name: 'First' });
+			let second = call('zotero_update_collection', { collectionKey: collection.key, name: 'Second' });
 			await Zotero.Promise.delay(100);
 			release.resolve();
 			await held;
@@ -783,7 +783,7 @@ describe("MCP tools", function () {
 		});
 	});
 	
-	describe("zotero_manage_tags", function () {
+	describe("zotero_rename_tags, zotero_delete_tags and zotero_set_tag_color", function () {
 		beforeEach(function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');
 			Zotero.UndoHistory.clear();
@@ -796,7 +796,7 @@ describe("MCP tools", function () {
 			let libraryID = Zotero.Libraries.userLibraryID;
 			await Zotero.Tags.setColor(libraryID, a, '#ff6666', 0);
 			try {
-				let result = await call('zotero_manage_tags', { action: 'rename', tags: [a, b], newName: c });
+				let result = await call('zotero_rename_tags', { tags: [a, b], newName: c });
 				assert.equal(result.itemCount, 2);
 				assert.deepEqual(one.getTags(), [{ tag: c }]);
 				assert.deepEqual(two.getTags(), [{ tag: c }]);
@@ -808,12 +808,8 @@ describe("MCP tools", function () {
 				assert.sameDeepMembers(two.getTags(), [{ tag: b }, { tag: c }]);
 				
 				assert.match(
-					await callForError('zotero_manage_tags', { action: 'rename', tags: ['no such tag'], newName: c }),
+					await callForError('zotero_rename_tags', { tags: ['no such tag'], newName: c }),
 					/No items in .* have the tags "no such tag"/
-				);
-				assert.match(
-					await callForError('zotero_manage_tags', { action: 'rename', tags: [c] }),
-					/Give newName to rename/
 				);
 			}
 			finally {
@@ -826,24 +822,24 @@ describe("MCP tools", function () {
 			let tag = Zotero.Utilities.randomString();
 			let item = await createDataObject('item', { tags: [{ tag }, { tag: 'kept' }] });
 			let libraryID = Zotero.Libraries.userLibraryID;
-			let result = await call('zotero_manage_tags', { action: 'setColor', tags: [tag], color: 'green' });
+			let result = await call('zotero_set_tag_color', { tag, color: 'green' });
 			assert.equal(result.color, 'green');
 			assert.equal(Zotero.Tags.getColor(libraryID, tag).color, '#5FB236');
 			assert.isAbove(result.position, 0);
 			
 			// A position alone moves the color to another number key and keeps it
 			let position = result.position == 9 ? 8 : 9;
-			result = await call('zotero_manage_tags', { action: 'setColor', tags: [tag], position });
+			result = await call('zotero_set_tag_color', { tag, position });
 			assert.equal(result.color, 'green');
 			assert.equal(Zotero.Tags.getColor(libraryID, tag).color, '#5FB236');
 			assert.match(
-				await callForError('zotero_manage_tags', { action: 'setColor', tags: ['kept'], position: 1 }),
+				await callForError('zotero_set_tag_color', { tag: 'kept', position: 1 }),
 				/kept has no color/
 			);
 			// Only the colors Zotero offers, by name
-			await callForError('zotero_manage_tags', { action: 'setColor', tags: [tag], color: '#5fb236' });
+			await callForError('zotero_set_tag_color', { tag, color: '#5fb236' });
 			
-			await call('zotero_manage_tags', { action: 'delete', tags: [tag] });
+			await call('zotero_delete_tags', { tags: [tag] });
 			assert.deepEqual(item.getTags(), [{ tag: 'kept' }]);
 			assert.isFalse(Zotero.Tags.getColor(libraryID, tag));
 		});
@@ -869,7 +865,7 @@ describe("MCP tools", function () {
 					{ condition: 'annotationType', operator: 'is', value: 'highlight', level: 'annotation' },
 				],
 			}];
-			let created = await call('zotero_manage_saved_searches', { action: 'create', name, conditions });
+			let created = await call('zotero_add_saved_search', { name, conditions });
 			assert.equal(created.itemCount, 2);
 			// As they were given, so they can be changed and given back
 			assert.deepEqual(created.conditions, conditions);
@@ -881,8 +877,7 @@ describe("MCP tools", function () {
 			assert.equal(found.total, 2);
 			assert.deepEqual(listed.conditions, conditions);
 			
-			let updated = await call('zotero_manage_saved_searches', {
-				action: 'update',
+			let updated = await call('zotero_update_saved_search', {
 				savedSearchKey: created.key,
 				conditions: [tagged, { condition: 'title', operator: 'contains', value: title }],
 			});
@@ -1512,7 +1507,7 @@ describe("MCP tools", function () {
 		});
 	});
 	
-	describe("zotero_trash", function () {
+	describe("zotero_trash and zotero_restore_from_trash", function () {
 		beforeEach(function () {
 			Zotero.UndoHistory.clear();
 		});
@@ -1530,13 +1525,12 @@ describe("MCP tools", function () {
 			// Restoring an item restores its trashed children
 			note.deleted = true;
 			await note.saveTx();
-			let { restored } = await call('zotero_trash', { itemKeys: [item.key], restore: true });
-			assert.isTrue(restored);
+			await call('zotero_restore_from_trash', { itemKeys: [item.key] });
 			assert.isTrue(ask.secondCall.calledWith('test-client', Permissions.EDIT_LIBRARY, item.libraryID));
 			assert.isFalse(item.deleted);
 			assert.isFalse(note.deleted);
 			
-			let error = await callForError('zotero_trash', { itemKeys: [item.key], restore: true });
+			let error = await callForError('zotero_restore_from_trash', { itemKeys: [item.key] });
 			assert.match(error, /isn't in the trash/);
 		});
 		
@@ -1552,7 +1546,7 @@ describe("MCP tools", function () {
 			assert.isTrue(child.deleted);
 			assert.isFalse(item.deleted);
 			
-			await call('zotero_trash', { collectionKeys: [parent.key], restore: true });
+			await call('zotero_restore_from_trash', { collectionKeys: [parent.key] });
 			assert.isFalse(parent.deleted);
 			assert.isFalse(child.deleted);
 		});

@@ -741,26 +741,29 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
-	 * Create a collection, or rename or move one
+	 * Create a collection
 	 */
-	this.manageCollections = async function ({ action, collectionKey, name, parentKey, libraryID }, { clientID }) {
+	this.addCollection = async function ({ name, parentKey, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
+		return saveCollection(clientID, new Zotero.Collection({ libraryID }), { name, parentKey });
+	};
+	
+	/**
+	 * Rename a collection, or move it
+	 */
+	this.updateCollection = async function ({ collectionKey, name, parentKey, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		if (name === undefined && parentKey === undefined) {
+			throw new Zotero.MCP.ToolError('Give name, or parentKey to move it (null for the top level)');
+		}
+		return saveCollection(clientID, getCollection(libraryID, collectionKey), { name, parentKey });
+	};
+	
+	async function saveCollection(clientID, collection, { name, parentKey }) {
+		let { libraryID } = collection;
 		name = name?.trim();
-		if (action == 'create' && !name) {
-			throw new Zotero.MCP.ToolError('create needs a name');
-		}
-		if (action == 'update' && !name && parentKey === undefined) {
-			throw new Zotero.MCP.ToolError('update needs a name, or a parentKey to move it (null for the top level)');
-		}
-		let collection;
-		if (action == 'create') {
-			collection = new Zotero.Collection({ libraryID });
-		}
-		else if (collectionKey) {
-			collection = getCollection(libraryID, collectionKey);
-		}
-		else {
-			throw new Zotero.MCP.ToolError(`${action} needs a collectionKey`);
+		if (name === '') {
+			throw new Zotero.MCP.ToolError('name must not be empty');
 		}
 		let parent = parentKey ? getCollection(libraryID, parentKey) : null;
 		let result;
@@ -788,7 +791,7 @@ Zotero.MCP.Tools = new function () {
 			};
 		}, [collection]);
 		return Zotero.MCP.jsonResult(result);
-	};
+	}
 	
 	//
 	// Tags -- Tags across a library
@@ -846,61 +849,71 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
-	 * Rename, merge or delete tags across a library, or set a tag's color
-	 *
-	 * Renaming and deleting change each item that has the tag, as one undo step, rather than
-	 * through Zotero.Tags.rename() and removeFromLibrary(), which write to the database
-	 * directly and so can't be undone. Colors are a synced setting, outside the undo history.
+	 * Rename tags across a library, merging them if they're renamed to one name
 	 */
-	this.manageTags = async function ({ action, tags, newName, color, position, libraryID }, { clientID }) {
+	this.renameTags = async function ({ tags, newName, libraryID }, { clientID }) {
+		return changeTags(clientID, getLibraryID(libraryID), tags, newName);
+	};
+	
+	/**
+	 * Remove tags from every item in a library that has them
+	 */
+	this.deleteTags = async function ({ tags, libraryID }, { clientID }) {
+		return changeTags(clientID, getLibraryID(libraryID), tags);
+	};
+	
+	/**
+	 * Set or remove a tag's color, or its number key. Colors are a synced setting, outside the
+	 * undo history.
+	 */
+	this.setTagColor = async function ({ tag, color, position, libraryID }) {
 		libraryID = getLibraryID(libraryID);
-		let library = Zotero.Libraries.get(libraryID);
-		if (!library.editable) {
-			throw new Zotero.MCP.ToolError(`${library.name} can't be edited`);
+		tag = tag.trim();
+		if (!tag) {
+			throw new Zotero.MCP.ToolError('Tags must not be empty');
 		}
+		let colors = Zotero.Tags.getColors(libraryID);
+		// Without a color, the tag keeps its own, e.g. to move it to another number key
+		if (color === undefined) {
+			color = colors.get(tag)?.color;
+			if (!color) {
+				throw new Zotero.MCP.ToolError(`${tag} has no color. Give color too.`);
+			}
+		}
+		else if (color) {
+			color = TAG_COLORS[color];
+		}
+		if (color && !colors.has(tag) && colors.size >= Zotero.Tags.MAX_COLORED_TAGS) {
+			throw new Zotero.MCP.ToolError(
+				`Only ${Zotero.Tags.MAX_COLORED_TAGS} tags can have colors, one per number key. `
+					+ 'Remove the color of another tag first.'
+			);
+		}
+		await Zotero.Tags.setColor(libraryID, tag, color || false, position && position - 1);
+		let set = Zotero.Tags.getColor(libraryID, tag);
+		return Zotero.MCP.jsonResult({
+			libraryID,
+			tag,
+			color: getTagColorName(set?.color),
+			position: set ? set.position + 1 : undefined,
+		});
+	};
+	
+	/**
+	 * Rename the tags to newName on each item that has them, or remove them without one
+	 *
+	 * This changes each item, as one undo step, rather than going through Zotero.Tags.rename()
+	 * and removeFromLibrary(), which write to the database directly and so can't be undone.
+	 */
+	async function changeTags(clientID, libraryID, tags, newName) {
+		let library = Zotero.Libraries.get(libraryID);
 		tags = [...new Set(tags.map(tag => tag.trim()))];
 		newName = newName?.trim();
 		if (tags.some(tag => !tag) || newName === '') {
 			throw new Zotero.MCP.ToolError('Tags must not be empty');
 		}
-		if ((action == 'rename') != (newName !== undefined)) {
-			throw new Zotero.MCP.ToolError('Give newName to rename, and only then');
-		}
 		let colors = Zotero.Tags.getColors(libraryID);
-		
-		if (action == 'setColor') {
-			let [tag] = tags;
-			if (tags.length != 1) {
-				throw new Zotero.MCP.ToolError('Give one tag to color');
-			}
-			// Without a color, the tag keeps its own, e.g. to move it to another number key
-			if (color === undefined) {
-				color = colors.get(tag)?.color;
-				if (!color) {
-					throw new Zotero.MCP.ToolError(`${tag} has no color. Give color too.`);
-				}
-			}
-			else if (color) {
-				color = TAG_COLORS[color];
-			}
-			if (color && !colors.has(tag) && colors.size >= Zotero.Tags.MAX_COLORED_TAGS) {
-				throw new Zotero.MCP.ToolError(
-					`Only ${Zotero.Tags.MAX_COLORED_TAGS} tags can have colors, one per number key. `
-						+ 'Remove the color of another tag first.'
-				);
-			}
-			await Zotero.Tags.setColor(libraryID, tag, color || false, position && position - 1);
-			let set = Zotero.Tags.getColor(libraryID, tag);
-			return Zotero.MCP.jsonResult({
-				libraryID,
-				action,
-				tag,
-				color: getTagColorName(set?.color),
-				position: set ? set.position + 1 : undefined,
-			});
-		}
-		
-		if (action == 'rename') {
+		if (newName !== undefined) {
 			tags = tags.filter(tag => tag != newName);
 			if (!tags.length) {
 				throw new Zotero.MCP.ToolError(`The tag is already named ${JSON.stringify(newName)}`);
@@ -925,13 +938,13 @@ Zotero.MCP.Tools = new function () {
 		let items = await Zotero.Items.getAsync([...itemIDs]);
 		await Zotero.Items.loadDataTypes(items);
 		// A renamed tag keeps its color, as when the user renames it, unless the new name has one
-		let keptColor = action == 'rename' && !colors.has(newName)
+		let keptColor = newName !== undefined && !colors.has(newName)
 			? tags.map(tag => colors.get(tag)).find(Boolean)
 			: null;
 		await edit(clientID, async () => {
 			for (let item of items) {
 				for (let tag of tags) {
-					if (action == 'rename' && !item.hasTag(newName)) {
+					if (newName !== undefined && !item.hasTag(newName)) {
 						item.replaceTag(tag, newName);
 					}
 					else {
@@ -953,10 +966,9 @@ Zotero.MCP.Tools = new function () {
 		Zotero.Prefs.set('purge.tags', true);
 		return Zotero.MCP.jsonResult({
 			libraryID,
-			action,
 			itemCount: items.length,
 		});
-	};
+	}
 	
 	/**
 	 * A tag color's name in TAG_COLORS, or its hex value if it isn't one of them, e.g. one
@@ -992,32 +1004,34 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
-	 * Create a saved search from conditions, or rename one or change its conditions
+	 * Create a saved search from conditions
 	 */
-	this.manageSavedSearches = async function ({
-		action, savedSearchKey, name, conditions, libraryID,
-	}, { clientID }) {
+	this.addSavedSearch = async function ({ name, conditions, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
+		return saveSavedSearch(clientID, new Zotero.Search({ libraryID }), { name, conditions });
+	};
+	
+	/**
+	 * Rename a saved search, or replace its conditions
+	 */
+	this.updateSavedSearch = async function ({ savedSearchKey, name, conditions, libraryID }, { clientID }) {
+		libraryID = getLibraryID(libraryID);
+		if (name === undefined && !conditions) {
+			throw new Zotero.MCP.ToolError('Give name or conditions');
+		}
+		return saveSavedSearch(clientID, getSavedSearch(libraryID, savedSearchKey), { name, conditions });
+	};
+	
+	async function saveSavedSearch(clientID, search, { name, conditions }) {
+		let { libraryID } = search;
 		name = name?.trim();
-		if (action == 'create' ? !name || !conditions?.length : !name && !conditions?.length) {
-			throw new Zotero.MCP.ToolError(
-				action == 'create' ? 'create needs a name and conditions' : 'update needs a name or conditions'
-			);
-		}
-		let search;
-		if (action == 'create') {
-			search = new Zotero.Search({ libraryID });
-		}
-		else {
-			search = savedSearchKey && Zotero.Searches.getByLibraryAndKey(libraryID, savedSearchKey);
-			if (!search || search.deleted) {
-				throw new Zotero.MCP.ToolError(`No saved search ${savedSearchKey} in library ${libraryID}`);
-			}
+		if (name === '') {
+			throw new Zotero.MCP.ToolError('name must not be empty');
 		}
 		if (!search.isEditable()) {
 			throw new Zotero.MCP.ToolError(`${search.key} can't be changed`);
 		}
-		let built = conditions?.length && buildSearch(libraryID, conditions).search;
+		let built = conditions && buildSearch(libraryID, conditions).search;
 		await edit(clientID, async () => {
 			search.fromJSON({
 				name: name || search.name,
@@ -1034,10 +1048,10 @@ Zotero.MCP.Tools = new function () {
 			itemCount: await countSearchItems(search),
 			link: getSelectLink(search),
 		});
-	};
+	}
 	
 	/**
-	 * A saved search's conditions as zotero_search and zotero_manage_saved_searches take them,
+	 * A saved search's conditions as zotero_search and zotero_add_saved_search take them,
 	 * read back from the flat list Zotero keeps, where a group lies between groupStart and
 	 * groupEnd, and its join mode and level are conditions of their own (see
 	 * Zotero.SearchQuery.addToSearch()). Options that aren't conditions, such as Search
@@ -2210,12 +2224,54 @@ Zotero.MCP.Tools = new function () {
 	//
 	
 	/**
-	 * Move items and collections to the trash, or restore them from it
-	 *
-	 * Trashing needs DELETE, but restoring only EDIT_LIBRARY, so this asks for the permission
-	 * itself instead of declaring one in tools.json.
+	 * Move items, collections and saved searches to the trash
 	 */
-	this.trash = async function ({ itemKeys = [], collectionKeys = [], savedSearchKeys = [], restore = false, libraryID }, call) {
+	this.trash = async function (args, { clientID }) {
+		let { libraryID, items, collections, searches } = await getTrashObjects(args, false);
+		await edit(clientID, async () => {
+			await Zotero.Items.trash(items.map(item => item.id));
+			for (let object of [...collections, ...searches]) {
+				object.deleted = true;
+				await object.save();
+			}
+		});
+		return trashResult(libraryID, items, collections, searches);
+	};
+	
+	/**
+	 * Restore items, collections and saved searches from the trash
+	 */
+	this.restoreFromTrash = async function (args, { clientID }) {
+		let { libraryID, items, collections, searches } = await getTrashObjects(args, true);
+		await edit(clientID, async () => {
+			// As when the user restores only parent items and collections in the trash
+			// (ZoteroPane.restoreSelectedItems()), their children come back too
+			let restored = [...items, ...collections, ...searches];
+			for (let item of items) {
+				if (item.isRegularItem()) {
+					restored.push(...Zotero.Items.get([...item.getNotes(true), ...item.getAttachments(true)]));
+				}
+			}
+			for (let collection of collections) {
+				restored.push(...Zotero.Collections.get(
+					collection.getDescendents(false, 'collection', true).map(descendant => descendant.id)
+				));
+			}
+			for (let object of new Set(restored)) {
+				if (object.deleted) {
+					object.deleted = false;
+					await object.save();
+				}
+			}
+		});
+		return trashResult(libraryID, items, collections, searches);
+	};
+	
+	/**
+	 * The objects zotero_trash or zotero_restore_from_trash was given, which must be in the trash
+	 * or not, without subcollections of collections given
+	 */
+	async function getTrashObjects({ itemKeys = [], collectionKeys = [], savedSearchKeys = [], libraryID }, inTrash) {
 		libraryID = getLibraryID(libraryID);
 		let library = Zotero.Libraries.get(libraryID);
 		if (!library.editable || !library.hasTrash) {
@@ -2228,9 +2284,9 @@ Zotero.MCP.Tools = new function () {
 			if (!object) {
 				throw new Zotero.MCP.ToolError(`No ${type} ${key} in library ${libraryID}`);
 			}
-			if (object.deleted != restore) {
+			if (object.deleted != inTrash) {
 				throw new Zotero.MCP.ToolError(
-					`${key} ${restore ? "isn't in the trash" : 'is already in the trash'}`
+					`${key} ${inTrash ? "isn't in the trash" : 'is already in the trash'}`
 				);
 			}
 			if (!object.isEditable()) {
@@ -2254,46 +2310,17 @@ Zotero.MCP.Tools = new function () {
 		collections = collections.filter(collection => !collections.some(
 			other => other != collection && other.hasDescendent('collection', collection.id)
 		));
-		
-		let { EDIT_LIBRARY, DELETE } = Zotero.MCP.Permissions;
-		await Zotero.MCP.Permissions.require(call.clientID, restore ? EDIT_LIBRARY : DELETE, libraryID, call);
-		await edit(call.clientID, async () => {
-			if (!restore) {
-				await Zotero.Items.trash(items.map(item => item.id));
-				for (let object of [...collections, ...searches]) {
-					object.deleted = true;
-					await object.save();
-				}
-				return;
-			}
-			// As when the user restores only parent items and collections in the trash
-			// (ZoteroPane.restoreSelectedItems()), their children come back too
-			let restored = [...items, ...collections, ...searches];
-			for (let item of items) {
-				if (item.isRegularItem()) {
-					restored.push(...Zotero.Items.get([...item.getNotes(true), ...item.getAttachments(true)]));
-				}
-			}
-			for (let collection of collections) {
-				restored.push(...Zotero.Collections.get(
-					collection.getDescendents(false, 'collection', true).map(descendant => descendant.id)
-				));
-			}
-			for (let object of new Set(restored)) {
-				if (object.deleted) {
-					object.deleted = false;
-					await object.save();
-				}
-			}
-		});
+		return { libraryID, items, collections, searches };
+	}
+	
+	function trashResult(libraryID, items, collections, searches) {
 		return Zotero.MCP.jsonResult({
 			libraryID,
-			restored: restore,
 			itemKeys: items.map(item => item.key),
 			collectionKeys: collections.map(collection => collection.key),
 			savedSearchKeys: searches.map(search => search.key),
 		});
-	};
+	}
 	
 	//
 	// Zotero windows -- What the user sees: the selection, the open tabs, and showing things to them
@@ -3249,7 +3276,7 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * A search for the conditions zotero_search and zotero_manage_saved_searches take, built as
+	 * A search for the conditions zotero_search and zotero_add_saved_search take, built as
 	 * Zotero.SearchQuery builds a query typed in the search box: it returns items, with a match on a child (e.g. an annotation's comment)
 	 * mapped up to its item
 	 *
