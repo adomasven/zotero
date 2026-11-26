@@ -1118,11 +1118,15 @@ Zotero.MCP.Tools = new function () {
 			return { joinMode: node.joinMode, level, conditions };
 		};
 		let conditions = root.conditions.map(toNode);
-		// The level of the whole search is the kind of item it finds, as zotero_search takes it
+		if (root.joinMode == 'any') {
+			conditions = [{ joinMode: 'any', conditions }];
+		}
+		// The level of the whole search is the kind of item it finds, as zotero_search takes it,
+		// so it goes outside a match-any group
 		if (root.level && root.level != 'item') {
 			conditions.unshift({ condition: 'itemType', operator: 'is', value: root.level });
 		}
-		return root.joinMode == 'any' ? [{ joinMode: 'any', conditions }] : conditions;
+		return conditions;
 	}
 	
 	/**
