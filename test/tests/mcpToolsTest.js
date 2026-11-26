@@ -90,17 +90,12 @@ describe("MCP tools", function () {
 			assert.lengthOf(itemTypes, 1);
 			let [type] = itemTypes;
 			assert.equal(type.itemType, 'bookSection');
-			assert.equal(type.label, 'Book Section');
-			assert.deepInclude(type.fields, { field: 'bookTitle', label: 'Book Title', baseField: 'publicationTitle' });
-			assert.deepInclude(type.fields, { field: 'title', label: 'Title' });
-			assert.notInclude(type.fields.map(field => field.field), 'issue');
-			assert.deepInclude(type.creatorTypes, { creatorType: 'author', label: 'Author', primary: true });
-			assert.deepInclude(type.creatorTypes, { creatorType: 'bookAuthor', label: 'Book Author' });
-			
-			({ itemTypes } = await call('zotero_list_item_types', {}));
-			let names = itemTypes.map(type => type.itemType);
-			assert.includeMembers(names, ['book', 'journalArticle', 'webpage']);
-			assert.notInclude(names, 'note');
+			assert.includeMembers(type.fields, ['title', 'bookTitle']);
+			assert.notInclude(type.fields, 'issue');
+			assert.equal(type.baseFields.bookTitle, 'publicationTitle');
+			assert.notProperty(type.baseFields, 'title');
+			assert.equal(type.creatorTypes[0], 'author');
+			assert.include(type.creatorTypes, 'bookAuthor');
 		});
 		
 		it("should be the item types tools.json takes, which should be all of Zotero's but notes, attachments and annotations", async function () {
@@ -108,7 +103,7 @@ describe("MCP tools", function () {
 				.map(type => type.name)
 				.filter(name => !['note', 'attachment', 'annotation'].includes(name))
 				.sort();
-			let { itemTypes } = await call('zotero_list_item_types', {});
+			let { itemTypes } = await call('zotero_list_item_types', { itemTypes: expected });
 			assert.sameMembers(itemTypes.map(type => type.itemType), expected);
 			
 			// Every list of item types in an input schema, e.g. after a schema update adds a type
@@ -273,12 +268,12 @@ describe("MCP tools", function () {
 			assert.lengthOf(items, 1);
 			assert.equal(items[0].title, item.getField('title'));
 			assert.equal(items[0].creators[0].lastName, 'Smith');
+			assert.notProperty(items[0], 'version');
 			assert.deepEqual(items[0].attachments, [{
 				key: attachment.key,
 				title: 'test',
 				contentType: 'application/pdf',
 				linkMode: 'imported_file',
-				fileExists: true,
 				path: attachment.getFilePath(),
 				link: `zotero://open/library/items/${attachment.key}`,
 			}]);
@@ -523,11 +518,11 @@ describe("MCP tools", function () {
 			Zotero.UndoHistory.clear();
 		});
 		
-		it("should tag an annotation, and give its file", async function () {
+		it("should tag an annotation", async function () {
 			let attachment = await importFileAttachment('test.pdf');
 			let annotation = await createAnnotation('highlight', attachment);
 			let { items } = await call('zotero_update_items', { changes: [{ key: annotation.key, addTags: ['figure'] }] });
-			assert.deepInclude(items[0], { key: annotation.key, parentItem: attachment.key });
+			assert.equal(items[0].key, annotation.key);
 			assert.deepEqual(annotation.getTags(), [{ tag: 'figure' }]);
 		});
 		
@@ -547,8 +542,10 @@ describe("MCP tools", function () {
 					},
 				],
 			});
-			assert.deepEqual(items.map(item => item.key), [a.key, b.key]);
-			assert.equal(items[0].title, 'New A');
+			assert.deepEqual(items, [
+				{ key: a.key, link: `zotero://select/library/items/${a.key}` },
+				{ key: b.key, link: `zotero://select/library/items/${b.key}` },
+			]);
 			assert.equal(a.getField('DOI'), '10.1/x');
 			assert.isTrue(collection.hasItem(a.id));
 			assert.deepEqual(b.getTags(), [{ tag: 'new' }]);
@@ -934,6 +931,22 @@ describe("MCP tools", function () {
 			result = await call('zotero_get_notes', { itemKeys: [note.key], format: 'html' });
 			assert.include(result.notes[0].content, '<strong>bold</strong>');
 			assert.lengthOf(result.annotations, 0);
+		});
+		
+		it("should stop after the key that passes its size limit, and give the rest as nextItemKeys", async function () {
+			let notes = [];
+			for (let i = 0; i < 3; i++) {
+				notes.push(await createDataObject('item', { itemType: 'note', note: `<p>${'word '.repeat(6000)}</p>` }));
+			}
+			let keys = notes.map(note => note.key);
+			let result = await call('zotero_get_notes', { itemKeys: keys });
+			assert.deepEqual(result.notes.map(note => note.key), keys.slice(0, 2));
+			assert.deepEqual(result.nextItemKeys, keys.slice(2));
+			assert.match(result.notice, /nextItemKeys/);
+			
+			result = await call('zotero_get_notes', { itemKeys: result.nextItemKeys });
+			assert.deepEqual(result.notes.map(note => note.key), keys.slice(2));
+			assert.notProperty(result, 'nextItemKeys');
 		});
 	});
 	
@@ -1605,6 +1618,7 @@ describe("MCP tools", function () {
 			let item = await createArticle();
 			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
 			let annotation = await createAnnotation('highlight', attachment);
+			await win.ZoteroPane.selectItem(item.id);
 			let reader = await Zotero.Reader.open(attachment.id);
 			await reader._initPromise;
 			let internalReader = reader._internalReader;
@@ -1622,6 +1636,9 @@ describe("MCP tools", function () {
 			
 			let context = await call('zotero_get_context', {});
 			assert.equal(context.tabType, 'reader');
+			// Behind the reader tab, so not what the user is looking at
+			assert.equal(context.selectedItemCount, 1);
+			assert.notProperty(context, 'selectedItems');
 			let { selectedAnnotations, ...rest } = context.reader;
 			assert.deepEqual(rest, {
 				libraryID: attachment.libraryID,

@@ -78,29 +78,23 @@ Zotero.MCP.Tools = new function () {
 	 * /itemTypes, /itemTypeFields and /itemTypeCreatorTypes give them
 	 */
 	this.listItemTypes = async function ({ itemTypes }) {
-		let types = getRegularItemTypes();
-		if (itemTypes?.length) {
-			types = types.filter(type => itemTypes.includes(type.name));
-		}
+		let types = getRegularItemTypes().filter(type => itemTypes.includes(type.name));
 		return Zotero.MCP.jsonResult({
 			itemTypes: types.map(({ id, name }) => {
-				let primaryID = Zotero.CreatorTypes.getPrimaryIDForType(id);
+				let fieldIDs = Zotero.ItemFields.getItemTypeFields(id);
+				let baseFields = {};
+				for (let fieldID of fieldIDs) {
+					let baseID = Zotero.ItemFields.getBaseIDFromTypeAndField(id, fieldID);
+					if (baseID && baseID != fieldID) {
+						baseFields[Zotero.ItemFields.getName(fieldID)] = Zotero.ItemFields.getName(baseID);
+					}
+				}
 				return {
 					itemType: name,
-					label: Zotero.ItemTypes.getLocalizedString(id),
-					fields: Zotero.ItemFields.getItemTypeFields(id).map((fieldID) => {
-						let baseID = Zotero.ItemFields.getBaseIDFromTypeAndField(id, fieldID);
-						return {
-							field: Zotero.ItemFields.getName(fieldID),
-							label: Zotero.ItemFields.getLocalizedString(fieldID),
-							baseField: baseID && baseID != fieldID ? Zotero.ItemFields.getName(baseID) : undefined,
-						};
-					}),
-					creatorTypes: Zotero.CreatorTypes.getTypesForItemType(id).map(type => ({
-						creatorType: type.name,
-						label: Zotero.CreatorTypes.getLocalizedString(type.id),
-						primary: type.id == primaryID || undefined,
-					})),
+					fields: fieldIDs.map(fieldID => Zotero.ItemFields.getName(fieldID)),
+					baseFields: nonEmpty(baseFields),
+					// The primary one first
+					creatorTypes: Zotero.CreatorTypes.getTypesForItemType(id).map(type => type.name),
 				};
 			}),
 		});
@@ -214,7 +208,8 @@ Zotero.MCP.Tools = new function () {
 		let { items: found, missing } = await getItemsByKey(libraryID, itemKeys, { includeTrashed });
 		let items = [];
 		for (let item of found) {
-			let json = item.toJSON();
+			// No tool takes the version
+			let { version: _version, ...json } = item.toJSON();
 			json.link = getSelectLink(item);
 			json.relations = nonEmpty(json.relations);
 			if (item.isRegularItem()) {
@@ -454,7 +449,7 @@ Zotero.MCP.Tools = new function () {
 		}, items);
 		return Zotero.MCP.jsonResult({
 			libraryID,
-			items: await Promise.all(items.map(describeItem)),
+			items: items.map(item => ({ key: item.key, link: getSelectLink(item) })),
 		});
 	};
 	
@@ -533,10 +528,12 @@ Zotero.MCP.Tools = new function () {
 		}, items);
 		return Zotero.MCP.jsonResult({
 			libraryID,
-			items: await Promise.all(changed.map(async ({ item, ...change }) => ({
-				...await describeItem(item),
+			items: changed.map(({ item, ...change }) => ({
+				key: item.key,
+				itemType: item.itemType,
+				link: getSelectLink(item),
 				...change,
-			}))),
+			})),
 		});
 	};
 	
@@ -1143,56 +1140,59 @@ Zotero.MCP.Tools = new function () {
 	// Annotations Zotero keeps an image of
 	const IMAGE_ANNOTATION_TYPES = ['image', 'ink'];
 	
+	// Characters of notes and annotations zotero_get_notes returns, after which it leaves the
+	// remaining keys for another call
+	const MAX_NOTES_CHARS = 50000;
+	
 	/**
 	 * Notes and annotations, as Markdown or HTML
 	 */
 	this.getNotes = async function ({ itemKeys, format = 'markdown', libraryID }) {
 		libraryID = getLibraryID(libraryID);
+		let { items, missing } = await getItemsByKey(libraryID, itemKeys);
 		let notes = new Set();
 		let annotations = new Set();
-		let { items, missing } = await getItemsByKey(libraryID, itemKeys);
-		for (let item of items) {
+		let noteResults = [];
+		let annotationResults = new Map();
+		let chars = 0;
+		let nextItemKeys;
+		for (let [i, item] of items.entries()) {
+			// At least the first key's, however long
+			if (chars > MAX_NOTES_CHARS) {
+				nextItemKeys = items.slice(i).map(item => item.key);
+				break;
+			}
+			let itemNotes = [];
+			let itemAnnotations = [];
 			if (item.isNote()) {
-				notes.add(item);
+				itemNotes.push(item);
 			}
 			else if (item.isAnnotation()) {
-				annotations.add(item);
+				itemAnnotations.push(item);
 			}
 			else if (item.isRegularItem()) {
-				Zotero.Items.get(item.getNotes()).forEach(note => notes.add(note));
+				itemNotes.push(...Zotero.Items.get(item.getNotes()));
 				for (let attachment of Zotero.Items.get(item.getAttachments())) {
 					if (attachment.isFileAttachment()) {
-						attachment.getAnnotations().forEach(annotation => annotations.add(annotation));
+						itemAnnotations.push(...attachment.getAnnotations());
 					}
 				}
 			}
 			else if (item.isFileAttachment()) {
-				item.getAnnotations().forEach(annotation => annotations.add(annotation));
+				itemAnnotations.push(...item.getAnnotations());
 			}
-		}
-		let noteResults = [];
-		for (let note of notes) {
-			// Embedded images, in the order they're in the note
-			let imageKeys = [...note.getNote().matchAll(/<img\b[^>]*\bdata-attachment-key="([^"]+)"/g)]
-				.map(match => match[1]);
-			let images = [];
-			for (let key of imageKeys) {
-				let image = Zotero.Items.getByLibraryAndKey(note.libraryID, key);
-				let path = image && await image.getFilePathAsync();
-				images.push({ key, path: path || undefined });
+			for (let note of itemNotes.filter(note => !notes.has(note))) {
+				notes.add(note);
+				let result = await describeNote(note, format);
+				chars += result.content.length;
+				noteResults.push(result);
 			}
-			noteResults.push({
-				key: note.key,
-				parentItem: note.parentKey || undefined,
-				title: note.getNoteTitle(),
-				tags: nonEmpty(note.getTags()),
-				dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
-				content: format == 'html'
-					? note.getNote()
-					: await noteToMarkdown(note),
-				images: nonEmpty(images),
-				link: getSelectLink(note),
-			});
+			for (let annotation of itemAnnotations.filter(annotation => !annotations.has(annotation))) {
+				annotations.add(annotation);
+				let result = await describeAnnotation(annotation);
+				chars += (result.annotationText?.length ?? 0) + (result.annotationComment?.length ?? 0);
+				annotationResults.set(annotation, result);
+			}
 		}
 		// In the order they're in the file, as in the reader's sidebar
 		let sorted = [...annotations]
@@ -1201,10 +1201,38 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			notes: noteResults,
-			annotations: await Promise.all(sorted.map(describeAnnotation)),
+			annotations: sorted.map(annotation => annotationResults.get(annotation)),
+			nextItemKeys,
 			missing: nonEmpty(missing),
+			notice: nextItemKeys
+				? 'These are too long to return at once. Call again with nextItemKeys for the rest.'
+				: undefined,
 		});
 	};
+	
+	async function describeNote(note, format) {
+		// Embedded images, in the order they're in the note
+		let imageKeys = [...note.getNote().matchAll(/<img\b[^>]*\bdata-attachment-key="([^"]+)"/g)]
+			.map(match => match[1]);
+		let images = [];
+		for (let key of imageKeys) {
+			let image = Zotero.Items.getByLibraryAndKey(note.libraryID, key);
+			let path = image && await image.getFilePathAsync();
+			images.push({ key, path: path || undefined });
+		}
+		return {
+			key: note.key,
+			parentItem: note.parentKey || undefined,
+			title: note.getNoteTitle(),
+			tags: nonEmpty(note.getTags()),
+			dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
+			content: format == 'html'
+				? note.getNote()
+				: await noteToMarkdown(note),
+			images: nonEmpty(images),
+			link: getSelectLink(note),
+		};
+	}
 	
 	/**
 	 * Image files of image and ink annotations, rendering those not rendered yet from their
@@ -2364,7 +2392,10 @@ Zotero.MCP.Tools = new function () {
 					name: search.name,
 				}))),
 				selectedItemCount: items.length,
-				selectedItems: nonEmpty(await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(describeItem))),
+				// Only when the user is looking at them
+				selectedItems: Zotero_Tabs.selectedType == 'library'
+					? nonEmpty(await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(describeItem)))
+					: undefined,
 			});
 		}
 		
@@ -2807,7 +2838,7 @@ Zotero.MCP.Tools = new function () {
 	const MAX_LISTED_ITEMS = 50;
 	
 	// Longest export zotero_export returns as text, in characters
-	const MAX_EXPORT_CHARS = 200000;
+	const MAX_EXPORT_CHARS = 50000;
 	
 	// Most items zotero_export gives the BibTeX citation keys of
 	const MAX_CITATION_KEYS = 500;
@@ -3371,9 +3402,8 @@ Zotero.MCP.Tools = new function () {
 			linkMode: Zotero.Attachments.linkModeToName(attachment.attachmentLinkMode),
 		};
 		if (attachment.isFileAttachment()) {
-			description.fileExists = await attachment.fileExists();
 			// For the AI app to open the file itself, e.g. to see a figure
-			description.path = description.fileExists ? attachment.getFilePath() : undefined;
+			description.path = await attachment.fileExists() ? attachment.getFilePath() : undefined;
 			description.annotationCount = attachment.getAnnotations().length || undefined;
 		}
 		// zotero://open opens only files
