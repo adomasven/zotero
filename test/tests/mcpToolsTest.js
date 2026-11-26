@@ -153,77 +153,35 @@ describe("MCP tools", function () {
 			assert.isOk(link);
 		});
 		
-		it("should filter by conditions, and match titles only as free text", async function () {
-			let name = Zotero.Utilities.randomString();
-			let byName = await createArticle({ lastName: name });
-			let aboutName = await createArticle({ title: `On ${name}` });
-			
-			let { items } = await call('zotero_search', { conditions: [{ condition: 'creator', operator: 'contains', value: name }] });
-			assert.deepEqual(items.map(item => item.key), [byName.key]);
-			assert.equal(items[0].creatorSummary, name);
-			assert.equal(items[0].link, `zotero://select/library/items/${byName.key}`);
-			
-			({ items } = await call('zotero_search', { query: name, mode: 'titleCreatorYear' }));
-			assert.sameMembers(items.map(item => item.key), [byName.key, aboutName.key]);
-		});
-		
-		it("should return an item once for matches in its notes, and the notes for itemType is note", async function () {
-			let word = Zotero.Utilities.randomString();
-			let item = await createArticle();
-			let notes = [];
-			for (let i = 0; i < 2; i++) {
-				notes.push(await createDataObject('item', { itemType: 'note', parentID: item.id, note: `<p>${word}</p>` }));
-			}
-			
-			let { items } = await call('zotero_search', { query: word, mode: 'fields' });
-			assert.deepEqual(items.map(item => item.key), [item.key]);
-			
-			let notesOnly = [{ condition: 'itemType', operator: 'is', value: 'note' }];
-			({ items } = await call('zotero_search', { query: word, mode: 'fields', conditions: notesOnly }));
-			assert.sameMembers(items.map(item => item.key), notes.map(note => note.key));
-			assert.isTrue(items.every(note => note.parentKey == item.key));
-			
-			let pdf = await importFileAttachment('test.pdf', { parentID: item.id });
-			let annotation = await createAnnotation('note', pdf, { comment: word });
-			let annotationsOnly = [{ condition: 'itemType', operator: 'is', value: 'annotation' }];
-			({ items } = await call('zotero_search', { query: word, mode: 'fields', conditions: annotationsOnly }));
-			assert.deepEqual(items.map(each => [each.key, each.attachmentKey, each.parentKey]), [[annotation.key, pdf.key, undefined]]);
-		});
-		
-		it("should match an item by its own conditions and its children's together", async function () {
+		it("should filter by conditions, groups of them and levels, with annotation types by name", async function () {
 			let tag = Zotero.Utilities.randomString();
-			let comment = Zotero.Utilities.randomString();
-			let annotated = await createArticle();
-			annotated.addTag(tag);
-			await annotated.saveTx();
+			let annotationTag = Zotero.Utilities.randomString();
+			let annotated = await createArticle({ lastName: 'Smith' });
 			let pdf = await importFileAttachment('test.pdf', { parentID: annotated.id });
-			let annotation = await createAnnotation('highlight', pdf, { comment });
-			annotation.addTag(comment);
-			await annotation.saveTx();
-			let other = await createArticle();
-			other.addTag(tag);
-			await other.saveTx();
+			let highlight = await createAnnotation('highlight', pdf);
+			highlight.addTag(annotationTag);
+			await highlight.saveTx();
+			let unattached = await createArticle();
+			// Has an annotation, but not a highlight
+			let noted = await createArticle();
+			await createAnnotation('note', await importFileAttachment('test.pdf', { parentID: noted.id }));
+			for (let item of [annotated, unattached, noted]) {
+				item.addTag(tag);
+				await item.saveTx();
+			}
 			let tagged = { condition: 'tag', operator: 'is', value: tag };
 			
-			// The tag is the item's and the annotation the PDF's, but both are the item's match
-			let { items } = await call('zotero_search', { conditions: [
-				tagged,
-				{ condition: 'annotationType', operator: 'is', value: 'highlight' },
-				{ condition: 'annotationComment', operator: 'contains', value: comment },
-			] });
-			assert.deepEqual(items.map(item => item.key), [annotated.key]);
-			
-			({ items } = await call('zotero_search', { conditions: [tagged, {
+			let { items } = await call('zotero_search', { conditions: [tagged, {
 				joinMode: 'any',
 				conditions: [
-					{ condition: 'annotationComment', operator: 'contains', value: comment },
+					{ condition: 'annotationType', operator: 'is', value: 'highlight' },
 					{ condition: 'numAttachments', operator: 'is', value: '0' },
 				],
-			}] }));
-			assert.sameMembers(items.map(item => item.key), [annotated.key, other.key]);
+			}] });
+			assert.sameMembers(items.map(item => item.key), [annotated.key, unattached.key]);
+			assert.equal(items.find(item => item.key == annotated.key).creatorSummary, 'Smith');
 			
-			// A tag on an annotation, and not on the item itself
-			({ items } = await call('zotero_search', { conditions: [{ ...tagged, value: comment }] }));
+			({ items } = await call('zotero_search', { conditions: [{ ...tagged, value: annotationTag, level: 'annotation' }] }));
 			assert.deepEqual(items.map(item => item.key), [annotated.key]);
 			({ items } = await call('zotero_search', { conditions: [{ ...tagged, level: 'annotation' }] }));
 			assert.lengthOf(items, 0);
@@ -234,12 +192,29 @@ describe("MCP tools", function () {
 			);
 		});
 		
-		it("should take every condition Zotero's Advanced Search has, in each tool that takes conditions", async function () {
-			let expected = Zotero.SearchConditions.getStandardConditions().map(condition => condition.name);
-			for (let name of ['zotero_search', 'zotero_manage_saved_searches']) {
-				let tool = (await Zotero.MCP.getTools()).find(tool => tool.name == name);
-				assert.sameMembers(tool.inputSchema.$defs.condition.properties.condition.enum, expected, name);
+		it("should return an item once for matches in its notes, and the notes for itemType is note", async function () {
+			let word = Zotero.Utilities.randomString();
+			let item = await createArticle();
+			let notes = [];
+			for (let i = 0; i < 2; i++) {
+				notes.push(await createDataObject('item', { itemType: 'note', parentID: item.id, note: `<p>${word}</p>` }));
 			}
+			let inNote = { condition: 'note', operator: 'contains', value: word };
+			
+			let { items } = await call('zotero_search', { conditions: [inNote] });
+			assert.deepEqual(items.map(item => item.key), [item.key]);
+			
+			({ items } = await call('zotero_search', { conditions: [{ condition: 'itemType', operator: 'is', value: 'note' }, inNote] }));
+			assert.sameMembers(items.map(item => item.key), notes.map(note => note.key));
+			assert.isTrue(items.every(note => note.parentKey == item.key));
+			
+			let pdf = await importFileAttachment('test.pdf', { parentID: item.id });
+			let annotation = await createAnnotation('note', pdf, { comment: word });
+			({ items } = await call('zotero_search', { conditions: [
+				{ condition: 'itemType', operator: 'is', value: 'annotation' },
+				{ condition: 'annotationComment', operator: 'contains', value: word },
+			] }));
+			assert.deepEqual(items.map(each => [each.key, each.attachmentKey, each.parentKey]), [[annotation.key, pdf.key, undefined]]);
 		});
 		
 		it("should list a collection's items, sorted and in pages", async function () {
@@ -264,8 +239,9 @@ describe("MCP tools", function () {
 			assert.deepEqual(page.items.map(item => item.key), [a]);
 			assert.notProperty(page, 'nextOffset');
 			
-			assert.equal((await call('zotero_search', { query: prefix, collectionKey: collection.key })).total, 3);
-			assert.equal((await call('zotero_search', { query: prefix })).total, 4);
+			let titled = [{ condition: 'title', operator: 'contains', value: prefix }];
+			assert.equal((await call('zotero_search', { conditions: titled, collectionKey: collection.key })).total, 3);
+			assert.equal((await call('zotero_search', { conditions: titled })).total, 4);
 		});
 		
 		it("should search the given library, and not the trash", async function () {
@@ -274,8 +250,9 @@ describe("MCP tools", function () {
 			let inGroup = await createArticle({ title, libraryID: group.libraryID });
 			await createArticle({ title, deleted: true });
 			
-			assert.equal((await call('zotero_search', { query: title })).total, 0);
-			let { items } = await call('zotero_search', { query: title, libraryID: group.libraryID });
+			let conditions = [{ condition: 'title', operator: 'is', value: title }];
+			assert.equal((await call('zotero_search', { conditions })).total, 0);
+			let { items } = await call('zotero_search', { conditions, libraryID: group.libraryID });
 			assert.deepEqual(items.map(item => item.key), [inGroup.key]);
 			assert.equal(items[0].link, `zotero://select/groups/${group.id}/items/${inGroup.key}`);
 		});

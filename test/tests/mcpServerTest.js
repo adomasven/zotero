@@ -95,7 +95,7 @@ describe("Zotero.Server.MCP", function () {
 			});
 			
 			it("should report arguments that don't match the input schema as a tool error", async function () {
-				let { result } = await callMCPTool('zotero_search', { query: 'a', limit: 0, colour: 'red' });
+				let { result } = await callMCPTool('zotero_search', { limit: 0, colour: 'red' });
 				assert.isTrue(result.isError);
 				assert.match(result.content[0].text, /^Invalid arguments: /);
 				assert.match(result.content[0].text, /\/limit/);

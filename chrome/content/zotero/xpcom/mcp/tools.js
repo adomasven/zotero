@@ -127,7 +127,7 @@ Zotero.MCP.Tools = new function () {
 	
 	const LOOKUPS_PENDING = 'Zotero is still looking up the identifiers with status pending. It '
 		+ 'adds each item when its lookup finishes, and looks for its file if asked to. To get their '
-		+ 'keys, search for them later with zotero_search in fields mode, by the identifier. If one '
+		+ 'keys, search for them later with zotero_search, by anyField contains the identifier. If one '
 		+ "doesn't turn up, Zotero couldn't find it: give its metadata as items.";
 	
 	// Identifiers zotero_add_items looks up at a time
@@ -150,12 +150,11 @@ Zotero.MCP.Tools = new function () {
 	]);
 	
 	/**
-	 * Search like the main window's search box: the same query syntax and modes, in the
-	 * library or a collection, with matches in notes, attachments and annotations standing for
-	 * the item they belong to
+	 * Search by Advanced Search conditions, in the library, a collection or a saved search, with
+	 * matches in notes, attachments and annotations standing for the item they belong to
 	 */
 	this.search = async function ({
-		query = '', mode = 'titleCreatorYear', conditions = [], libraryID, collectionKey,
+		conditions = [], libraryID, collectionKey,
 		includeSubcollectionItems = false, savedSearchKey, sortField = 'dateModified', sortDirection, limit = 25, offset = 0,
 	}) {
 		libraryID = getLibraryID(libraryID);
@@ -185,10 +184,9 @@ Zotero.MCP.Tools = new function () {
 		search.setScope(scope, true);
 		// Conditions that name a child type (itemType is note) return those, not their items
 		let resultLevel = 'item';
-		query = query.trim();
-		if (query || conditions.length) {
+		if (conditions.length) {
 			let built;
-			({ search: built, resultLevel } = buildSearch(libraryID, conditions, query, mode));
+			({ search: built, resultLevel } = buildSearch(libraryID, conditions));
 			built.setScope(search, true);
 			search = built;
 		}
@@ -3216,14 +3214,13 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * A search for the conditions zotero_search and zotero_manage_saved_searches take, with
-	 * free text matched by a quick search mode, built as Zotero.SearchQuery builds a query typed
-	 * in the search box: it returns items, with a match on a child (e.g. an annotation's comment)
+	 * A search for the conditions zotero_search and zotero_manage_saved_searches take, built as
+	 * Zotero.SearchQuery builds a query typed in the search box: it returns items, with a match on a child (e.g. an annotation's comment)
 	 * mapped up to its item
 	 *
 	 * @return {Object} { search, resultLevel }, where resultLevel is the kind of item it returns
 	 */
-	function buildSearch(libraryID, conditions, query, mode) {
+	function buildSearch(libraryID, conditions) {
 		let toNode = (node) => {
 			if (node.conditions) {
 				return { joinMode: node.joinMode, children: node.conditions.map(toNode) };
@@ -3252,9 +3249,6 @@ Zotero.MCP.Tools = new function () {
 		let search = new Zotero.Search({ libraryID });
 		search.addCondition('resultLevel', resultLevel);
 		Zotero.SearchQuery.addToSearch(search, tree);
-		if (query) {
-			search.addCondition('quicksearch-' + mode, 'contains', query);
-		}
 		return { search, resultLevel };
 	}
 	

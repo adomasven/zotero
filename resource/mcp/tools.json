@@ -108,7 +108,7 @@
 		{
 			"name": "zotero_search",
 			"title": "Search Zotero",
-			"description": "Find items in a Zotero library by free text, as Zotero's search box matches it, and by conditions, as in its Advanced Search. Matches in notes, attachments and annotations return the item they belong to, unless a condition is itemType is note, attachment or annotation.",
+			"description": "Find items in a Zotero library by conditions, as in its Advanced Search. For free text, use titleCreatorYear, anyField or fulltextContent with contains. Matches in notes, attachments and annotations return the item they belong to, unless a condition is itemType is note, attachment or annotation.",
 			"inputSchema": {
 				"type": "object",
 				"$defs": {
@@ -125,10 +125,9 @@
 					}
 				},
 				"properties": {
-					"query": { "type": "string", "description": "Free text, matched according to mode" },
 					"conditions": {
 						"type": "array",
-						"description": "Conditions items must all meet, e.g. [{\"condition\": \"creator\", \"operator\": \"contains\", \"value\": \"Smith\"}, {\"condition\": \"date\", \"operator\": \"isAfter\", \"value\": \"2019\"}, {\"joinMode\": \"any\", \"conditions\": [{\"condition\": \"tag\", \"operator\": \"is\", \"value\": \"to read\"}, {\"condition\": \"numNotes\", \"operator\": \"isLessThan\", \"value\": \"1\"}]}]. Without query or conditions, all items in the scope.",
+						"description": "Conditions items must all meet, e.g. [{\"condition\": \"creator\", \"operator\": \"contains\", \"value\": \"Smith\"}, {\"condition\": \"date\", \"operator\": \"isAfter\", \"value\": \"2019\"}, {\"joinMode\": \"any\", \"conditions\": [{\"condition\": \"tag\", \"operator\": \"is\", \"value\": \"to read\"}, {\"condition\": \"numNotes\", \"operator\": \"isLessThan\", \"value\": \"1\"}]}]. Without conditions, all items in the scope.",
 						"items": {
 							"anyOf": [
 								{ "$ref": "#/$defs/condition" },
@@ -144,11 +143,6 @@
 								}
 							]
 						}
-					},
-					"mode": {
-						"enum": ["titleCreatorYear", "fields", "everything"],
-						"default": "titleCreatorYear",
-						"description": "What free text matches: title, creators and year; all fields, tags and notes; or those and attachment full text"
 					},
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
 					"collectionKey": { "type": "string", "description": "Only items in this collection. Not with savedSearchKey." },

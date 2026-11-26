@@ -42,7 +42,7 @@ describe("Zotero.MCP.Permissions", function () {
 	
 	it("should let apps read without asking", async function () {
 		let ask = sinon.stub(Permissions, '_ask');
-		let { result } = await callMCPTool('zotero_search', { query: 'x' });
+		let { result } = await callMCPTool('zotero_search', {});
 		assert.notOk(result.isError);
 		assert.isFalse(ask.called);
 	});
