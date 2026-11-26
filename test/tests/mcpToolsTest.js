@@ -928,7 +928,6 @@ describe("MCP tools", function () {
 				comment: last.annotationComment,
 				color: '#ffd400',
 				page: 5,
-				pageLabel: last.annotationPageLabel,
 				tags: ['important'],
 				link: `zotero://open/library/items/${attachment.key}?annotation=${last.key}`,
 			});
@@ -1111,7 +1110,6 @@ describe("MCP tools", function () {
 			// Has the word but not the phrase
 			let other = await importFileAttachment('test.pdf');
 			await setText(other, [`Just ${word}.`]);
-			stubStructure({ pages: [{ label: 'i' }, { label: '1' }, { label: '2' }] });
 			
 			let { total, files: results } = await call('zotero_search_fulltext', { query: `${word} "soil organic"` });
 			assert.equal(total, 1);
@@ -1122,19 +1120,16 @@ describe("MCP tools", function () {
 			assert.deepEqual(results[0].passages, [
 				{
 					page: 2,
-					pageLabel: '1',
 					text: `Here Sôil–organic matter and ${word} interact.`,
 					link: `zotero://open/library/items/${attachment.key}?page=2`,
 				},
 				{
 					page: 1,
-					pageLabel: 'i',
 					text: `Introduction about ${word} cycles.`,
 					link: `zotero://open/library/items/${attachment.key}?page=1`,
 				},
 				{
 					page: 3,
-					pageLabel: '2',
 					text: `Only soil here, and organic elsewhere, with ${word}.`,
 					link: `zotero://open/library/items/${attachment.key}?page=3`,
 				},
@@ -1200,13 +1195,12 @@ describe("MCP tools", function () {
 			Zotero.MCP.Tools._structureWait = 15 * 1000;
 		});
 		
-		it("should read a PDF by page, up to about maxChars, with labels and the outline", async function () {
+		it("should read a PDF by page, up to about maxChars, with the outline", async function () {
 			let item = await createArticle();
 			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
 			let pages = ['a', 'b', 'c'].map(letter => `${letter} `.repeat(300).trim());
 			await setText(attachment, pages);
 			stubStructure({
-				pages: [{ label: 'i' }, { label: '1' }, { label: '2' }],
 				outline: [{
 					title: 'Chapter',
 					target: { position: { pageIndex: 1 } },
@@ -1219,8 +1213,8 @@ describe("MCP tools", function () {
 			assert.equal(result.key, attachment.key);
 			assert.equal(result.totalPages, 3);
 			assert.deepEqual(result.pages, [
-				{ page: 1, pageLabel: 'i', text: pages[0] },
-				{ page: 2, pageLabel: '1', text: pages[1] },
+				{ page: 1, text: pages[0] },
+				{ page: 2, text: pages[1] },
 			]);
 			assert.equal(result.nextPage, 3);
 			assert.deepEqual(result.outline, [
@@ -1229,29 +1223,30 @@ describe("MCP tools", function () {
 			assert.notProperty(result, 'notice');
 			
 			result = await call('zotero_read_text', { itemKey: attachment.key, startPage: 3 });
-			assert.deepEqual(result.pages, [{ page: 3, pageLabel: '2', text: pages[2] }]);
+			assert.deepEqual(result.pages, [{ page: 3, text: pages[2] }]);
 			assert.notProperty(result, 'nextPage');
 			assert.notProperty(result, 'outline');
 		});
 		
-		it("should wait for page labels only until the deadline, and have them later", async function () {
+		it("should wait for the outline only until the deadline, and have it later", async function () {
 			let attachment = await importFileAttachment('test.pdf');
 			await setText(attachment, ['One', 'Two']);
 			Zotero.MCP.Tools._structureWait = 200;
 			let getReader = sinon.stub(Zotero.SDT, 'getReader');
-			let catalog = { pages: [{ label: 'i' }, { label: 'ii' }] };
+			let catalog = { outline: [{ title: 'Two', target: { position: { pageIndex: 1 } } }] };
 			let generated = Zotero.Promise.delay(1000).then(() => ({ getCatalog: async () => catalog }));
 			getReader.returns(generated);
 			
-			let result = await call('zotero_read_text', { itemKey: attachment.key, startPage: 2 });
-			assert.deepEqual(result.pages, [{ page: 2, text: 'Two' }]);
-			assert.match(result.notice, /Page labels .* aren't available yet/);
+			let result = await call('zotero_read_text', { itemKey: attachment.key });
+			assert.deepEqual(result.pages, [{ page: 1, text: 'One' }, { page: 2, text: 'Two' }]);
+			assert.notProperty(result, 'outline');
+			assert.match(result.notice, /outline isn't available yet/);
 			assert.isTrue(getReader.calledWith(attachment.id, sinon.match({ isPriority: true })));
 			
-			// Generation went on, so a later call has the labels
+			// Generation went on, so a later call has the outline
 			await generated;
-			result = await call('zotero_read_text', { itemKey: attachment.key, startPage: 2 });
-			assert.deepEqual(result.pages, [{ page: 2, pageLabel: 'ii', text: 'Two' }]);
+			result = await call('zotero_read_text', { itemKey: attachment.key });
+			assert.deepEqual(result.outline, [{ title: 'Two', page: 2 }]);
 			assert.notProperty(result, 'notice');
 		});
 		
@@ -1638,14 +1633,9 @@ describe("MCP tools", function () {
 				type: 'pdf',
 				page: 1,
 				link: `zotero://open/library/items/${attachment.key}?page=1`,
-				selection: { text: 'Selected words', page: 1, pageLabel: '1' },
+				selection: { text: 'Selected words', page: 1 },
 			});
 			assert.deepEqual(selectedAnnotations.map(annotation => annotation.key), [annotation.key]);
-			
-			// "-" is the reader's label for a page whose label it couldn't determine
-			internalReader._state.primaryViewSelectionPopup.annotation.pageLabel = '-';
-			context = await call('zotero_get_context', {});
-			assert.deepEqual(context.reader.selection, { text: 'Selected words', page: 1 });
 			internalReader._state.primaryViewSelectionPopup = null;
 		});
 		

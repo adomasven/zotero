@@ -1411,10 +1411,6 @@ Zotero.MCP.Tools = new function () {
 	const TEXT_PENDING = "Zotero is still getting the text from the file, so it isn't all here. "
 		+ 'Call zotero_read_text again shortly, from nextPage for a PDF.';
 	
-	const LABELS_PENDING = "Page labels (the page numbers printed on the pages) and the outline "
-		+ "aren't available yet for some files. Zotero is preparing them, so a later call may "
-		+ 'include them.';
-	
 	// Characters of context around a zotero_search_fulltext match, and the longest a passage
 	// of nearby matches grows
 	const PASSAGE_CONTEXT = 200;
@@ -1423,7 +1419,7 @@ Zotero.MCP.Tools = new function () {
 	
 	const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 	
-	// Longest a call waits for structured document text (see getStructure()), within its
+	// Longest a call waits for structured document text (see getOutline()), within its
 	// deadline
 	this._structureWait = 15 * 1000;
 	
@@ -1436,8 +1432,6 @@ Zotero.MCP.Tools = new function () {
 		query, itemKeys, collectionKey, includeSubcollectionItems = false, libraryID, limit = 10, offset = 0,
 		passagesPerFile = 3,
 	}, { deadline }) {
-		let structureDeadline = Math.min(deadline, Date.now() + Zotero.MCP.Tools._structureWait);
-		let labelsPending = false;
 		let textPending = false;
 		libraryID = getLibraryID(libraryID);
 		let terms = Zotero.SearchConditions.parseSearchString(query)
@@ -1485,16 +1479,12 @@ Zotero.MCP.Tools = new function () {
 			let passages = [];
 			let matchCount = 0;
 			if (attachment.isPDFAttachment()) {
-				let structure = await getStructure(attachment, structureDeadline);
-				labelsPending ||= !!structure?.pending;
-				let labels = structure?.labels;
 				// The PDF worker separates pages with form feeds
 				text.split('\f').forEach((pageText, i) => {
 					let found = findPassages(pageText, regExps);
 					matchCount += found.matchCount;
 					passages.push(...found.passages.map(passage => ({
 						page: i + 1,
-						pageLabel: labels?.[i],
 						termCount: passage.termCount,
 						text: passage.text,
 						link: getOpenLink(attachment, { page: i + 1 }),
@@ -1528,7 +1518,6 @@ Zotero.MCP.Tools = new function () {
 			notice: [
 				textPending && 'Zotero is still getting the text of the files with pending: true, so their '
 					+ 'passages are missing. Search again shortly.',
-				labelsPending && LABELS_PENDING,
 			].filter(Boolean).join(' ') || undefined,
 		});
 	};
@@ -1616,7 +1605,8 @@ Zotero.MCP.Tools = new function () {
 		if (endPage < startPage) {
 			throw new Zotero.MCP.ToolError('endPage is before startPage');
 		}
-		let structure = await getStructure(
+		// Only the first call has the outline
+		let structure = startPage == 1 && await getOutline(
 			attachment,
 			Math.min(deadline, Date.now() + Zotero.MCP.Tools._structureWait)
 		);
@@ -1642,7 +1632,7 @@ Zotero.MCP.Tools = new function () {
 			}
 			let pageText = (pages[page - 1] ?? '').trim();
 			chars += pageText.length;
-			pageResults.push({ page, pageLabel: structure?.labels?.[page - 1], text: pageText });
+			pageResults.push({ page, text: pageText });
 		}
 		let notice;
 		if (textPending) {
@@ -1652,13 +1642,14 @@ Zotero.MCP.Tools = new function () {
 			notice = 'These pages have no text. If the PDF is scanned, it may need OCR.';
 		}
 		else if (structure?.pending) {
-			notice = LABELS_PENDING;
+			notice = "The PDF's outline isn't available yet. Zotero is preparing it, so a later call "
+				+ 'from startPage 1 may include it.';
 		}
 		Object.assign(result, {
 			totalPages,
 			pages: pageResults,
 			nextPage: page <= endPage ? page : undefined,
-			outline: startPage == 1 ? structure?.outline : undefined,
+			outline: structure?.outline,
 			notice,
 		});
 		return Zotero.MCP.jsonResult(result);
@@ -2018,8 +2009,7 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * A PDF's page labels (the page numbers printed on its pages) and outline, from its
-	 * structured document text (see sdt.js)
+	 * A PDF's outline, from its structured document text (see sdt.js)
 	 *
 	 * The text itself comes from the full-text index, which works even when only text synced
 	 * from another computer is here; structured document text is only for what the index
@@ -2029,10 +2019,10 @@ Zotero.MCP.Tools = new function () {
 	 * Generation goes on after that, so a later call has it.
 	 *
 	 * @param {Number} deadline - Date.now() time to stop waiting at
-	 * @return {Promise<Object|null>} { labels, outline }, { pending: true } if it wasn't ready
+	 * @return {Promise<Object|null>} { outline }, { pending: true } if it wasn't ready
 	 *     by the deadline, or null if there's none (e.g., a password-protected PDF)
 	 */
-	async function getStructure(attachment, deadline) {
+	async function getOutline(attachment, deadline) {
 		let reader = Zotero.SDT.getReader(attachment.id, { isPriority: true });
 		let timeout = Zotero.Promise.delay(Math.max(0, deadline - Date.now())).then(() => 'timeout');
 		let result = await Promise.race([reader, timeout]);
@@ -2044,19 +2034,16 @@ Zotero.MCP.Tools = new function () {
 		if (!result) {
 			return null;
 		}
-		let { pages = [], outline = [] } = await result.getCatalog();
-		let getOutline = entries => entries.map((entry) => {
+		let { outline = [] } = await result.getCatalog();
+		let toOutline = entries => entries.map((entry) => {
 			let pageIndex = entry.target?.position?.pageIndex;
 			return {
 				title: entry.title,
 				page: Number.isInteger(pageIndex) ? pageIndex + 1 : undefined,
-				children: entry.children?.length ? getOutline(entry.children) : undefined,
+				children: entry.children?.length ? toOutline(entry.children) : undefined,
 			};
 		});
-		return {
-			labels: pages.map(page => page.label),
-			outline: getOutline(outline),
-		};
+		return { outline: toOutline(outline) };
 	}
 	
 	/**
@@ -2394,13 +2381,13 @@ Zotero.MCP.Tools = new function () {
 	 * selected instead, unless newTab is given.
 	 */
 	this.open = async function ({
-		itemKey, page, pageLabel, annotationKey, windowID, newWindow = false, newTab = false,
+		itemKey, page, annotationKey, windowID, newWindow = false, newTab = false,
 		focus = false, libraryID,
 	}, { deadline }) {
 		libraryID = getLibraryID(libraryID);
 		checkWhere({ windowID, newWindow, newTab });
-		if ([page, pageLabel, annotationKey].filter(x => x !== undefined).length > 1) {
-			throw new Zotero.MCP.ToolError('Give page, pageLabel or annotationKey, not more than one');
+		if (page !== undefined && annotationKey) {
+			throw new Zotero.MCP.ToolError('Give page or annotationKey, not both');
 		}
 		let item = await getItem(libraryID, itemKey);
 		if (item.isRegularItem()) {
@@ -2419,20 +2406,9 @@ Zotero.MCP.Tools = new function () {
 		}
 		else if (page !== undefined) {
 			if (!item.isPDFAttachment()) {
-				throw new Zotero.MCP.ToolError(`${item.key} isn't a PDF. Give pageLabel for an EPUB.`);
+				throw new Zotero.MCP.ToolError(`${item.key} isn't a PDF, so it has no pages`);
 			}
 			location = { pageIndex: page - 1 };
-		}
-		else if (pageLabel !== undefined) {
-			if (item.isPDFAttachment()) {
-				location = { pageLabel };
-			}
-			else if (item.isEPUBAttachment()) {
-				location = { pageNumber: pageLabel };
-			}
-			else {
-				throw new Zotero.MCP.ToolError(`${item.key} has no pages. Give annotationKey to scroll to.`);
-			}
 		}
 		
 		let options = {
@@ -2581,7 +2557,6 @@ Zotero.MCP.Tools = new function () {
 			description.selection = {
 				text: selection.text,
 				page: Number.isInteger(selectionPageIndex) ? selectionPageIndex + 1 : undefined,
-				pageLabel: knownPageLabel(selection.pageLabel),
 			};
 		}
 		return description;
@@ -3314,17 +3289,9 @@ Zotero.MCP.Tools = new function () {
 			comment: annotation.annotationComment || undefined,
 			color: annotation.annotationColor,
 			page: Number.isInteger(pageIndex) ? pageIndex + 1 : undefined,
-			pageLabel: knownPageLabel(annotation.annotationPageLabel),
 			tags: annotation.getTags().map(tag => tag.tag),
 			link: getOpenLink(attachment, { annotation: annotation.key }),
 		};
-	}
-	
-	/**
-	 * A page label, without the reader's "-" for a page whose label it couldn't determine
-	 */
-	function knownPageLabel(label) {
-		return label && label != '-' ? label : undefined;
 	}
 	
 	/**

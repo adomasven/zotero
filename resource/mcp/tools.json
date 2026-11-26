@@ -947,7 +947,6 @@
 								"comment": { "type": "string" },
 								"color": { "type": "string" },
 								"page": { "type": "integer", "description": "PDF page, from 1" },
-								"pageLabel": { "type": "string", "description": "The page number printed on the page, for citing" },
 								"tags": { "type": "array", "items": { "type": "string" } },
 								"link": { "type": "string", "description": "zotero:// link that opens the file at the annotation" },
 								"imagePath": { "type": "string", "description": "For an image or ink annotation Zotero has rendered, a PNG of it. Read it now rather than keep the path: Zotero replaces the file when the annotation changes." }
@@ -1126,7 +1125,6 @@
 										"type": "object",
 										"properties": {
 											"page": { "type": "integer", "description": "PDF page, from 1, for zotero_read_text and links" },
-											"pageLabel": { "type": "string", "description": "The page number printed on the page, for citing, when Zotero has it" },
 											"offset": { "type": "integer", "description": "Character offset in a file without pages, for zotero_read_text" },
 											"text": { "type": "string" },
 											"link": { "type": "string", "description": "zotero:// link that opens the file, at the page for a PDF" }
@@ -1152,7 +1150,7 @@
 		{
 			"name": "zotero_read_text",
 			"title": "Read text from a Zotero file",
-			"description": "Read the text of a PDF, EPUB, web page snapshot or text file in Zotero. PDFs are read by page, with page labels (the page numbers printed on the pages, for citing) and the outline when Zotero has them; other files by character offset. Returns about maxChars characters per call, and nextPage or nextOffset to continue.",
+			"description": "Read the text of a PDF, EPUB, web page snapshot or text file in Zotero. PDFs are read by page, with the outline when Zotero has it; other files by character offset. Returns about maxChars characters per call, and nextPage or nextOffset to continue.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1193,7 +1191,6 @@
 							"type": "object",
 							"properties": {
 								"page": { "type": "integer" },
-								"pageLabel": { "type": "string", "description": "The page number printed on the page" },
 								"text": { "type": "string" }
 							},
 							"required": ["page", "text"]
@@ -1452,8 +1449,7 @@
 								"description": "Text the user has selected",
 								"properties": {
 									"text": { "type": "string" },
-									"page": { "type": "integer" },
-									"pageLabel": { "type": "string" }
+									"page": { "type": "integer" }
 								},
 								"required": ["text"]
 							},
@@ -1469,7 +1465,6 @@
 										"comment": { "type": "string" },
 										"color": { "type": "string" },
 										"page": { "type": "integer" },
-										"pageLabel": { "type": "string" },
 										"tags": { "type": "array", "items": { "type": "string" } },
 										"link": { "type": "string" }
 									},
@@ -1576,8 +1571,7 @@
 				"type": "object",
 				"properties": {
 					"itemKey": { "type": "string", "description": "An attachment, a note, or a regular item to open its PDF, EPUB or snapshot" },
-					"page": { "type": "integer", "minimum": 1, "description": "PDF page to scroll to, from 1, as zotero_read_text and zotero_search_fulltext give. Only one of page, pageLabel and annotationKey." },
-					"pageLabel": { "type": "string", "description": "The page number printed on the page, for a PDF or an EPUB with page numbers" },
+					"page": { "type": "integer", "minimum": 1, "description": "PDF page to scroll to, from 1, as zotero_read_text and zotero_search_fulltext give. Not with annotationKey." },
 					"annotationKey": { "type": "string", "description": "An annotation of the file to scroll to and select" },
 					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
 					"newTab": { "type": "boolean", "default": false, "description": "Open another tab even if it's already open" },
