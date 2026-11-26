@@ -206,7 +206,7 @@ describe("MCP tools", function () {
 			
 			({ items } = await call('zotero_search', { conditions: [{ condition: 'itemType', operator: 'is', value: 'note' }, inNote] }));
 			assert.sameMembers(items.map(item => item.key), notes.map(note => note.key));
-			assert.isTrue(items.every(note => note.parentKey == item.key));
+			assert.isTrue(items.every(note => note.parentItem == item.key));
 			
 			let pdf = await importFileAttachment('test.pdf', { parentID: item.id });
 			let annotation = await createAnnotation('note', pdf, { comment: word });
@@ -214,7 +214,7 @@ describe("MCP tools", function () {
 				{ condition: 'itemType', operator: 'is', value: 'annotation' },
 				{ condition: 'annotationComment', operator: 'contains', value: word },
 			] }));
-			assert.deepEqual(items.map(each => [each.key, each.attachmentKey, each.parentKey]), [[annotation.key, pdf.key, undefined]]);
+			assert.deepEqual(items.map(each => [each.key, each.parentItem]), [[annotation.key, pdf.key]]);
 		});
 		
 		it("should list a collection's items, sorted and in pages", async function () {
@@ -527,7 +527,7 @@ describe("MCP tools", function () {
 			let attachment = await importFileAttachment('test.pdf');
 			let annotation = await createAnnotation('highlight', attachment);
 			let { items } = await call('zotero_update_items', { changes: [{ key: annotation.key, addTags: ['figure'] }] });
-			assert.deepInclude(items[0], { key: annotation.key, attachmentKey: attachment.key });
+			assert.deepInclude(items[0], { key: annotation.key, parentItem: attachment.key });
 			assert.deepEqual(annotation.getTags(), [{ tag: 'figure' }]);
 		});
 		
@@ -538,7 +538,7 @@ describe("MCP tools", function () {
 			
 			let { items } = await call('zotero_update_items', {
 				changes: [
-					{ key: a.key, fields: { title: 'New A', DOI: '10.1/x' }, addToCollections: [collection.key] },
+					{ key: a.key, title: 'New A', DOI: '10.1/x', addToCollections: [collection.key] },
 					{
 						key: b.key,
 						creators: [{ creatorType: 'author', name: 'Org' }, { creatorType: 'editor', firstName: 'Bo', lastName: 'Ng' }],
@@ -572,8 +572,8 @@ describe("MCP tools", function () {
 			let book = await createDataObject('item', { itemType: 'book', title: 'B' });
 			let error = await callForError('zotero_update_items', {
 				changes: [
-					{ key: a.key, fields: { title: 'Changed' }, addTags: ['t'] },
-					{ key: book.key, fields: { issue: '3' } },
+					{ key: a.key, title: 'Changed', addTags: ['t'] },
+					{ key: book.key, issue: '3' },
 				],
 			});
 			assert.match(error, new RegExp(`${book.key}: issue isn't a field of item type book`));
@@ -582,7 +582,7 @@ describe("MCP tools", function () {
 			assert.isFalse(a.hasTag('t'));
 			
 			error = await callForError('zotero_update_items', {
-				changes: [{ key: a.key, fields: { title: 'Changed' } }, { key: 'AAAAAAAA' }],
+				changes: [{ key: a.key, title: 'Changed' }, { key: 'AAAAAAAA' }],
 			});
 			assert.match(error, /No item AAAAAAAA/);
 			assert.equal(a.getField('title'), 'A');
@@ -596,7 +596,7 @@ describe("MCP tools", function () {
 		it("should set a base field by the item type's own name for it", async function () {
 			let section = await createDataObject('item', { itemType: 'bookSection' });
 			await call('zotero_update_items', {
-				changes: [{ key: section.key, fields: { publicationTitle: 'The Book' } }],
+				changes: [{ key: section.key, publicationTitle: 'The Book' }],
 			});
 			assert.equal(section.getField('bookTitle'), 'The Book');
 		});
@@ -684,8 +684,8 @@ describe("MCP tools", function () {
 			
 			let { collections } = await call('zotero_list_collections', { collectionKey: parent.key });
 			assert.sameDeepMembers(collections, [
-				{ key: child.key, name: child.name, parentKey: parent.key, itemCount: 0, link: `zotero://select/library/collections/${child.key}` },
-				{ key: grandchild.key, name: grandchild.name, parentKey: child.key, itemCount: 1, link: `zotero://select/library/collections/${grandchild.key}` },
+				{ key: child.key, name: child.name, parentCollection: parent.key, itemCount: 0, link: `zotero://select/library/collections/${child.key}` },
+				{ key: grandchild.key, name: grandchild.name, parentCollection: child.key, itemCount: 1, link: `zotero://select/library/collections/${grandchild.key}` },
 			]);
 			
 			// Whatever the user's setting for showing items from subcollections
@@ -713,7 +713,7 @@ describe("MCP tools", function () {
 		
 		it("should create, rename and move collections", async function () {
 			let parent = await createDataObject('collection');
-			let created = await call('zotero_add_collection', { name: 'Reading', parentKey: parent.key });
+			let created = await call('zotero_add_collection', { name: 'Reading', parentCollection: parent.key });
 			let collection = Zotero.Collections.getByLibraryAndKey(Zotero.Libraries.userLibraryID, created.key);
 			assert.equal(collection.name, 'Reading');
 			assert.equal(collection.parentKey, parent.key);
@@ -723,7 +723,7 @@ describe("MCP tools", function () {
 			assert.equal(collection.name, 'Read');
 			assert.equal(collection.parentKey, parent.key);
 			
-			await call('zotero_update_collection', { collectionKey: created.key, parentKey: null });
+			await call('zotero_update_collection', { collectionKey: created.key, parentCollection: null });
 			assert.isFalse(collection.parentKey);
 			assert.equal(collection.name, 'Read');
 		});
@@ -731,7 +731,7 @@ describe("MCP tools", function () {
 		it("shouldn't move a collection into its own subcollection", async function () {
 			let parent = await createDataObject('collection');
 			let child = await createDataObject('collection', { parentID: parent.id });
-			let error = await callForError('zotero_update_collection', { collectionKey: parent.key, parentKey: child.key });
+			let error = await callForError('zotero_update_collection', { collectionKey: parent.key, parentCollection: child.key });
 			assert.match(error, /can't be moved into itself or a subcollection/);
 			assert.isFalse(parent.parentKey);
 		});
@@ -922,13 +922,13 @@ describe("MCP tools", function () {
 			assert.deepEqual(result.annotations.map(annotation => annotation.key), [first.key, middle.key, last.key]);
 			assert.deepEqual(result.annotations[2], {
 				key: last.key,
-				attachmentKey: attachment.key,
-				type: 'highlight',
-				text: last.annotationText,
-				comment: last.annotationComment,
-				color: '#ffd400',
+				parentItem: attachment.key,
+				annotationType: 'highlight',
+				annotationText: last.annotationText,
+				annotationComment: last.annotationComment,
+				annotationColor: '#ffd400',
 				page: 5,
-				tags: ['important'],
+				tags: [{ tag: 'important' }],
 				link: `zotero://open/library/items/${attachment.key}?annotation=${last.key}`,
 			});
 			
@@ -996,8 +996,8 @@ describe("MCP tools", function () {
 			let item = await createArticle();
 			let markdown = '# Summary\n\nCosts $5 and $10, energy $E = mc^2$ for $m$, ~~not~~ see https://example.com\n\n'
 				+ '$$\n\\frac{a}{b}\n$$\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n<b>raw</b>';
-			let result = await call('zotero_add_note', { markdown, parentKey: item.key });
-			assert.equal(result.parentKey, item.key);
+			let result = await call('zotero_add_note', { markdown, parentItem: item.key });
+			assert.equal(result.parentItem, item.key);
 			assert.equal(result.title, 'Summary');
 			let note = Zotero.Items.getByLibraryAndKey(item.libraryID, result.key);
 			assert.equal(note.parentID, item.id);
@@ -1034,7 +1034,7 @@ describe("MCP tools", function () {
 			assert.isTrue(note.isTopLevelItem());
 			assert.isTrue(collection.hasItem(note.id));
 			
-			let error = await callForError('zotero_add_note', { markdown: 'x', parentKey: key });
+			let error = await callForError('zotero_add_note', { markdown: 'x', parentItem: key });
 			assert.match(error, /is a note/);
 		});
 	});
@@ -1114,7 +1114,7 @@ describe("MCP tools", function () {
 			let { total, files: results } = await call('zotero_search_fulltext', { query: `${word} "soil organic"` });
 			assert.equal(total, 1);
 			assert.equal(results[0].key, attachment.key);
-			assert.equal(results[0].parentKey, item.key);
+			assert.equal(results[0].parentItem, item.key);
 			assert.equal(results[0].title, item.getField('title'));
 			assert.equal(results[0].matchCount, 4);
 			assert.deepEqual(results[0].passages, [
@@ -1163,7 +1163,7 @@ describe("MCP tools", function () {
 			
 			assert.equal((await call('zotero_search_fulltext', { query: word })).total, 2);
 			let { files, missing } = await call('zotero_search_fulltext', { query: word, itemKeys: [items[1].key, 'AAAAAAAA'] });
-			assert.deepEqual(files.map(file => file.parentKey), [items[1].key]);
+			assert.deepEqual(files.map(file => file.parentItem), [items[1].key]);
 			assert.deepEqual(missing, ['AAAAAAAA']);
 		});
 	});
@@ -1398,7 +1398,7 @@ describe("MCP tools", function () {
 			httpd.registerFile(`/${prefix}/paper.pdf`, file);
 			try {
 				let result = await call('zotero_add_attachment', {
-					parentKey: parent.key,
+					parentItem: parent.key,
 					url: `${baseURL}${prefix}/paper.pdf`,
 					title: 'Preprint',
 				});
@@ -1426,7 +1426,7 @@ describe("MCP tools", function () {
 			let result;
 			try {
 				result = await call('zotero_add_attachment', {
-					parentKey: parent.key,
+					parentItem: parent.key,
 					url: 'https://example.com/paper.pdf',
 					title: 'Preprint',
 				});
@@ -1450,15 +1450,15 @@ describe("MCP tools", function () {
 			sinon.stub(Permissions, '_ask').resolves('allow');
 			let file = getTestDataDirectory();
 			file.append('test.pdf');
-			let result = await call('zotero_add_attachment', { parentKey: parent.key, path: file.path });
+			let result = await call('zotero_add_attachment', { parentItem: parent.key, path: file.path });
 			let attachment = Zotero.Items.getByLibraryAndKey(parent.libraryID, result.key);
 			assert.equal(attachment.parentID, parent.id);
 			assert.isTrue(await attachment.fileExists());
 			
-			let error = await callForError('zotero_add_attachment', { parentKey: parent.key, path: 'test.pdf' });
+			let error = await callForError('zotero_add_attachment', { parentItem: parent.key, path: 'test.pdf' });
 			assert.match(error, /isn't an absolute path/);
 			let missing = PathUtils.join(PathUtils.parent(file.path), 'missing.pdf');
-			error = await callForError('zotero_add_attachment', { parentKey: parent.key, path: missing });
+			error = await callForError('zotero_add_attachment', { parentItem: parent.key, path: missing });
 			assert.match(error, /There's no file at/);
 		});
 		
@@ -1475,7 +1475,7 @@ describe("MCP tools", function () {
 			file.append('test.pdf');
 			let result = await call('zotero_add_attachment', { path: file.path, collectionKey: collection.key });
 			assert.isTrue(result.identified);
-			assert.equal(result.parentKey, recognized.key);
+			assert.equal(result.parentItem, recognized.key);
 			assert.equal(result.parent.title, 'Recognized paper');
 			let attachment = Zotero.Items.getByLibraryAndKey(recognized.libraryID, result.key);
 			assert.equal(attachment.parentID, recognized.id);
@@ -1494,7 +1494,7 @@ describe("MCP tools", function () {
 			let result = await call('zotero_add_attachment', { path: file.path, linkFile: true });
 			assert.isFalse(result.identified);
 			assert.equal(result.linkMode, 'linked_file');
-			assert.notProperty(result, 'parentKey');
+			assert.notProperty(result, 'parentItem');
 			assert.match(result.notice, /couldn't identify/);
 			let attachment = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.key);
 			assert.isTrue(attachment.isTopLevelItem());
@@ -1502,7 +1502,7 @@ describe("MCP tools", function () {
 			
 			assert.match(
 				await callForError('zotero_add_attachment', { url: 'https://example.com/a.pdf' }),
-				/Give parentKey/
+				/Give parentItem/
 			);
 		});
 	});
@@ -1625,7 +1625,7 @@ describe("MCP tools", function () {
 			assert.deepEqual(rest, {
 				libraryID: attachment.libraryID,
 				key: attachment.key,
-				parentKey: item.key,
+				parentItem: item.key,
 				title: item.getField('title'),
 				contentType: 'application/pdf',
 				path: attachment.getFilePath(),

@@ -169,8 +169,7 @@
 							"properties": {
 								"key": { "type": "string" },
 								"itemType": { "type": "string" },
-								"parentKey": { "type": "string", "description": "A note's or attachment's item" },
-								"attachmentKey": { "type": "string", "description": "An annotation's file" },
+								"parentItem": { "type": "string", "description": "A note's or attachment's item, or an annotation's file" },
 								"title": { "type": "string" },
 								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
@@ -421,11 +420,6 @@
 							"type": "object",
 							"properties": {
 								"key": { "type": "string", "description": "The item's key" },
-								"fields": {
-									"type": "object",
-									"description": "Fields to set, by Zotero field name (zotero_list_item_types lists each item type's), e.g. {\"title\": \"…\", \"date\": \"2020-05\"}. An empty string clears a field.",
-									"additionalProperties": { "type": "string" }
-								},
 								"creators": {
 									"type": "array",
 									"description": "Replaces all of the item's creators, in order",
@@ -451,7 +445,7 @@
 								"removeFromCollections": { "type": "array", "items": { "type": "string" }, "description": "Collection keys. The item stays in the library." }
 							},
 							"required": ["key"],
-							"additionalProperties": false
+							"additionalProperties": { "type": "string", "description": "Fields to set, by Zotero field name, as in item JSON (zotero_list_item_types lists each item type's), e.g. {\"key\": \"…\", \"title\": \"…\", \"date\": \"2020-05\"}. An empty string clears a field." }
 						},
 						"minItems": 1,
 						"maxItems": 50
@@ -473,8 +467,7 @@
 							"properties": {
 								"key": { "type": "string" },
 								"itemType": { "type": "string" },
-								"parentKey": { "type": "string" },
-								"attachmentKey": { "type": "string", "description": "For an annotation, its file" },
+								"parentItem": { "type": "string", "description": "A note's or attachment's item, or an annotation's file" },
 								"title": { "type": "string" },
 								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
@@ -646,7 +639,7 @@
 							"properties": {
 								"key": { "type": "string" },
 								"name": { "type": "string" },
-								"parentKey": { "type": "string" },
+								"parentCollection": { "type": "string" },
 								"itemCount": { "type": "integer", "description": "Top-level items in the collection, and in its subcollections with includeSubcollectionItems" },
 								"link": { "type": "string", "description": "zotero:// link that shows the collection in Zotero" }
 							},
@@ -669,7 +662,7 @@
 				"type": "object",
 				"properties": {
 					"name": { "type": "string", "minLength": 1 },
-					"parentKey": { "type": "string", "description": "The collection to create it in. Defaults to the top level." },
+					"parentCollection": { "type": "string", "description": "The collection to create it in. Defaults to the top level." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
 				"required": ["name"],
@@ -681,7 +674,7 @@
 					"libraryID": { "type": "integer" },
 					"key": { "type": "string" },
 					"name": { "type": "string" },
-					"parentKey": { "type": "string" },
+					"parentCollection": { "type": "string" },
 					"link": { "type": "string", "description": "zotero:// link that shows the collection in Zotero" }
 				},
 				"required": ["libraryID", "key", "name", "link"]
@@ -705,7 +698,7 @@
 				"properties": {
 					"collectionKey": { "type": "string" },
 					"name": { "type": "string", "minLength": 1, "description": "A new name" },
-					"parentKey": { "type": ["string", "null"], "description": "The collection to move it into, or null for the top level" },
+					"parentCollection": { "type": ["string", "null"], "description": "The collection to move it into, or null for the top level" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
 				"required": ["collectionKey"],
@@ -717,7 +710,7 @@
 					"libraryID": { "type": "integer" },
 					"key": { "type": "string" },
 					"name": { "type": "string" },
-					"parentKey": { "type": "string" },
+					"parentCollection": { "type": "string" },
 					"link": { "type": "string", "description": "zotero:// link that shows the collection in Zotero" }
 				},
 				"required": ["libraryID", "key", "name", "link"]
@@ -1139,9 +1132,9 @@
 							"type": "object",
 							"properties": {
 								"key": { "type": "string" },
-								"parentKey": { "type": "string" },
+								"parentItem": { "type": "string" },
 								"title": { "type": "string" },
-								"tags": { "type": "array", "items": { "type": "string" } },
+								"tags": { "type": "array", "items": { "type": "object", "properties": { "tag": { "type": "string" }, "type": { "type": "integer", "description": "1 for a tag Zotero added automatically" } }, "required": ["tag"] } },
 								"dateModified": { "type": "string" },
 								"content": { "type": "string" },
 								"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" },
@@ -1156,17 +1149,17 @@
 							"type": "object",
 							"properties": {
 								"key": { "type": "string" },
-								"attachmentKey": { "type": "string" },
-								"type": { "enum": ["highlight", "underline", "note", "text", "image", "ink"] },
-								"text": { "type": "string", "description": "The highlighted or underlined text" },
-								"comment": { "type": "string" },
-								"color": { "type": "string" },
+								"parentItem": { "type": "string", "description": "The file it's in" },
+								"annotationType": { "enum": ["highlight", "underline", "note", "text", "image", "ink"] },
+								"annotationText": { "type": "string", "description": "The highlighted or underlined text" },
+								"annotationComment": { "type": "string" },
+								"annotationColor": { "type": "string" },
 								"page": { "type": "integer", "description": "PDF page, from 1" },
-								"tags": { "type": "array", "items": { "type": "string" } },
+								"tags": { "type": "array", "items": { "type": "object", "properties": { "tag": { "type": "string" }, "type": { "type": "integer", "description": "1 for a tag Zotero added automatically" } }, "required": ["tag"] } },
 								"link": { "type": "string", "description": "zotero:// link that opens the file at the annotation" },
 								"imagePath": { "type": "string", "description": "For an image or ink annotation Zotero has rendered, a PNG of it. Read it now rather than keep the path: Zotero replaces the file when the annotation changes." }
 							},
-							"required": ["key", "attachmentKey", "type", "tags", "link"]
+							"required": ["key", "parentItem", "annotationType", "tags", "link"]
 						}
 					},
 					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" }
@@ -1225,7 +1218,7 @@
 				"type": "object",
 				"properties": {
 					"markdown": { "type": "string", "minLength": 1, "description": "The note. Its first line becomes its title, so start with a heading." },
-					"parentKey": { "type": "string", "description": "The regular item (e.g. a journal article) to add the note under" },
+					"parentItem": { "type": "string", "description": "The regular item (e.g. a journal article) to add the note under" },
 					"collectionKey": { "type": "string", "description": "For a standalone note, a collection to put it in" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
@@ -1237,7 +1230,7 @@
 				"properties": {
 					"libraryID": { "type": "integer" },
 					"key": { "type": "string" },
-					"parentKey": { "type": "string" },
+					"parentItem": { "type": "string" },
 					"title": { "type": "string" },
 					"dateModified": { "type": "string", "description": "For zotero_edit_note" },
 					"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
@@ -1275,7 +1268,7 @@
 				"properties": {
 					"libraryID": { "type": "integer" },
 					"key": { "type": "string" },
-					"parentKey": { "type": "string" },
+					"parentItem": { "type": "string" },
 					"title": { "type": "string" },
 					"dateModified": { "type": "string", "description": "For a further edit" },
 					"link": { "type": "string", "description": "zotero:// link that shows the note in Zotero" }
@@ -1328,7 +1321,7 @@
 							"type": "object",
 							"properties": {
 								"key": { "type": "string", "description": "The attachment's key" },
-								"parentKey": { "type": "string", "description": "The key of the item it belongs to" },
+								"parentItem": { "type": "string", "description": "The key of the item it belongs to" },
 								"title": { "type": "string", "description": "The parent item's title" },
 								"contentType": { "type": "string" },
 								"matchCount": { "type": "integer" },
@@ -1395,7 +1388,7 @@
 				"properties": {
 					"libraryID": { "type": "integer" },
 					"key": { "type": "string", "description": "The attachment's key" },
-					"parentKey": { "type": "string" },
+					"parentItem": { "type": "string" },
 					"title": { "type": "string", "description": "The parent item's title" },
 					"contentType": { "type": "string" },
 					"link": { "type": "string", "description": "zotero:// link that opens the file" },
@@ -1491,11 +1484,11 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"parentKey": { "type": "string", "description": "The regular item (e.g. a journal article) to attach the file to. Omit to add a file from path as a standalone attachment that Zotero identifies." },
-					"url": { "type": "string", "description": "http or https, with parentKey: a PDF or EPUB, or a page that links to one. Downloaded from the user's computer, so their institution's access applies. Not with path." },
+					"parentItem": { "type": "string", "description": "The regular item (e.g. a journal article) to attach the file to. Omit to add a file from path as a standalone attachment that Zotero identifies." },
+					"url": { "type": "string", "description": "http or https, with parentItem: a PDF or EPUB, or a page that links to one. Downloaded from the user's computer, so their institution's access applies. Not with path." },
 					"path": { "type": "string", "description": "The absolute path of a file on this computer" },
 					"linkFile": { "type": "boolean", "default": false, "description": "Link to the file at path where it is, instead of copying it into Zotero" },
-					"collectionKey": { "type": "string", "description": "Without parentKey, a collection to add the file and the item Zotero creates for it to" },
+					"collectionKey": { "type": "string", "description": "Without parentItem, a collection to add the file and the item Zotero creates for it to" },
 					"title": { "type": "string", "description": "The attachment's title. By default Zotero names it, e.g. \"Full Text PDF\"." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
@@ -1505,9 +1498,9 @@
 				"type": "object",
 				"properties": {
 					"libraryID": { "type": "integer" },
-					"parentKey": { "type": "string" },
+					"parentItem": { "type": "string" },
 					"status": { "enum": ["attached", "pending"], "description": "pending: Zotero is still downloading the file" },
-					"identified": { "type": "boolean", "description": "Without parentKey, whether Zotero identified the file and created its parent item. Absent while Zotero is still identifying it." },
+					"identified": { "type": "boolean", "description": "Without parentItem, whether Zotero identified the file and created its parent item. Absent while Zotero is still identifying it." },
 					"parent": {
 						"type": "object",
 						"description": "The item Zotero created for the file",
@@ -1663,7 +1656,7 @@
 							"properties": {
 								"key": { "type": "string" },
 								"itemType": { "type": "string" },
-								"parentKey": { "type": "string" },
+								"parentItem": { "type": "string" },
 								"title": { "type": "string" },
 								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
@@ -1687,7 +1680,7 @@
 						"properties": {
 							"libraryID": { "type": "integer" },
 							"key": { "type": "string", "description": "The attachment's key, for zotero_read_text" },
-							"parentKey": { "type": "string" },
+							"parentItem": { "type": "string" },
 							"title": { "type": "string", "description": "The parent item's title" },
 							"contentType": { "type": "string" },
 							"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
@@ -1709,16 +1702,16 @@
 									"type": "object",
 									"properties": {
 										"key": { "type": "string" },
-										"attachmentKey": { "type": "string" },
-										"type": { "enum": ["highlight", "underline", "note", "text", "image", "ink"] },
-										"text": { "type": "string" },
-										"comment": { "type": "string" },
-										"color": { "type": "string" },
+										"parentItem": { "type": "string", "description": "The file it's in" },
+										"annotationType": { "enum": ["highlight", "underline", "note", "text", "image", "ink"] },
+										"annotationText": { "type": "string" },
+										"annotationComment": { "type": "string" },
+										"annotationColor": { "type": "string" },
 										"page": { "type": "integer" },
-										"tags": { "type": "array", "items": { "type": "string" } },
+										"tags": { "type": "array", "items": { "type": "object", "properties": { "tag": { "type": "string" }, "type": { "type": "integer", "description": "1 for a tag Zotero added automatically" } }, "required": ["tag"] } },
 										"link": { "type": "string" }
 									},
-									"required": ["key", "attachmentKey", "type", "tags", "link"]
+									"required": ["key", "parentItem", "annotationType", "tags", "link"]
 								}
 							}
 						},
@@ -1730,7 +1723,7 @@
 						"properties": {
 							"libraryID": { "type": "integer" },
 							"key": { "type": "string" },
-							"parentKey": { "type": "string" },
+							"parentItem": { "type": "string" },
 							"title": { "type": "string" },
 							"link": { "type": "string" }
 						},

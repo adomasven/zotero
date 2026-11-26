@@ -388,6 +388,11 @@ Zotero.MCP.Tools = new function () {
 		});
 	};
 	
+	// What a zotero_update_items change has besides fields
+	const CHANGE_PROPERTIES = new Set([
+		'key', 'creators', 'addTags', 'removeTags', 'addToCollections', 'removeFromCollections',
+	]);
+	
 	/**
 	 * Change items' fields, creators, tags and collections, all or none: everything is checked
 	 * before anything changes
@@ -396,11 +401,13 @@ Zotero.MCP.Tools = new function () {
 		libraryID = getLibraryID(libraryID);
 		let checked = [];
 		for (let change of changes) {
+			// Fields are the change's other properties, as in item JSON
+			let fields = Object.entries(change).filter(([name]) => !CHANGE_PROPERTIES.has(name));
 			let item = await getItem(libraryID, change.key);
 			if (!item.isEditable()) {
 				throw new Zotero.MCP.ToolError(`${item.key} can't be edited`);
 			}
-			for (let field of Object.keys(change.fields ?? {})) {
+			for (let [field] of fields) {
 				checkField(item, field);
 			}
 			if (change.creators) {
@@ -418,13 +425,13 @@ Zotero.MCP.Tools = new function () {
 						+ `${item.parentKey}`
 				);
 			}
-			checked.push({ item, change, addTo, removeFrom });
+			checked.push({ item, change, fields, addTo, removeFrom });
 		}
 		
 		let items = [...new Set(checked.map(({ item }) => item))];
 		await edit(clientID, async () => {
-			for (let { item, change, addTo, removeFrom } of checked) {
-				for (let [field, value] of Object.entries(change.fields ?? {})) {
+			for (let { item, change, fields, addTo, removeFrom } of checked) {
+				for (let [field, value] of fields) {
 					item.setField(field, value);
 				}
 				if (change.creators) {
@@ -730,7 +737,7 @@ Zotero.MCP.Tools = new function () {
 			collections: collections.map(collection => ({
 				key: collection.key,
 				name: collection.name,
-				parentKey: collection.parentKey || undefined,
+				parentCollection: collection.parentKey || undefined,
 				itemCount: includeSubcollectionItems
 					? new Set([collection, ...Zotero.Collections.getByParent(collection.id, true)]
 						.flatMap(c => c.getChildItems(true))).size
@@ -743,7 +750,7 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * Create a collection
 	 */
-	this.addCollection = async function ({ name, parentKey, libraryID }, { clientID }) {
+	this.addCollection = async function ({ name, parentCollection: parentKey, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
 		return saveCollection(clientID, new Zotero.Collection({ libraryID }), { name, parentKey });
 	};
@@ -751,10 +758,10 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * Rename a collection, or move it
 	 */
-	this.updateCollection = async function ({ collectionKey, name, parentKey, libraryID }, { clientID }) {
+	this.updateCollection = async function ({ collectionKey, name, parentCollection: parentKey, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
 		if (name === undefined && parentKey === undefined) {
-			throw new Zotero.MCP.ToolError('Give name, or parentKey to move it (null for the top level)');
+			throw new Zotero.MCP.ToolError('Give name, or parentCollection to move it (null for the top level)');
 		}
 		return saveCollection(clientID, getCollection(libraryID, collectionKey), { name, parentKey });
 	};
@@ -786,7 +793,7 @@ Zotero.MCP.Tools = new function () {
 				libraryID,
 				key: collection.key,
 				name: collection.name,
-				parentKey: collection.parentKey || undefined,
+				parentCollection: collection.parentKey || undefined,
 				link: getSelectLink(collection),
 			};
 		}, [collection]);
@@ -1170,9 +1177,9 @@ Zotero.MCP.Tools = new function () {
 			}
 			noteResults.push({
 				key: note.key,
-				parentKey: note.parentKey || undefined,
+				parentItem: note.parentKey || undefined,
 				title: note.getNoteTitle(),
-				tags: note.getTags().map(tag => tag.tag),
+				tags: note.getTags(),
 				dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
 				content: format == 'html'
 					? note.getNote()
@@ -1257,14 +1264,14 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * A note from Markdown, under an item, in a collection, or standalone
 	 */
-	this.addNote = async function ({ markdown, parentKey, collectionKey, libraryID }, { clientID }) {
+	this.addNote = async function ({ markdown, parentItem: parentKey, collectionKey, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
 		if (!markdown.trim()) {
 			throw new Zotero.MCP.ToolError('The note must not be empty');
 		}
 		if (parentKey && collectionKey) {
 			throw new Zotero.MCP.ToolError(
-				'Give parentKey or collectionKey, not both: a note under an item shows wherever the item is'
+				'Give parentItem or collectionKey, not both: a note under an item shows wherever the item is'
 			);
 		}
 		let note = new Zotero.Item('note');
@@ -1288,7 +1295,7 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			key: note.key,
-			parentKey: note.parentKey || undefined,
+			parentItem: note.parentKey || undefined,
 			title: note.getNoteTitle(),
 			dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
 			link: getSelectLink(note),
@@ -1343,7 +1350,7 @@ Zotero.MCP.Tools = new function () {
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			key: note.key,
-			parentKey: note.parentKey || undefined,
+			parentItem: note.parentKey || undefined,
 			title: note.getNoteTitle(),
 			dateModified: Zotero.Date.sqlToISO8601(note.dateModified),
 			link: getSelectLink(note),
@@ -1544,7 +1551,7 @@ Zotero.MCP.Tools = new function () {
 			let text = await getIndexedText(attachment, deadline);
 			let summary = {
 				key: attachment.key,
-				parentKey: attachment.parentKey || undefined,
+				parentItem: attachment.parentKey || undefined,
 				title: getTitle(attachment),
 				contentType: attachment.attachmentContentType,
 			};
@@ -1613,7 +1620,7 @@ Zotero.MCP.Tools = new function () {
 		let result = {
 			libraryID,
 			key: attachment.key,
-			parentKey: attachment.parentKey || undefined,
+			parentItem: attachment.parentKey || undefined,
 			title: getTitle(attachment),
 			contentType: attachment.attachmentContentType,
 			link: getOpenLink(attachment),
@@ -1809,7 +1816,7 @@ Zotero.MCP.Tools = new function () {
 	 * as a standalone attachment, which Zotero identifies as with Retrieve Metadata
 	 */
 	this.addAttachment = async function ({
-		parentKey, url, path, linkFile = false, title, collectionKey, libraryID,
+		parentItem: parentKey, url, path, linkFile = false, title, collectionKey, libraryID,
 	}, { clientID, deadline }) {
 		libraryID = getLibraryID(libraryID);
 		let library = Zotero.Libraries.get(libraryID);
@@ -1827,12 +1834,12 @@ Zotero.MCP.Tools = new function () {
 		}
 		if (!parentKey) {
 			if (url) {
-				throw new Zotero.MCP.ToolError('Give parentKey to attach a file from a URL');
+				throw new Zotero.MCP.ToolError('Give parentItem to attach a file from a URL');
 			}
 			return addStandaloneFile({ path, linkFile, title, collectionKey, libraryID }, { clientID, deadline });
 		}
 		if (collectionKey) {
-			throw new Zotero.MCP.ToolError("Give collectionKey only without parentKey. A file is in its parent's collections.");
+			throw new Zotero.MCP.ToolError("Give collectionKey only without parentItem. A file is in its parent's collections.");
 		}
 		let parent = await getItem(libraryID, parentKey);
 		if (!parent.isRegularItem()) {
@@ -1870,7 +1877,7 @@ Zotero.MCP.Tools = new function () {
 			if (attachment === TIMED_OUT) {
 				return Zotero.MCP.jsonResult({
 					libraryID,
-					parentKey: parent.key,
+					parentItem: parent.key,
 					status: 'pending',
 					notice: 'Zotero is still downloading the file. Call zotero_get_items on the '
 						+ 'parent item later to see whether it was attached.',
@@ -1912,7 +1919,7 @@ Zotero.MCP.Tools = new function () {
 		}
 		return Zotero.MCP.jsonResult({
 			libraryID,
-			parentKey: parent.key,
+			parentItem: parent.key,
 			status: 'attached',
 			...await describeAttachment(attachment),
 			link: getOpenLink(attachment),
@@ -1972,7 +1979,7 @@ Zotero.MCP.Tools = new function () {
 		else if (parent) {
 			result.identified = true;
 			result.parent = await describeItem(parent);
-			result.parentKey = parent.key;
+			result.parentItem = parent.key;
 		}
 		else {
 			result.identified = false;
@@ -2379,7 +2386,7 @@ Zotero.MCP.Tools = new function () {
 				result.note = {
 					libraryID: note.libraryID,
 					key: note.key,
-					parentKey: note.parentKey || undefined,
+					parentItem: note.parentKey || undefined,
 					title: note.getNoteTitle(),
 					link: getSelectLink(note),
 				};
@@ -2631,7 +2638,7 @@ Zotero.MCP.Tools = new function () {
 		let description = {
 			libraryID: attachment.libraryID,
 			key: attachment.key,
-			parentKey: attachment.parentKey || undefined,
+			parentItem: attachment.parentKey || undefined,
 			title: getTitle(attachment),
 			contentType: attachment.attachmentContentType,
 			path: attachment.getFilePath() || undefined,
@@ -3325,11 +3332,10 @@ Zotero.MCP.Tools = new function () {
 		let summary = {
 			key: item.key,
 			itemType: item.itemType,
-			parentKey: item.parentKey || undefined,
+			parentItem: item.parentKey || undefined,
 			link: getSelectLink(item),
 		};
 		if (item.isAnnotation()) {
-			summary = { ...summary, parentKey: undefined, attachmentKey: item.parentKey };
 			summary.title = Zotero.Utilities.ellipsize(item.annotationText || item.annotationComment || '', 200);
 			return summary;
 		}
@@ -3374,13 +3380,13 @@ Zotero.MCP.Tools = new function () {
 			: undefined;
 		return {
 			key: annotation.key,
-			attachmentKey: attachment.key,
-			type: annotation.annotationType,
-			text: annotation.annotationText || undefined,
-			comment: annotation.annotationComment || undefined,
-			color: annotation.annotationColor,
+			parentItem: attachment.key,
+			annotationType: annotation.annotationType,
+			annotationText: annotation.annotationText || undefined,
+			annotationComment: annotation.annotationComment || undefined,
+			annotationColor: annotation.annotationColor,
 			page: Number.isInteger(pageIndex) ? pageIndex + 1 : undefined,
-			tags: annotation.getTags().map(tag => tag.tag),
+			tags: annotation.getTags(),
 			link: getOpenLink(attachment, { annotation: annotation.key }),
 		};
 	}
