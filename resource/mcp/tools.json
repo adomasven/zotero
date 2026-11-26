@@ -217,7 +217,7 @@
 											"title": { "type": "string" },
 											"contentType": { "type": "string" },
 											"linkMode": { "type": "string" },
-																						"path": { "type": "string", "description": "The file, to open yourself, e.g. to see a figure. Absent if it isn't on this computer." },
+											"path": { "type": "string", "description": "The file, to open yourself, e.g. to see a figure. Absent if it isn't on this computer." },
 											"annotationCount": { "type": "integer", "description": "Absent when 0" },
 											"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
 										},
@@ -366,7 +366,7 @@
 											"title": { "type": "string" },
 											"contentType": { "type": "string" },
 											"linkMode": { "type": "string" },
-																						"path": { "type": "string", "description": "The file, to open yourself, e.g. to see a figure. Absent if it isn't on this computer." },
+											"path": { "type": "string", "description": "The file, to open yourself, e.g. to see a figure. Absent if it isn't on this computer." },
 											"annotationCount": { "type": "integer", "description": "Absent when 0" },
 											"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
 										},
@@ -473,7 +473,7 @@
 		{
 			"name": "zotero_change_item_types",
 			"title": "Change Zotero item types",
-			"description": "Change items' types, e.g. from journalArticle to bookSection. Fields the new type also has keep their values. A field with a counterpart in the new type moves to it (e.g. publicationTitle becomes bookTitle; zotero_list_item_types lists each field's baseField). Fields the new type doesn't have are removed, and the result gives their values, so you can tell the user or put them elsewhere. Use zotero_update_items afterwards to fill the new type's fields. Notes, attachments and annotations can't change type. All or nothing: one invalid change fails the call.",
+			"description": "Change items' types, e.g. from journalArticle to bookSection. Fields the new type also has keep their values. A field with a counterpart in the new type moves to it (e.g. publicationTitle becomes bookTitle; zotero_list_item_types gives each type's baseFields). Fields the new type doesn't have are removed, and the result gives their values, so you can tell the user or put them elsewhere. Use zotero_update_items afterwards to fill the new type's fields. Notes, attachments and annotations can't change type. All or nothing: one invalid change fails the call.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1416,7 +1416,7 @@
 										"title": { "type": "string" },
 										"contentType": { "type": "string" },
 										"linkMode": { "type": "string" },
-																				"path": { "type": "string", "description": "The file, to open yourself, e.g. to see a figure. Absent if it isn't on this computer." },
+										"path": { "type": "string", "description": "The file, to open yourself, e.g. to see a figure. Absent if it isn't on this computer." },
 										"annotationCount": { "type": "integer", "description": "Absent when 0" },
 										"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
 									},
@@ -1494,7 +1494,7 @@
 							"title": { "type": "string" },
 							"contentType": { "type": "string" },
 							"linkMode": { "type": "string" },
-														"path": { "type": "string", "description": "The file, to open yourself, e.g. to see a figure. Absent if it isn't on this computer." },
+							"path": { "type": "string", "description": "The file, to open yourself, e.g. to see a figure. Absent if it isn't on this computer." },
 							"annotationCount": { "type": "integer", "description": "Absent when 0" },
 							"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
 						},
