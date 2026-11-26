@@ -122,6 +122,17 @@
 						},
 						"required": ["condition", "operator"],
 						"additionalProperties": false
+					},
+					"group": {
+						"type": "object",
+						"description": "A group, which matches if all or any of its conditions do",
+						"properties": {
+							"joinMode": { "enum": ["all", "any"] },
+							"level": { "enum": ["attachment", "note", "annotation"], "description": "Match all its conditions on the same child of the item" },
+							"conditions": { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] }, "minItems": 1 }
+						},
+						"required": ["joinMode", "conditions"],
+						"additionalProperties": false
 					}
 				},
 				"properties": {
@@ -131,16 +142,7 @@
 						"items": {
 							"anyOf": [
 								{ "$ref": "#/$defs/condition" },
-								{
-									"type": "object",
-									"description": "A group, which matches if all or any of its conditions do",
-									"properties": {
-										"joinMode": { "enum": ["all", "any"] },
-										"conditions": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "minItems": 1 }
-									},
-									"required": ["joinMode", "conditions"],
-									"additionalProperties": false
-								}
+								{ "$ref": "#/$defs/group" }
 							]
 						}
 					},
@@ -791,6 +793,27 @@
 			},
 			"outputSchema": {
 				"type": "object",
+				"$defs": {
+					"condition": {
+						"type": "object",
+						"properties": {
+							"condition": { "type": "string" },
+							"operator": { "type": "string" },
+							"value": { "type": "string" },
+							"level": { "enum": ["attachment", "note", "annotation"] }
+						},
+						"required": ["condition", "operator"]
+					},
+					"group": {
+						"type": "object",
+						"properties": {
+							"joinMode": { "enum": ["all", "any"] },
+							"level": { "enum": ["attachment", "note", "annotation"] },
+							"conditions": { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] } }
+						},
+						"required": ["joinMode", "conditions"]
+					}
+				},
 				"properties": {
 					"libraryID": { "type": "integer" },
 					"savedSearches": {
@@ -800,18 +823,7 @@
 							"properties": {
 								"key": { "type": "string" },
 								"name": { "type": "string" },
-								"conditions": {
-									"type": "array",
-									"description": "As in Zotero's API",
-									"items": {
-										"type": "object",
-										"properties": {
-											"condition": { "type": "string" },
-											"operator": { "type": "string" },
-											"value": { "type": "string" }
-										}
-									}
-								},
+								"conditions": { "type": "array", "description": "As zotero_search and zotero_manage_saved_searches take them", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] } },
 								"link": { "type": "string", "description": "zotero:// link that shows it in Zotero" }
 							},
 							"required": ["key", "name", "conditions", "link"]
@@ -842,6 +854,17 @@
 						},
 						"required": ["condition", "operator"],
 						"additionalProperties": false
+					},
+					"group": {
+						"type": "object",
+						"description": "A group, which matches if all or any of its conditions do",
+						"properties": {
+							"joinMode": { "enum": ["all", "any"] },
+							"level": { "enum": ["attachment", "note", "annotation"], "description": "Match all its conditions on the same child of the item" },
+							"conditions": { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] }, "minItems": 1 }
+						},
+						"required": ["joinMode", "conditions"],
+						"additionalProperties": false
 					}
 				},
 				"properties": {
@@ -854,16 +877,7 @@
 						"items": {
 							"anyOf": [
 								{ "$ref": "#/$defs/condition" },
-								{
-									"type": "object",
-									"description": "A group, which matches if all or any of its conditions do",
-									"properties": {
-										"joinMode": { "enum": ["all", "any"] },
-										"conditions": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "minItems": 1 }
-									},
-									"required": ["joinMode", "conditions"],
-									"additionalProperties": false
-								}
+								{ "$ref": "#/$defs/group" }
 							]
 						}
 					},
@@ -874,11 +888,32 @@
 			},
 			"outputSchema": {
 				"type": "object",
+				"$defs": {
+					"condition": {
+						"type": "object",
+						"properties": {
+							"condition": { "type": "string" },
+							"operator": { "type": "string" },
+							"value": { "type": "string" },
+							"level": { "enum": ["attachment", "note", "annotation"] }
+						},
+						"required": ["condition", "operator"]
+					},
+					"group": {
+						"type": "object",
+						"properties": {
+							"joinMode": { "enum": ["all", "any"] },
+							"level": { "enum": ["attachment", "note", "annotation"] },
+							"conditions": { "type": "array", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] } }
+						},
+						"required": ["joinMode", "conditions"]
+					}
+				},
 				"properties": {
 					"libraryID": { "type": "integer" },
 					"key": { "type": "string" },
 					"name": { "type": "string" },
-					"conditions": { "type": "array", "items": { "type": "object" } },
+					"conditions": { "type": "array", "description": "As zotero_search and zotero_manage_saved_searches take them", "items": { "anyOf": [{ "$ref": "#/$defs/condition" }, { "$ref": "#/$defs/group" }] } },
 					"itemCount": { "type": "integer" },
 					"link": { "type": "string", "description": "zotero:// link that shows it in Zotero" }
 				},

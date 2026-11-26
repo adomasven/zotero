@@ -985,15 +985,14 @@ Zotero.MCP.Tools = new function () {
 			savedSearches: searches.map(search => ({
 				key: search.key,
 				name: search.name,
-				conditions: search.toJSON().conditions,
+				conditions: describeConditions(search),
 				link: getSelectLink(search),
 			})),
 		});
 	};
 	
 	/**
-	 * Create a saved search from a query in zotero_search's syntax, or rename one or change
-	 * its query
+	 * Create a saved search from conditions, or rename one or change its conditions
 	 */
 	this.manageSavedSearches = async function ({
 		action, savedSearchKey, name, conditions, libraryID,
@@ -1031,11 +1030,76 @@ Zotero.MCP.Tools = new function () {
 			libraryID,
 			key: search.key,
 			name: search.name,
-			conditions: search.toJSON().conditions,
+			conditions: describeConditions(search),
 			itemCount: await countSearchItems(search),
 			link: getSelectLink(search),
 		});
 	};
+	
+	/**
+	 * A saved search's conditions as zotero_search and zotero_manage_saved_searches take them,
+	 * read back from the flat list Zotero keeps, where a group lies between groupStart and
+	 * groupEnd, and its join mode and level are conditions of their own (see
+	 * Zotero.SearchQuery.addToSearch()). Options that aren't conditions, such as Search
+	 * subcollections, are given as conditions under their own names.
+	 */
+	function describeConditions(search) {
+		let root = { joinMode: 'all', conditions: [] };
+		let stack = [root];
+		for (let { condition, mode, operator, value } of Object.values(search.getConditions())) {
+			let group = stack[stack.length - 1];
+			if (condition == 'groupStart') {
+				let child = { joinMode: 'all', conditions: [] };
+				group.conditions.push(child);
+				stack.push(child);
+			}
+			else if (condition == 'groupEnd') {
+				stack.pop();
+			}
+			else if (condition == 'joinMode') {
+				group.joinMode = operator;
+				group.joined = true;
+			}
+			else if (condition == 'resultLevel') {
+				group.level = operator;
+			}
+			// The item level, as before result levels
+			else if (condition == 'noChildren' && group == root) {
+				root.level = 'item';
+			}
+			else {
+				// Annotation types are stored by number
+				if (condition == 'annotationType') {
+					value = ['highlight', 'underline', 'note', 'text', 'image', 'ink']
+						.find(type => Zotero.Annotations['ANNOTATION_TYPE_' + type.toUpperCase()] == value)
+						?? value;
+				}
+				group.conditions.push({
+					condition: mode ? `${condition}/${mode}` : condition,
+					operator,
+					value: value || undefined,
+				});
+			}
+		}
+		let toNode = (node) => {
+			if (!node.conditions) {
+				return node;
+			}
+			let conditions = node.conditions.map(toNode);
+			// A condition on a child is saved as a group of one at the child's level
+			if (node.level && !node.joined && conditions.length == 1 && !conditions[0].conditions) {
+				return { ...conditions[0], level: node.level };
+			}
+			let level = node.level == 'item' ? undefined : node.level;
+			return { joinMode: node.joinMode, level, conditions };
+		};
+		let conditions = root.conditions.map(toNode);
+		// The level of the whole search is the kind of item it finds, as zotero_search takes it
+		if (root.level && root.level != 'item') {
+			conditions.unshift({ condition: 'itemType', operator: 'is', value: root.level });
+		}
+		return root.joinMode == 'any' ? [{ joinMode: 'any', conditions }] : conditions;
+	}
 	
 	/**
 	 * The items a saved search shows, as in its view: top-level, and not in the trash
@@ -3194,7 +3258,7 @@ Zotero.MCP.Tools = new function () {
 	function buildSearch(libraryID, conditions) {
 		let toNode = (node) => {
 			if (node.conditions) {
-				return { joinMode: node.joinMode, children: node.conditions.map(toNode) };
+				return { joinMode: node.joinMode, level: node.level, children: node.conditions.map(toNode) };
 			}
 			let { condition, operator, value = '', level } = node;
 			if (!Zotero.SearchConditions.hasOperator(condition, operator)) {

@@ -862,19 +862,24 @@ describe("MCP tools", function () {
 			await createDataObject('item', { tags: [{ tag }] });
 			let name = Zotero.Utilities.randomString();
 			let tagged = { condition: 'tag', operator: 'is', value: tag };
-			let created = await call('zotero_manage_saved_searches', {
-				action: 'create',
-				name,
-				conditions: [tagged, { condition: 'numNotes', operator: 'is', value: '0' }],
-			});
+			let conditions = [tagged, {
+				joinMode: 'any',
+				conditions: [
+					{ condition: 'numNotes', operator: 'is', value: '0' },
+					{ condition: 'annotationType', operator: 'is', value: 'highlight', level: 'annotation' },
+				],
+			}];
+			let created = await call('zotero_manage_saved_searches', { action: 'create', name, conditions });
 			assert.equal(created.itemCount, 2);
+			// As they were given, so they can be changed and given back
+			assert.deepEqual(created.conditions, conditions);
 			let { savedSearches } = await call('zotero_list_saved_searches', {});
 			let listed = savedSearches.find(search => search.key == created.key);
 			assert.equal(listed.name, name);
 			assert.notProperty(listed, 'itemCount');
 			let found = await call('zotero_search', { savedSearchKey: created.key });
 			assert.equal(found.total, 2);
-			assert.deepInclude(listed.conditions, { condition: 'tag', operator: 'is', value: tag });
+			assert.deepEqual(listed.conditions, conditions);
 			
 			let updated = await call('zotero_manage_saved_searches', {
 				action: 'update',
