@@ -1442,8 +1442,7 @@
 							"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
 							"type": { "enum": ["pdf", "epub", "snapshot"] },
 							"page": { "type": "integer", "description": "PDF page the user is on, from 1" },
-							"pageLabel": { "type": "string", "description": "The page number printed on that page, for citing" },
-							"link": { "type": "string", "description": "zotero:// link that opens the file, at the page for a PDF" },
+							"link": { "type": "string", "description": "zotero:// link that opens the file where the user is" },
 							"selection": {
 								"type": "object",
 								"description": "Text the user has selected",

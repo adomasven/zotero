@@ -2551,19 +2551,15 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
-	 * The file open in a reader tab, the page the user is on, and what they've selected
+	 * The file open in a reader tab, where the user is in it, and what they've selected
 	 */
 	function describeReader(reader, attachment) {
-		let { pageIndex, pageLabel, selection, selectedAnnotationKeys } = getReaderState(reader);
+		let { position, selection, selectedAnnotationKeys } = getReaderState(reader);
 		let page;
-		// For an EPUB, the reader's page is a location number unless the book has page numbers,
-		// and links can't open one, so only a selection's page label is given
 		if (attachment.isPDFAttachment()) {
-			pageIndex ??= attachment.getAttachmentLastPageIndex() ?? undefined;
+			let pageIndex = position?.pageIndex ?? attachment.getAttachmentLastPageIndex();
 			page = Number.isInteger(pageIndex) ? pageIndex + 1 : undefined;
-		}
-		else {
-			pageLabel = undefined;
+			position = undefined;
 		}
 		let description = {
 			libraryID: attachment.libraryID,
@@ -2574,8 +2570,7 @@ Zotero.MCP.Tools = new function () {
 			path: attachment.getFilePath() || undefined,
 			type: reader.type,
 			page,
-			pageLabel: knownPageLabel(pageLabel),
-			link: getOpenLink(attachment, { page }),
+			link: getOpenLink(attachment, { page, position }),
 			selectedAnnotations: selectedAnnotationKeys
 				.map(key => Zotero.Items.getByLibraryAndKey(attachment.libraryID, key))
 				.filter(annotation => annotation?.isAnnotation())
@@ -2593,27 +2588,22 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * The page the user is on and what they've selected, from the reader's private state,
-	 * which can change without notice, so anything missing is left out.
-	 *
-	 * TODO: Use _internalReader.getSelection(), .selectedAnnotationIDs, .pageIndex and
-	 * .pageLabel once the reader has them (https://github.com/zotero/reader/pull/276)
+	 * Where the user is in a reader tab's file (see the reader's getCurrentPosition()) and
+	 * what they've selected, in the view they last used. A reader that hasn't loaded yet has
+	 * none of these.
 	 */
 	function getReaderState(reader) {
+		let internalReader = reader._internalReader;
+		if (!internalReader) {
+			return { selectedAnnotationKeys: [] };
+		}
 		try {
-			let internalReader = reader._internalReader;
-			let state = internalReader._state;
-			// The view the user last used, as the reader's getSelectionPosition() decides
-			let view = internalReader._lastViewPrimary === false ? 'secondaryView' : 'primaryView';
 			// Copied out of the reader's window, so they can be passed on
-			let copy = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
-			let stats = copy(state[`${view}Stats`]) || {};
-			let selectedAnnotationKeys = copy(state.selectedAnnotationIDs);
+			let copy = value => (value ? JSON.parse(JSON.stringify(value)) : undefined);
 			return {
-				pageIndex: Number.isInteger(stats.pageIndex) ? stats.pageIndex : undefined,
-				pageLabel: typeof stats.pageLabel == 'string' ? stats.pageLabel : undefined,
-				selection: copy(state[`${view}SelectionPopup`]?.annotation),
-				selectedAnnotationKeys: Array.isArray(selectedAnnotationKeys) ? selectedAnnotationKeys : [],
+				position: copy(internalReader.getCurrentPosition()),
+				selection: copy(internalReader.getSelection()),
+				selectedAnnotationKeys: copy(internalReader.selectedAnnotationIDs) || [],
 			};
 		}
 		catch (e) {
@@ -2696,7 +2686,7 @@ Zotero.MCP.Tools = new function () {
 			Object.assign(tab, { libraryID: item.libraryID, key: item.key });
 			let reader = Zotero.Reader.getByTabID(tabID);
 			if (reader && item.isPDFAttachment()) {
-				let { pageIndex } = getReaderState(reader);
+				let pageIndex = getReaderState(reader).position?.pageIndex;
 				tab.page = Number.isInteger(pageIndex) ? pageIndex + 1 : undefined;
 			}
 		}
@@ -3348,15 +3338,22 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * A link that opens an attachment in Zotero, at a PDF page (1-based) or an annotation
+	 * A link that opens an attachment in Zotero, at a PDF page (1-based), an annotation, or a
+	 * reader position in an EPUB (a CFI) or a snapshot (a CSS selector)
 	 */
-	function getOpenLink(attachment, { page, annotation } = {}) {
+	function getOpenLink(attachment, { page, annotation, position } = {}) {
 		let link = `zotero://open/${Zotero.API.getLibraryPrefix(attachment.libraryID)}/items/${attachment.key}`;
 		if (annotation) {
 			return `${link}?annotation=${annotation}`;
 		}
 		if (page) {
 			return `${link}?page=${page}`;
+		}
+		if (position?.type == 'FragmentSelector') {
+			return `${link}?cfi=${encodeURIComponent(position.value)}`;
+		}
+		if (position?.type == 'CssSelector') {
+			return `${link}?sel=${encodeURIComponent(position.value)}`;
 		}
 		return link;
 	}

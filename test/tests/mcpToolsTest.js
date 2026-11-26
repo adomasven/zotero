@@ -1605,10 +1605,10 @@ describe("MCP tools", function () {
 			let reader = await Zotero.Reader.open(attachment.id);
 			await reader._initPromise;
 			let internalReader = reader._internalReader;
-			await waitForCallback(() => internalReader._state.primaryViewStats.pageLabel !== undefined);
+			await waitForCallback(() => internalReader.getCurrentPosition());
 			let readerWindow = reader._iframeWindow;
 			internalReader.setSelectedAnnotations(Cu.cloneInto([annotation.key], readerWindow));
-			// As the reader's state has it while text is selected (see getReaderState() in tools.js)
+			// As the reader's state has it while text is selected, which getSelection() reads
 			internalReader._state.primaryViewSelectionPopup = Cu.cloneInto({
 				annotation: {
 					text: 'Selected words',
@@ -1629,7 +1629,6 @@ describe("MCP tools", function () {
 				path: attachment.getFilePath(),
 				type: 'pdf',
 				page: 1,
-				pageLabel: '1',
 				link: `zotero://open/library/items/${attachment.key}?page=1`,
 				selection: { text: 'Selected words', page: 1, pageLabel: '1' },
 			});
@@ -1640,6 +1639,20 @@ describe("MCP tools", function () {
 			context = await call('zotero_get_context', {});
 			assert.deepEqual(context.reader.selection, { text: 'Selected words', page: 1 });
 			internalReader._state.primaryViewSelectionPopup = null;
+		});
+		
+		it("should link an EPUB at where the user is", async function () {
+			let attachment = await importFileAttachment('recognizeEPUB_test_DOI.epub');
+			let reader = await Zotero.Reader.open(attachment.id);
+			await reader._initPromise;
+			let position = await waitForCallback(() => reader._internalReader.getCurrentPosition());
+			
+			let context = await call('zotero_get_context', {});
+			assert.equal(context.reader.type, 'epub');
+			assert.equal(
+				context.reader.link,
+				`zotero://open/library/items/${attachment.key}?cfi=${encodeURIComponent(position.value)}`
+			);
 		});
 		
 		it("should say when the main window isn't open", async function () {
