@@ -241,9 +241,10 @@
 											"linkMode": { "type": "string" },
 											"fileExists": { "type": "boolean" },
 											"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
-											"annotationCount": { "type": "integer" }
+											"annotationCount": { "type": "integer" },
+											"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
 										},
-										"required": ["key", "title", "linkMode"]
+										"required": ["key", "title", "linkMode", "link"]
 									}
 								},
 								"notes": {
@@ -383,8 +384,17 @@
 									"description": "The new item's attachments, e.g. the PDF Zotero found",
 									"items": {
 										"type": "object",
-										"properties": { "key": { "type": "string" }, "title": { "type": "string" }, "contentType": { "type": "string" } },
-										"required": ["key", "title"]
+										"properties": {
+											"key": { "type": "string" },
+											"title": { "type": "string" },
+											"contentType": { "type": "string" },
+											"linkMode": { "type": "string" },
+											"fileExists": { "type": "boolean" },
+											"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
+											"annotationCount": { "type": "integer" },
+											"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
+										},
+										"required": ["key", "title", "linkMode", "link"]
 									}
 								},
 								"fileSearch": { "enum": ["pending", "notFound"], "description": "For a new item without a file: whether Zotero is still looking for one" },
@@ -1325,7 +1335,7 @@
 								"title": { "type": "string", "description": "The parent item's title" },
 								"contentType": { "type": "string" },
 								"matchCount": { "type": "integer" },
-								"pending": { "type": "boolean", "description": "Zotero is still getting the file's text, so its passages are missing" },
+								"status": { "const": "pending", "description": "Zotero is still getting the file's text, so its passages are missing" },
 								"passages": {
 									"type": "array",
 									"description": "Passages with the most query terms first",
@@ -1410,6 +1420,7 @@
 					"offset": { "type": "integer" },
 					"text": { "type": "string" },
 					"nextOffset": { "type": "integer", "description": "Present when there's more text" },
+					"status": { "const": "pending", "description": "Zotero is still getting the text, so some is missing" },
 					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "key", "title", "link"]
@@ -1454,10 +1465,11 @@
 										"contentType": { "type": "string" },
 										"linkMode": { "type": "string" },
 										"fileExists": { "type": "boolean" },
-										"path": { "type": "string", "description": "The file on this computer" },
-										"annotationCount": { "type": "integer" }
+										"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
+										"annotationCount": { "type": "integer" },
+										"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
 									},
-									"required": ["key", "title", "linkMode"]
+									"required": ["key", "title", "linkMode", "link"]
 								}
 							},
 							"required": ["key", "title", "status"]
@@ -1523,14 +1535,21 @@
 						},
 						"required": ["key", "itemType", "title", "attachmentCount", "noteCount", "annotationCount", "link"]
 					},
-					"key": { "type": "string" },
-					"title": { "type": "string" },
-					"contentType": { "type": "string" },
-					"linkMode": { "type": "string" },
-					"fileExists": { "type": "boolean" },
-					"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
-					"annotationCount": { "type": "integer" },
-					"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" },
+					"attachment": {
+						"description": "The file attached. Absent with status pending.",
+						"type": "object",
+						"properties": {
+							"key": { "type": "string" },
+							"title": { "type": "string" },
+							"contentType": { "type": "string" },
+							"linkMode": { "type": "string" },
+							"fileExists": { "type": "boolean" },
+							"path": { "type": "string", "description": "The file on this computer, to open it yourself, e.g. to look at a figure. Absent if the file isn't on this computer." },
+							"annotationCount": { "type": "integer" },
+							"link": { "type": "string", "description": "zotero:// link that opens the file in Zotero" }
+						},
+						"required": ["key", "title", "linkMode", "link"]
+					},
 					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "status"]
@@ -1709,7 +1728,8 @@
 										"annotationColor": { "type": "string" },
 										"page": { "type": "integer" },
 										"tags": { "type": "array", "items": { "type": "object", "properties": { "tag": { "type": "string" }, "type": { "type": "integer", "description": "1 for a tag Zotero added automatically" } }, "required": ["tag"] } },
-										"link": { "type": "string" }
+										"link": { "type": "string" },
+										"imagePath": { "type": "string", "description": "For an image or ink annotation Zotero has rendered, a PNG of it" }
 									},
 									"required": ["key", "parentItem", "annotationType", "tags", "link"]
 								}
@@ -1833,6 +1853,7 @@
 					"title": { "type": "string", "description": "The parent item's title" },
 					"windowID": { "type": "string" },
 					"tabID": { "type": "string" },
+					"status": { "const": "pending", "description": "Zotero is still opening it, so windowID and tabID are missing" },
 					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
 				"required": ["libraryID", "key", "title"]

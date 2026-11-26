@@ -281,6 +281,7 @@ describe("MCP tools", function () {
 				fileExists: true,
 				path: attachment.getFilePath(),
 				annotationCount: 0,
+				link: `zotero://open/library/items/${attachment.key}`,
 			}]);
 			assert.deepEqual(items[0].notes, [{ key: note.key, title: 'My note' }]);
 		});
@@ -1179,8 +1180,8 @@ describe("MCP tools", function () {
 			sinon.stub(Zotero.FullText, 'indexItems').returns(indexing.promise);
 			
 			let result = await withBudget(300, () => call('zotero_search_fulltext', { query: 'text' }));
-			assert.deepEqual(result.files.map(file => [file.key, file.pending]), [[attachment.key, true]]);
-			assert.match(result.notice, /still getting the text of the files with pending/);
+			assert.deepEqual(result.files.map(file => [file.key, file.status]), [[attachment.key, 'pending']]);
+			assert.match(result.notice, /still getting the text of the files with status pending/);
 			indexing.resolve();
 		});
 	});
@@ -1279,6 +1280,7 @@ describe("MCP tools", function () {
 			let result = await withBudget(300, () => call('zotero_read_text', { itemKey: attachment.key }));
 			assert.deepEqual(result.pages, [{ page: 1, text: 'One' }, { page: 2, text: 'Two' }]);
 			assert.equal(result.nextPage, 3);
+			assert.equal(result.status, 'pending');
 			assert.match(result.notice, /still getting the text/);
 			
 			extracted.resolve({ text: 'Three\fFour', totalPages: 4 });
@@ -1295,6 +1297,7 @@ describe("MCP tools", function () {
 			
 			let result = await withBudget(300, () => call('zotero_read_text', { itemKey: attachment.key }));
 			assert.notProperty(result, 'text');
+			assert.equal(result.status, 'pending');
 			assert.match(result.notice, /still getting the text/);
 			indexing.resolve();
 		});
@@ -1403,9 +1406,9 @@ describe("MCP tools", function () {
 					title: 'Preprint',
 				});
 				assert.equal(result.status, 'attached');
-				assert.equal(result.contentType, 'application/pdf');
-				assert.equal(result.title, 'Preprint');
-				let attachment = Zotero.Items.getByLibraryAndKey(parent.libraryID, result.key);
+				assert.equal(result.attachment.contentType, 'application/pdf');
+				assert.equal(result.attachment.title, 'Preprint');
+				let attachment = Zotero.Items.getByLibraryAndKey(parent.libraryID, result.attachment.key);
 				assert.equal(attachment.parentID, parent.id);
 				assert.isTrue(await attachment.fileExists());
 				
@@ -1451,7 +1454,7 @@ describe("MCP tools", function () {
 			let file = getTestDataDirectory();
 			file.append('test.pdf');
 			let result = await call('zotero_add_attachment', { parentItem: parent.key, path: file.path });
-			let attachment = Zotero.Items.getByLibraryAndKey(parent.libraryID, result.key);
+			let attachment = Zotero.Items.getByLibraryAndKey(parent.libraryID, result.attachment.key);
 			assert.equal(attachment.parentID, parent.id);
 			assert.isTrue(await attachment.fileExists());
 			
@@ -1477,7 +1480,7 @@ describe("MCP tools", function () {
 			assert.isTrue(result.identified);
 			assert.equal(result.parentItem, recognized.key);
 			assert.equal(result.parent.title, 'Recognized paper');
-			let attachment = Zotero.Items.getByLibraryAndKey(recognized.libraryID, result.key);
+			let attachment = Zotero.Items.getByLibraryAndKey(recognized.libraryID, result.attachment.key);
 			assert.equal(attachment.parentID, recognized.id);
 			assert.isTrue(collection.hasItem(recognized));
 			
@@ -1493,10 +1496,10 @@ describe("MCP tools", function () {
 			file.append('test.pdf');
 			let result = await call('zotero_add_attachment', { path: file.path, linkFile: true });
 			assert.isFalse(result.identified);
-			assert.equal(result.linkMode, 'linked_file');
+			assert.equal(result.attachment.linkMode, 'linked_file');
 			assert.notProperty(result, 'parentItem');
 			assert.match(result.notice, /couldn't identify/);
-			let attachment = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.key);
+			let attachment = Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, result.attachment.key);
 			assert.isTrue(attachment.isTopLevelItem());
 			assert.equal(attachment.getFilePath(), file.path);
 			
@@ -1792,6 +1795,7 @@ describe("MCP tools", function () {
 			sinon.stub(Zotero.Reader, 'open').resolves();
 			let opened = await withBudget(300, () => call('zotero_open', { itemKey: attachment.key }));
 			assert.notProperty(opened, 'tabID');
+			assert.equal(opened.status, 'pending');
 			assert.match(opened.notice, /still opening/);
 		});
 	});

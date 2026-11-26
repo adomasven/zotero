@@ -226,7 +226,8 @@ Zotero.MCP.Tools = new function () {
 				}));
 			}
 			else if (item.isFileAttachment()) {
-				Object.assign(json, await describeAttachment(item));
+				let { link: _link, ...file } = await describeAttachment(item);
+				Object.assign(json, file);
 			}
 			items.push(json);
 		}
@@ -370,11 +371,9 @@ Zotero.MCP.Tools = new function () {
 				bestAttachment: _bestAttachment, attachmentCount: _attachmentCount, noteCount: _noteCount,
 				annotationCount: _annotationCount, ...summary
 			} = await describeItem(item);
-			summary.attachments = Zotero.Items.get(item.getAttachments()).map(attachment => ({
-				key: attachment.key,
-				title: attachment.getField('title'),
-				contentType: attachment.attachmentContentType || undefined,
-			}));
+			summary.attachments = await Promise.all(
+				Zotero.Items.get(item.getAttachments()).map(describeAttachment)
+			);
 			if (searched.has(item) && !summary.attachments.length) {
 				summary.fileSearch = searching ? 'pending' : 'notFound';
 				notices.add(searching ? FILES_PENDING : FILES_NOT_FOUND);
@@ -1192,20 +1191,10 @@ Zotero.MCP.Tools = new function () {
 		let sorted = [...annotations]
 			.sort((a, b) => a.parentID - b.parentID
 				|| (a.annotationSortIndex < b.annotationSortIndex ? -1 : 1));
-		let annotationResults = [];
-		for (let annotation of sorted) {
-			let result = describeAnnotation(annotation);
-			// Only an image already rendered, as rendering means opening the PDF
-			if (IMAGE_ANNOTATION_TYPES.includes(annotation.annotationType)
-					&& await Zotero.Annotations.hasCacheImage(annotation)) {
-				result.imagePath = Zotero.Annotations.getCacheImagePath(annotation);
-			}
-			annotationResults.push(result);
-		}
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			notes: noteResults,
-			annotations: annotationResults,
+			annotations: await Promise.all(sorted.map(describeAnnotation)),
 			missing: missing.length ? missing : undefined,
 		});
 	};
@@ -1557,7 +1546,7 @@ Zotero.MCP.Tools = new function () {
 			};
 			if (text === TIMED_OUT) {
 				textPending = true;
-				results.push({ ...summary, pending: true, passages: [] });
+				results.push({ ...summary, status: 'pending', passages: [] });
 				continue;
 			}
 			text ??= '';
@@ -1601,7 +1590,7 @@ Zotero.MCP.Tools = new function () {
 			nextOffset: offset + limit < attachments.length ? offset + limit : undefined,
 			missing: missing.length ? missing : undefined,
 			notice: [
-				textPending && 'Zotero is still getting the text of the files with pending: true, so their '
+				textPending && 'Zotero is still getting the text of the files with status pending, so their '
 					+ 'passages are missing. Search again shortly.',
 			].filter(Boolean).join(' ') || undefined,
 		});
@@ -1627,7 +1616,7 @@ Zotero.MCP.Tools = new function () {
 		};
 		// A PDF's pages can still be read from the file
 		if (text === TIMED_OUT && !attachment.isPDFAttachment()) {
-			return Zotero.MCP.jsonResult({ ...result, notice: TEXT_PENDING });
+			return Zotero.MCP.jsonResult({ ...result, status: 'pending', notice: TEXT_PENDING });
 		}
 		if (text === null && !(fileExists && attachment.isPDFAttachment())) {
 			throw new Zotero.MCP.ToolError(fileExists
@@ -1677,7 +1666,7 @@ Zotero.MCP.Tools = new function () {
 		if (!totalPages) {
 			let extracted = await extractPages(attachment, [0], deadline);
 			if (extracted === TIMED_OUT) {
-				return Zotero.MCP.jsonResult({ ...result, notice: TEXT_PENDING });
+				return Zotero.MCP.jsonResult({ ...result, status: 'pending', notice: TEXT_PENDING });
 			}
 			totalPages = extracted.totalPages;
 			pages[0] = extracted.texts[0];
@@ -1731,6 +1720,7 @@ Zotero.MCP.Tools = new function () {
 				+ 'from startPage 1 may include it.';
 		}
 		Object.assign(result, {
+			status: textPending ? 'pending' : undefined,
 			totalPages,
 			pages: pageResults,
 			nextPage: page <= endPage ? page : undefined,
@@ -1921,8 +1911,7 @@ Zotero.MCP.Tools = new function () {
 			libraryID,
 			parentItem: parent.key,
 			status: 'attached',
-			...await describeAttachment(attachment),
-			link: getOpenLink(attachment),
+			attachment: await describeAttachment(attachment),
 		});
 	};
 	
@@ -1969,8 +1958,7 @@ Zotero.MCP.Tools = new function () {
 		let result = {
 			libraryID,
 			status: 'attached',
-			...await describeAttachment(attachment),
-			link: getOpenLink(attachment),
+			attachment: await describeAttachment(attachment),
 		};
 		if (parent === TIMED_OUT) {
 			result.notice = 'Zotero is still identifying the file. Call zotero_get_items on the '
@@ -2377,7 +2365,7 @@ Zotero.MCP.Tools = new function () {
 			let reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
 			let attachment = reader && Zotero.Items.get(reader.itemID);
 			if (attachment) {
-				result.reader = describeReader(reader, attachment);
+				result.reader = await describeReader(reader, attachment);
 			}
 		}
 		else if (Zotero_Tabs.selectedType == 'note') {
@@ -2574,6 +2562,7 @@ Zotero.MCP.Tools = new function () {
 			title: item.isNote() ? item.getNoteTitle() : getTitle(item),
 			windowID: win?.Zotero_Tabs.windowID,
 			tabID,
+			status: win ? undefined : 'pending',
 			notice: win ? undefined : 'Zotero is still opening it. Call zotero_get_context later for its tab.',
 		});
 	};
@@ -2627,7 +2616,7 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * The file open in a reader tab, where the user is in it, and what they've selected
 	 */
-	function describeReader(reader, attachment) {
+	async function describeReader(reader, attachment) {
 		let { position, selection, selectedAnnotationKeys } = getReaderState(reader);
 		let page;
 		if (attachment.isPDFAttachment()) {
@@ -2645,10 +2634,10 @@ Zotero.MCP.Tools = new function () {
 			type: reader.type,
 			page,
 			link: getOpenLink(attachment, { page, position }),
-			selectedAnnotations: selectedAnnotationKeys
+			selectedAnnotations: await Promise.all(selectedAnnotationKeys
 				.map(key => Zotero.Items.getByLibraryAndKey(attachment.libraryID, key))
 				.filter(annotation => annotation?.isAnnotation())
-				.map(describeAnnotation),
+				.map(describeAnnotation)),
 		};
 		if (selection?.text) {
 			let selectionPageIndex = selection.position?.pageIndex;
@@ -3370,13 +3359,22 @@ Zotero.MCP.Tools = new function () {
 			description.path = description.fileExists ? attachment.getFilePath() : undefined;
 			description.annotationCount = attachment.getAnnotations().length;
 		}
+		// zotero://open opens only files
+		description.link = attachment.isFileAttachment()
+			? getOpenLink(attachment)
+			: getSelectLink(attachment);
 		return description;
 	}
 	
-	function describeAnnotation(annotation) {
+	async function describeAnnotation(annotation) {
 		let attachment = annotation.parentItem;
 		let pageIndex = attachment.isPDFAttachment()
 			? JSON.parse(annotation.annotationPosition).pageIndex
+			: undefined;
+		// Only an image already rendered, as rendering means opening the PDF
+		let imagePath = IMAGE_ANNOTATION_TYPES.includes(annotation.annotationType)
+				&& await Zotero.Annotations.hasCacheImage(annotation)
+			? Zotero.Annotations.getCacheImagePath(annotation)
 			: undefined;
 		return {
 			key: annotation.key,
@@ -3388,6 +3386,7 @@ Zotero.MCP.Tools = new function () {
 			page: Number.isInteger(pageIndex) ? pageIndex + 1 : undefined,
 			tags: annotation.getTags(),
 			link: getOpenLink(attachment, { annotation: annotation.key }),
+			imagePath,
 		};
 	}
 	
