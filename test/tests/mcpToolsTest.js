@@ -1815,7 +1815,7 @@ describe("MCP tools", function () {
 		});
 	});
 	
-	describe("zotero_generate_citation", function () {
+	describe("zotero_generate_citations", function () {
 		const STYLE_ID = 'http://www.zotero.org/styles/zotero-mcp-test';
 		let item;
 		
@@ -1831,7 +1831,7 @@ describe("MCP tools", function () {
 		});
 		
 		it("should format a citation with a page locator", async function () {
-			let result = await call('zotero_generate_citation', {
+			let result = await call('zotero_generate_citations', {
 				items: [{ key: item.key, locator: '23' }],
 				format: 'citation',
 				style: 'apa',
@@ -1839,13 +1839,13 @@ describe("MCP tools", function () {
 			assert.equal(result.output, '(Quuxly, 2020, p. 23)');
 			assert.equal(result.style, 'http://www.zotero.org/styles/apa');
 			
-			result = await call('zotero_generate_citation', { items: [{ key: item.key }], format: 'citation', style: 'apa' });
+			result = await call('zotero_generate_citations', { items: [{ key: item.key }], format: 'citation', style: 'apa' });
 			assert.equal(result.output, '(Quuxly, 2020)');
 			
 			// APA by default, not the style the user copies citations with
 			Zotero.Prefs.set('export.quickCopy.setting', 'bibliography=http://www.zotero.org/styles/ieee');
 			try {
-				result = await call('zotero_generate_citation', { items: [{ key: item.key }], format: 'citation' });
+				result = await call('zotero_generate_citations', { items: [{ key: item.key }], format: 'citation' });
 				assert.equal(result.style, 'http://www.zotero.org/styles/apa');
 				assert.equal(result.output, '(Quuxly, 2020)');
 			}
@@ -1855,9 +1855,9 @@ describe("MCP tools", function () {
 		});
 		
 		it("should format a bibliography as text or HTML", async function () {
-			let { output } = await call('zotero_generate_citation', { items: [{ key: item.key }], format: 'bibliography', style: 'apa' });
+			let { output } = await call('zotero_generate_citations', { items: [{ key: item.key }], format: 'bibliography', style: 'apa' });
 			assert.match(output, /^Quuxly, A\. \(2020\)\. A study of things\.$/);
-			({ output } = await call('zotero_generate_citation', { items: [{ key: item.key }], format: 'bibliography', style: 'apa', html: true }));
+			({ output } = await call('zotero_generate_citations', { items: [{ key: item.key }], format: 'bibliography', style: 'apa', html: true }));
 			assert.include(output, 'csl-entry');
 		});
 		
@@ -1865,7 +1865,7 @@ describe("MCP tools", function () {
 			let other = await createArticle({ title: 'Another study', lastName: 'Quuxly', date: '2020' });
 			let third = await createArticle({ title: 'Third study', lastName: 'Zorbin', date: '2019' });
 			
-			let result = await call('zotero_generate_citation', {
+			let result = await call('zotero_generate_citations', {
 				citations: [[{ key: item.key }], [{ key: other.key, locator: '5' }], [{ key: item.key }, { key: third.key }]],
 				format: 'document',
 				style: 'apa',
@@ -1874,7 +1874,7 @@ describe("MCP tools", function () {
 			assert.match(result.bibliography, /^Quuxly, A\. \(2020a\)\. A study of things\.\nQuuxly, A\. \(2020b\)\. Another study\.\nZorbin/);
 			assert.isFalse(result.noteStyle);
 			
-			result = await call('zotero_generate_citation', {
+			result = await call('zotero_generate_citations', {
 				citations: [[{ key: third.key }], [{ key: item.key }], [{ key: third.key }]],
 				format: 'document',
 				style: 'ieee',
@@ -1882,7 +1882,7 @@ describe("MCP tools", function () {
 			assert.deepEqual(result.citations, ['[1]', '[2]', '[1]']);
 			assert.match(result.bibliography, /^\[1\][^\n]*Zorbin/);
 			
-			result = await call('zotero_generate_citation', {
+			result = await call('zotero_generate_citations', {
 				citations: [[{ key: item.key }], [{ key: item.key }]],
 				format: 'document',
 				style: 'chicago-notes-bibliography',
@@ -1891,14 +1891,14 @@ describe("MCP tools", function () {
 			assert.isBelow(result.citations[1].length, result.citations[0].length);
 			
 			assert.match(
-				await callForError('zotero_generate_citation', { items: [{ key: item.key }], format: 'document' }),
+				await callForError('zotero_generate_citations', { items: [{ key: item.key }], format: 'document' }),
 				/Give citations for format document/
 			);
 		});
 		
 		it("should not cite notes", async function () {
 			let note = await createDataObject('item', { itemType: 'note' });
-			let error = await callForError('zotero_generate_citation', { items: [{ key: note.key }], format: 'citation' });
+			let error = await callForError('zotero_generate_citations', { items: [{ key: note.key }], format: 'citation' });
 			assert.match(error, /can't be cited/);
 		});
 		
@@ -1926,20 +1926,20 @@ describe("MCP tools", function () {
 			
 			it("should not ask about a style the repository doesn't have", async function () {
 				let ask = sinon.stub(Permissions, '_ask');
-				let error = await callForError('zotero_generate_citation', { items: [{ key: item.key }], format: 'citation', style: 'no-such-style' });
+				let error = await callForError('zotero_generate_citations', { items: [{ key: item.key }], format: 'citation', style: 'no-such-style' });
 				assert.match(error, /No style "no-such-style"/);
 				assert.isFalse(ask.called);
 			});
 			
 			it("should only install it if the user allows it", async function () {
 				let ask = sinon.stub(Permissions, '_ask').resolves('deny');
-				let error = await callForError('zotero_generate_citation', { items: [{ key: item.key }], format: 'citation', style: 'zotero-mcp-test' });
+				let error = await callForError('zotero_generate_citations', { items: [{ key: item.key }], format: 'citation', style: 'zotero-mcp-test' });
 				assert.match(error, /denied/);
 				assert.isTrue(ask.calledWith('test-client', Permissions.INSTALL_STYLES));
 				assert.isFalse(Zotero.Styles.get(STYLE_ID));
 				
 				ask.resolves('allow');
-				let result = await call('zotero_generate_citation', { items: [{ key: item.key }], format: 'citation', style: 'zotero-mcp-test' });
+				let result = await call('zotero_generate_citations', { items: [{ key: item.key }], format: 'citation', style: 'zotero-mcp-test' });
 				assert.equal(result.style, STYLE_ID);
 				assert.equal(result.output, '(Quuxly, 2020)');
 				assert.deepEqual(requests, [
@@ -1952,7 +1952,7 @@ describe("MCP tools", function () {
 				sinon.stub(Permissions, '_ask').resolves('allow');
 				let installing = Zotero.Promise.defer();
 				sinon.stub(Zotero.Styles, 'install').returns(installing.promise);
-				let error = await withBudget(300, () => callForError('zotero_generate_citation', {
+				let error = await withBudget(300, () => callForError('zotero_generate_citations', {
 					items: [{ key: item.key }],
 					format: 'citation',
 					style: 'zotero-mcp-test',
@@ -1962,7 +1962,7 @@ describe("MCP tools", function () {
 			});
 			
 			it("should only install styles from the repository", async function () {
-				let error = await callForError('zotero_generate_citation', {
+				let error = await callForError('zotero_generate_citations', {
 					items: [{ key: item.key }],
 					format: 'citation',
 					style: 'https://example.com/style.csl',

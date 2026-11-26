@@ -2850,7 +2850,7 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * Citations and bibliographies in a CSL style
 	 */
-	this.generateCitation = async function ({
+	this.generateCitations = async function ({
 		items: refs, citations: clusters, format, style, locale, html = false, libraryID,
 	}, call) {
 		libraryID = getLibraryID(libraryID);
