@@ -2842,6 +2842,12 @@ Zotero.MCP.Tools = new function () {
 		if (collectionKey && newCollection) {
 			throw new Zotero.MCP.ToolError('Give collectionKey or newCollection, not both');
 		}
+		if (linkFiles && text) {
+			throw new Zotero.MCP.ToolError('Only files a file from path refers to can be linked');
+		}
+		if (linkFiles && Zotero.Libraries.get(libraryID).libraryType != 'user') {
+			throw new Zotero.MCP.ToolError('Files can be linked only in My Library');
+		}
 		// Like File → Import, a file goes into a collection of its own
 		newCollection ??= !!path && !collectionKey;
 		let collections = collectionKey ? [getCollection(libraryID, collectionKey).id] : [];

@@ -117,7 +117,7 @@
 						"properties": {
 							"condition": { "enum": ["abstractNote", "accessDate", "annotationAuthor", "annotationColor", "annotationComment", "annotationText", "annotationType", "anyField", "applicationNumber", "archive", "archiveLocation", "artworkSize", "assignee", "attachmentStorageType", "author", "authority", "bookAuthor", "callNumber", "citationKey", "code", "codeNumber", "collection", "committee", "conferenceName", "country", "creator", "date", "dateAdded", "dateModified", "DOI", "edition", "editor", "eventPlace", "extra", "fileTypeID", "filingDate", "fulltextContent", "history", "ISBN", "ISSN", "issue", "itemType", "journalAbbreviation", "language", "lastRead", "libraryCatalog", "medium", "meetingName", "note", "numAnnotations", "numAttachments", "number", "numberOfVolumes", "numNotes", "numPages", "numTags", "originalDate", "originalPlace", "originalPublisher", "pages", "partNumber", "partTitle", "place", "PMCID", "PMID", "priorityNumbers", "programmingLanguage", "publicationTitle", "publisher", "references", "reporter", "rights", "runningTime", "savedSearch", "scale", "section", "series", "seriesNumber", "seriesText", "seriesTitle", "session", "shortTitle", "status", "system", "tag", "title", "titleCreatorYear", "type", "url", "versionNumber", "volume"], "description": "As in Zotero's Advanced Search: item fields (see zotero_list_item_types), creator types, tags, notes, annotations, counts and more" },
 							"operator": { "enum": ["is", "isNot", "contains", "doesNotContain", "beginsWith", "isLessThan", "isGreaterThan", "isBefore", "isAfter", "isInTheLast", "isEmpty", "isNotEmpty"], "description": "Each condition takes some of these; an error lists which" },
-							"value": { "type": "string", "description": "Not for isEmpty and isNotEmpty. itemType: a name from zotero_list_item_types. Dates: e.g. 2020 or 2020-05-01; for isInTheLast, e.g. 7 days. collection and savedSearch: a key. annotationType: highlight, underline, note, text, image or ink. annotationColor: a hex color, as zotero_get_notes gives." },
+							"value": { "type": "string", "description": "Not for isEmpty and isNotEmpty. itemType: a name from zotero_list_item_types, or note, attachment or annotation. Dates: e.g. 2020 or 2020-05-01; for isInTheLast, e.g. 7 days. collection and savedSearch: a key. annotationType: highlight, underline, note, text, image or ink. annotationColor: a hex color, as zotero_get_notes gives." },
 							"level": { "enum": ["attachment", "note", "annotation"], "description": "Match only on the item's children of this kind, e.g. a tag on its annotations and not on the item" }
 						},
 						"required": ["condition", "operator"],
@@ -313,7 +313,7 @@
 									"annotationCount": { "type": "integer", "description": "In all its files" },
 									"link": { "type": "string" }
 								},
-								"required": ["key", "itemType", "title", "dateAdded", "attachmentCount", "noteCount"]
+								"required": ["key", "itemType", "title", "dateAdded", "attachmentCount", "noteCount", "annotationCount", "link"]
 							}
 						}
 					},
@@ -336,11 +336,13 @@
 					"identifiers": {
 						"type": "array",
 						"items": { "type": "string" },
+						"minItems": 1,
 						"maxItems": 10,
 						"description": "e.g. [\"10.1038/nature12373\", \"978-0-262-03384-8\", \"arXiv:1706.03762\", \"PMID: 23903748\"]"
 					},
 					"items": {
 						"type": "array",
+						"minItems": 1,
 						"maxItems": 50,
 						"description": "Item JSON in the Zotero web API format, as zotero_get_items returns, e.g. {\"itemType\": \"report\", \"title\": \"…\", \"creators\": [{\"creatorType\": \"author\", \"firstName\": \"Ann\", \"lastName\": \"Lee\"}], \"date\": \"2024\", \"institution\": \"…\", \"url\": \"…\"}. Only fields of the item type are accepted; zotero_list_item_types lists each type's fields and creator types. Notes and files aren't items here: add them with zotero_add_note and zotero_add_attachment.",
 						"items": {
@@ -470,6 +472,7 @@
 								"key": { "type": "string" },
 								"itemType": { "type": "string" },
 								"parentKey": { "type": "string" },
+								"attachmentKey": { "type": "string", "description": "For an annotation, its file" },
 								"title": { "type": "string" },
 								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
@@ -538,7 +541,6 @@
 							"properties": {
 								"key": { "type": "string" },
 								"itemType": { "type": "string" },
-								"parentKey": { "type": "string" },
 								"title": { "type": "string" },
 								"creatorSummary": { "type": "string", "description": "e.g. Smith et al." },
 								"date": { "type": "string" },
@@ -745,8 +747,8 @@
 				"type": "object",
 				"properties": {
 					"action": { "enum": ["rename", "delete", "setColor"] },
-					"tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100, "description": "For setColor, one tag" },
-					"newName": { "type": "string", "description": "For rename" },
+					"tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "maxItems": 100, "description": "For setColor, one tag" },
+					"newName": { "type": "string", "minLength": 1, "description": "For rename" },
 					"color": { "enum": ["red", "orange", "gray", "green", "teal", "blue", "indigo", "purple", "plum", null], "description": "For setColor: one of the colors Zotero offers, or null to remove the color. Leave it out to keep the tag's color, e.g. to give it another position. Colored tags show first in the tag selector and as colored dots on items; at most 9 tags can have colors." },
 					"position": { "type": "integer", "minimum": 1, "maximum": 9, "description": "For setColor: the number key that toggles the tag on selected items. Defaults to its current one, or the next free one." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
@@ -835,7 +837,7 @@
 						"properties": {
 							"condition": { "enum": ["abstractNote", "accessDate", "annotationAuthor", "annotationColor", "annotationComment", "annotationText", "annotationType", "anyField", "applicationNumber", "archive", "archiveLocation", "artworkSize", "assignee", "attachmentStorageType", "author", "authority", "bookAuthor", "callNumber", "citationKey", "code", "codeNumber", "collection", "committee", "conferenceName", "country", "creator", "date", "dateAdded", "dateModified", "DOI", "edition", "editor", "eventPlace", "extra", "fileTypeID", "filingDate", "fulltextContent", "history", "ISBN", "ISSN", "issue", "itemType", "journalAbbreviation", "language", "lastRead", "libraryCatalog", "medium", "meetingName", "note", "numAnnotations", "numAttachments", "number", "numberOfVolumes", "numNotes", "numPages", "numTags", "originalDate", "originalPlace", "originalPublisher", "pages", "partNumber", "partTitle", "place", "PMCID", "PMID", "priorityNumbers", "programmingLanguage", "publicationTitle", "publisher", "references", "reporter", "rights", "runningTime", "savedSearch", "scale", "section", "series", "seriesNumber", "seriesText", "seriesTitle", "session", "shortTitle", "status", "system", "tag", "title", "titleCreatorYear", "type", "url", "versionNumber", "volume"], "description": "As in Zotero's Advanced Search: item fields (see zotero_list_item_types), creator types, tags, notes, annotations, counts and more" },
 							"operator": { "enum": ["is", "isNot", "contains", "doesNotContain", "beginsWith", "isLessThan", "isGreaterThan", "isBefore", "isAfter", "isInTheLast", "isEmpty", "isNotEmpty"], "description": "Each condition takes some of these; an error lists which" },
-							"value": { "type": "string", "description": "Not for isEmpty and isNotEmpty. itemType: a name from zotero_list_item_types. Dates: e.g. 2020 or 2020-05-01; for isInTheLast, e.g. 7 days. collection and savedSearch: a key. annotationType: highlight, underline, note, text, image or ink. annotationColor: a hex color, as zotero_get_notes gives." },
+							"value": { "type": "string", "description": "Not for isEmpty and isNotEmpty. itemType: a name from zotero_list_item_types, or note, attachment or annotation. Dates: e.g. 2020 or 2020-05-01; for isInTheLast, e.g. 7 days. collection and savedSearch: a key. annotationType: highlight, underline, note, text, image or ink. annotationColor: a hex color, as zotero_get_notes gives." },
 							"level": { "enum": ["attachment", "note", "annotation"], "description": "Match only on the item's children of this kind, e.g. a tag on its annotations and not on the item" }
 						},
 						"required": ["condition", "operator"],
@@ -845,7 +847,7 @@
 				"properties": {
 					"action": { "enum": ["create", "update"] },
 					"savedSearchKey": { "type": "string", "description": "For update" },
-					"name": { "type": "string", "description": "Needed for create" },
+					"name": { "type": "string", "minLength": 1, "description": "Needed for create" },
 					"conditions": {
 						"type": "array",
 						"description": "Needed for create. As for zotero_search; they replace the search's conditions.",
@@ -1079,7 +1081,7 @@
 		{
 			"name": "zotero_search_fulltext",
 			"title": "Search Zotero full text",
-			"description": "Find where words or phrases occur in the text of PDFs, EPUBs, web page snapshots and other files in a Zotero library, and get the passage around each match, with its page and a link that opens the file there. Matches words, not meaning: every word or \"quoted phrase\" in the query must occur in a file, ignoring case and accents, and a word also matches words it starts (\"archive\" matches \"archives\"). Only files Zotero has indexed are searched, and by default only the first 100 pages of a PDF. Files are listed by when their item was last modified, not by relevance. Use zotero_read_text to read more around a passage, and zotero_search with fulltext: to combine full text with other criteria.",
+			"description": "Find where words or phrases occur in the text of PDFs, EPUBs, web page snapshots and other files in a Zotero library, and get the passage around each match, with its page and a link that opens the file there. Matches words, not meaning: every word or \"quoted phrase\" in the query must occur in a file, ignoring case and accents, and a word also matches words it starts (\"archive\" matches \"archives\"). Only files Zotero has indexed are searched, and by default only the first 100 pages of a PDF. Files are listed by when their item was last modified, not by relevance. Use zotero_read_text to read more around a passage, and zotero_search with the fulltextContent condition to combine full text with other criteria.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -1249,7 +1251,8 @@
 										"fileExists": { "type": "boolean" },
 										"path": { "type": "string", "description": "The file on this computer" },
 										"annotationCount": { "type": "integer" }
-									}
+									},
+									"required": ["key", "title", "linkMode"]
 								}
 							},
 							"required": ["key", "title", "status"]
@@ -1312,7 +1315,8 @@
 							"noteCount": { "type": "integer" },
 							"annotationCount": { "type": "integer", "description": "In all its files" },
 							"link": { "type": "string" }
-						}
+						},
+						"required": ["key", "itemType", "title", "attachmentCount", "noteCount", "annotationCount", "link"]
 					},
 					"key": { "type": "string" },
 					"title": { "type": "string" },
@@ -1343,9 +1347,9 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"itemKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100, "description": "Items, notes or attachments" },
-					"collectionKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100 },
-					"savedSearchKeys": { "type": "array", "items": { "type": "string" }, "maxItems": 100 },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100, "description": "Items, notes or attachments" },
+					"collectionKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100 },
+					"savedSearchKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 100 },
 					"restore": { "type": "boolean", "default": false, "description": "Restore from the trash instead" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
@@ -1594,7 +1598,7 @@
 					"tabID": { "type": "string" },
 					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
-				"required": ["libraryID", "key"]
+				"required": ["libraryID", "key", "title"]
 			},
 			"annotations": {
 				"readOnlyHint": false,
@@ -1610,9 +1614,9 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"tabIDs": { "type": "array", "items": { "type": "string" }, "description": "Tabs to close" },
+					"tabIDs": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Tabs to close" },
 					"windowID": { "type": "string", "description": "The window of tabIDs, needed when one of them is in several windows" },
-					"windowIDs": { "type": "array", "items": { "type": "string" }, "description": "Windows to close, with all their tabs" }
+					"windowIDs": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Windows to close, with all their tabs" }
 				},
 				"additionalProperties": false
 			},
@@ -1637,23 +1641,26 @@
 			"description": "Format items in a citation style: as one citation (with page or other locators), as a bibliography, or, with format document, all of a document's citations at once. Use format document when writing a document with several citations: give its citations in the order they appear, and get each one formatted and the bibliography, with numbering, disambiguation (Smith 2020a, 2020b) and ibid. or short forms worked out across the document. A citation formatted on its own always starts at [1] in a numeric style. For BibTeX, RIS and other export formats, use zotero_export. A style that isn't installed is installed from the Zotero Style Repository if the user allows it.",
 			"inputSchema": {
 				"type": "object",
+				"$defs": {
+					"citedItem": {
+						"type": "object",
+						"properties": {
+							"key": { "type": "string" },
+							"locator": { "type": "string", "description": "e.g. \"23\" or \"23-25\". Not for format bibliography." },
+							"label": {
+								"enum": ["act", "appendix", "article-locator", "book", "canon", "chapter", "column", "elocation", "equation", "figure", "folio", "issue", "line", "note", "opus", "page", "paragraph", "part", "rule", "scene", "section", "sub-verbo", "table", "timestamp", "title-locator", "verse", "volume"],
+								"default": "page"
+							}
+						},
+						"required": ["key"],
+						"additionalProperties": false
+					}
+				},
 				"properties": {
 					"items": {
 						"type": "array",
 						"description": "For format citation or bibliography, in citation order",
-						"items": {
-							"type": "object",
-							"properties": {
-								"key": { "type": "string" },
-								"locator": { "type": "string", "description": "For format citation, e.g. \"23\" or \"23-25\"" },
-								"label": {
-									"enum": ["act", "appendix", "article-locator", "book", "canon", "chapter", "column", "elocation", "equation", "figure", "folio", "issue", "line", "note", "opus", "page", "paragraph", "part", "rule", "scene", "section", "sub-verbo", "table", "timestamp", "title-locator", "verse", "volume"],
-									"default": "page"
-								}
-							},
-							"required": ["key"],
-							"additionalProperties": false
-						},
+						"items": { "$ref": "#/$defs/citedItem" },
 						"minItems": 1,
 						"maxItems": 100
 					},
@@ -1662,19 +1669,7 @@
 						"description": "For format document: the document's citations in the order they appear, each the items cited together in one place",
 						"items": {
 							"type": "array",
-							"items": {
-									"type": "object",
-									"properties": {
-										"key": { "type": "string" },
-										"locator": { "type": "string", "description": "e.g. \"23\" or \"23-25\"" },
-										"label": {
-											"enum": ["act", "appendix", "article-locator", "book", "canon", "chapter", "column", "elocation", "equation", "figure", "folio", "issue", "line", "note", "opus", "page", "paragraph", "part", "rule", "scene", "section", "sub-verbo", "table", "timestamp", "title-locator", "verse", "volume"],
-											"default": "page"
-										}
-									},
-									"required": ["key"],
-									"additionalProperties": false
-								},
+							"items": { "$ref": "#/$defs/citedItem" },
 							"minItems": 1
 						},
 						"minItems": 1,
@@ -1702,7 +1697,7 @@
 					"bibliography": { "type": "string", "description": "For format document. Empty for a style without one." },
 					"noteStyle": { "type": "boolean", "description": "For format document: whether the style puts citations in footnotes, one footnote per citation" }
 				},
-				"required": ["libraryID", "format"]
+				"required": ["libraryID", "format", "style", "styleTitle", "locale"]
 			},
 			"annotations": {
 				"readOnlyHint": false,

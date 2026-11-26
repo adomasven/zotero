@@ -523,6 +523,14 @@ describe("MCP tools", function () {
 			Zotero.UndoHistory.clear();
 		});
 		
+		it("should tag an annotation, and give its file", async function () {
+			let attachment = await importFileAttachment('test.pdf');
+			let annotation = await createAnnotation('highlight', attachment);
+			let { items } = await call('zotero_update_items', { changes: [{ key: annotation.key, addTags: ['figure'] }] });
+			assert.deepInclude(items[0], { key: annotation.key, attachmentKey: attachment.key });
+			assert.deepEqual(annotation.getTags(), [{ tag: 'figure' }]);
+		});
+		
 		it("should change several items in one step the user can undo", async function () {
 			let collection = await createDataObject('collection');
 			let a = await createArticle({ title: 'Old A' });
