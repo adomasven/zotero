@@ -795,7 +795,7 @@
 				"type": "object",
 				"properties": {
 					"tag": { "type": "string", "minLength": 1, "description": "Exact tag name (case-sensitive)" },
-					"color": { "enum": ["red", "orange", "gray", "green", "teal", "blue", "indigo", "purple", "plum", null], "description": "Color name, null to remove, or omit to keep current color" },
+					"color": { "enum": ["red", "orange", "gray", "green", "teal", "blue", "purple", "violet", "maroon", null], "description": "Color name, null to remove, or omit to keep current color" },
 					"position": { "type": "integer", "minimum": 1, "maximum": 9, "description": "Number key 1–9 (default: current or next free)" },
 					"libraryID": { "type": "integer" }
 				},

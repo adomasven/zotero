@@ -866,19 +866,6 @@ Zotero.MCP.Tools = new function () {
 	// Tags -- Tags across a library
 	//
 	
-	// MCP names for the tag colors in Zotero.Tags.COLORS (by l10n key)
-	const TAG_COLOR_NAMES = {
-		'general.red': 'red',
-		'general.orange': 'orange',
-		'general.gray': 'gray',
-		'general.green': 'green',
-		'general.teal': 'teal',
-		'general.blue': 'blue',
-		'general.purple': 'indigo',
-		'general.violet': 'purple',
-		'general.maroon': 'plum',
-	};
-	
 	/**
 	 * Tags in the library, colored tags first (in the tag selector's order), then by how
 	 * many items have them
@@ -949,7 +936,7 @@ Zotero.MCP.Tools = new function () {
 			}
 		}
 		else if (color) {
-			color = Zotero.Tags.COLORS.find(([key]) => TAG_COLOR_NAMES[key] == color)?.[1];
+			color = Zotero.Tags.COLORS.find(([key]) => key == 'general.' + color)?.[1];
 		}
 		if (color && !colors.has(tag) && colors.size >= Zotero.Tags.MAX_COLORED_TAGS) {
 			throw new Zotero.MCP.ToolError(
@@ -1039,15 +1026,15 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * A tag color's MCP name from Zotero.Tags.COLORS, or its hex value if it isn't one of them,
+	 * A tag color's name from Zotero.Tags.COLORS, or its hex value if it isn't one of them,
 	 * e.g. one set by a plugin
 	 */
 	function getTagColorName(hex) {
 		if (!hex) {
 			return undefined;
 		}
-		let entry = Zotero.Tags.COLORS.find(([, color]) => color.toUpperCase() == hex.toUpperCase());
-		return (entry && TAG_COLOR_NAMES[entry[0]]) ?? hex;
+		return Zotero.Tags.COLORS.find(([, color]) => color.toUpperCase() == hex.toUpperCase())?.[0]
+			.replace(/^general\./, '') ?? hex;
 	}
 	
 	//
