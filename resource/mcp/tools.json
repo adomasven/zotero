@@ -396,7 +396,7 @@
 		},
 		{
 			"name": "zotero_update_items",
-			"title": "Edit Zotero items",
+			"title": "Update Zotero items",
 			"description": "Change items' metadata, tags and collections: set or clear fields (title, date, DOI, abstractNote and so on), replace creators, add or remove tags, and add items to or remove them from collections. To change an item's type, use zotero_change_item_types. All or nothing: one invalid change fails the call.",
 			"inputSchema": {
 				"type": "object",
@@ -654,7 +654,7 @@
 		},
 		{
 			"name": "zotero_update_collection",
-			"title": "Rename or move a Zotero collection",
+			"title": "Update a Zotero collection",
 			"description": "Rename a collection, or move it into another collection or to the top level. To put items in it, use zotero_update_items. To delete it, use zotero_trash.",
 			"inputSchema": {
 				"type": "object",
@@ -979,7 +979,7 @@
 		},
 		{
 			"name": "zotero_update_saved_search",
-			"title": "Change a Zotero saved search",
+			"title": "Update a Zotero saved search",
 			"description": "Rename a saved search, or replace its conditions. To delete it, use zotero_trash.",
 			"inputSchema": {
 				"type": "object",
@@ -1393,7 +1393,7 @@
 		},
 		{
 			"name": "zotero_find_fulltext_attachments",
-			"title": "Find full text in Zotero",
+			"title": "Find full text attachments for Zotero items",
 			"description": "Look for a PDF or EPUB of items that have none, as Zotero's Find Full Text menu command does: by DOI, URL or PMCID, from open-access sources and from the publisher's site, through the user's institution where they have access. Use it for items added without files, e.g. by zotero_import. Items that already have a PDF or EPUB, or have no DOI, URL or PMCID, are skipped.",
 			"inputSchema": {
 				"type": "object",
