@@ -34,6 +34,8 @@ they need in tools.json, and Zotero.MCP.callTool() calls require() before runnin
 - DELETE: move items or collections in one library to the trash
 - EDIT_SETTINGS: change Zotero settings
 - INSTALL_STYLES: install citation styles from the Zotero Style Repository
+- WRITE_FILES: write files on the user's computer, asked for by the tool itself only when it
+  writes one (zotero_export with a path)
 
 Grants are stored per app, permission and library, in the mcp.clients pref as JSON:
 
@@ -57,6 +59,7 @@ Zotero.MCP.Permissions = new function () {
 	this.DELETE = 'delete';
 	this.EDIT_SETTINGS = 'editSettings';
 	this.INSTALL_STYLES = 'installStyles';
+	this.WRITE_FILES = 'writeFiles';
 	
 	// How long DELETE is allowed for at a time
 	this.TEMPORARY_GRANT = 60 * 60 * 1000;
@@ -271,9 +274,9 @@ Zotero.MCP.Permissions = new function () {
 	};
 	
 	function getTarget(permission, libraryID) {
-		let { EDIT_SETTINGS, INSTALL_STYLES } = Zotero.MCP.Permissions;
+		let { EDIT_SETTINGS, INSTALL_STYLES, WRITE_FILES } = Zotero.MCP.Permissions;
 		// Not per library
-		if (permission == EDIT_SETTINGS || permission == INSTALL_STYLES) {
+		if (permission == EDIT_SETTINGS || permission == INSTALL_STYLES || permission == WRITE_FILES) {
 			return permission;
 		}
 		if (permission != Zotero.MCP.Permissions.EDIT_LIBRARY
@@ -295,6 +298,9 @@ Zotero.MCP.Permissions = new function () {
 		}
 		if (permission == Zotero.MCP.Permissions.INSTALL_STYLES) {
 			return Zotero.ftl.formatValueSync('mcp-permission-install-styles');
+		}
+		if (permission == Zotero.MCP.Permissions.WRITE_FILES) {
+			return Zotero.ftl.formatValueSync('mcp-permission-write-files');
 		}
 		let library = Zotero.Libraries.get(libraryID).name;
 		return Zotero.ftl.formatValueSync(

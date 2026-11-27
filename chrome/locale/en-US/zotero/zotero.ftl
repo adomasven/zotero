@@ -1415,6 +1415,7 @@ mcp-permission-edit-library = edit items, collections, tags and notes in “{ $l
 mcp-permission-delete = move items and collections in “{ $library }” to the trash
 mcp-permission-edit-settings = change { -app-name } settings
 mcp-permission-install-styles = install citation styles from the { -app-name } Style Repository
+mcp-permission-write-files = save files on your computer
 
 mcp-permissions-window =
     .title = Permissions for “{ $app }”
@@ -1429,5 +1430,7 @@ mcp-permissions-edit-settings =
     .label = Always allow changing { -app-name } settings
 mcp-permissions-install-styles =
     .label = Always allow installing citation styles
+mcp-permissions-write-files =
+    .label = Always allow saving files on your computer
 mcp-permissions-close =
     .label = Close

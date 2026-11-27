@@ -2007,7 +2007,7 @@
 					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Items to export. Not with collectionKey. Without either, the whole library." },
 					"collectionKey": { "type": "string" },
 					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also the items in the collection's subcollections, at any depth. Formats that keep collections, such as Zotero RDF, then also export the subcollections." },
-					"path": { "type": "string", "description": "An absolute path to write to, where nothing exists yet. Without it, the export is returned as text." },
+					"path": { "type": "string", "description": "An absolute path to write to, where nothing exists yet, which asks the user for permission. Without it, the export is returned as text." },
 					"includeFiles": { "type": "boolean", "default": false, "description": "Also copy the items' files, with their annotations. path is then a new folder, with the export file inside it." },
 					"overwrite": { "type": "boolean", "default": false, "description": "Replace a file already at path. A folder, or an export with includeFiles, is never replaced." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }

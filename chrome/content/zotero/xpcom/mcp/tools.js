@@ -3189,7 +3189,7 @@ Zotero.MCP.Tools = new function () {
 	this.export = async function ({
 		format, itemKeys, collectionKey, includeSubcollectionItems = false, path, includeFiles = false,
 		overwrite = false, libraryID,
-	}, { deadline }) {
+	}, call) {
 		libraryID = getLibraryID(libraryID);
 		if (itemKeys && collectionKey) {
 			throw new Zotero.MCP.ToolError('Give itemKeys or collectionKey, not both');
@@ -3257,6 +3257,7 @@ Zotero.MCP.Tools = new function () {
 			if ((await statPath(PathUtils.parent(path)))?.type != 'directory') {
 				throw new Zotero.MCP.ToolError(`There's no folder ${PathUtils.parent(path)} to write to.`);
 			}
+			await Zotero.MCP.Permissions.require(call.clientID, Zotero.MCP.Permissions.WRITE_FILES, null, call);
 			translation.setLocation(Zotero.File.pathToFile(path));
 			// With its files, the export is a folder named by the path, as with File → Export
 			if (includeFiles) {
@@ -3279,7 +3280,7 @@ Zotero.MCP.Tools = new function () {
 		});
 		let result;
 		try {
-			result = await untilDeadline(exporting, deadline);
+			result = await untilDeadline(exporting, call.deadline);
 		}
 		catch (e) {
 			throw new Zotero.MCP.ToolError(`Zotero couldn't export: ${e.message || e}`);

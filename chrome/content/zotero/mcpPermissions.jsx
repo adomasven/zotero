@@ -103,6 +103,7 @@ var Zotero_MCP_Permissions = { // eslint-disable-line no-unused-vars
 		return [
 			['mcp-permissions-settings', Zotero.MCP.Permissions.EDIT_SETTINGS],
 			['mcp-permissions-styles', Zotero.MCP.Permissions.INSTALL_STYLES],
+			['mcp-permissions-files', Zotero.MCP.Permissions.WRITE_FILES],
 		];
 	},
 	

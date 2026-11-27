@@ -2097,9 +2097,14 @@ describe("MCP tools", function () {
 	
 	describe("zotero_export", function () {
 		let item;
+		let ask;
 		
 		before(async function () {
 			item = await createArticle({ title: 'A study of things', lastName: 'Quuxly', date: '2020' });
+		});
+		
+		beforeEach(function () {
+			ask = sinon.stub(Permissions, '_ask').resolves('allow');
 		});
 		
 		it("should export items as text in a format given by name", async function () {
@@ -2111,11 +2116,13 @@ describe("MCP tools", function () {
 			
 			({ output } = await call('zotero_export', { format: 'CSL JSON', itemKeys: [item.key] }));
 			assert.equal(JSON.parse(output)[0].title, 'A study of things');
+			assert.isFalse(ask.called);
 		});
 		
-		it("should write a new file, and not replace one", async function () {
+		it("should ask to write a new file, and not replace one", async function () {
 			let path = PathUtils.join(await getTempDirectory(), 'export.ris');
 			let result = await call('zotero_export', { format: 'RIS', itemKeys: [item.key], path });
+			assert.isTrue(ask.calledOnceWith('test-client', Permissions.WRITE_FILES));
 			assert.deepEqual(result, { libraryID: Zotero.Libraries.userLibraryID, format: 'RIS', path, status: 'written' });
 			assert.include(await Zotero.File.getContentsAsync(path), 'TI  - A study of things');
 			
