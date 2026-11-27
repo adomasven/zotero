@@ -1602,24 +1602,33 @@
 					"window": { "type": "boolean", "description": "Whether a Zotero window is open. The rest describes the one the user used last." },
 					"windowID": { "type": "string" },
 					"tabID": { "type": "string", "description": "The active tab" },
-					"tabType": { "type": "string", "description": "The active tab's kind: library, reader, note or another kind" },
+					"tabType": { "type": "string", "description": "The active tab's kind: library, reader, note or another kind, with -loading or -unloaded until it's open, e.g. reader-unloaded" },
 					"libraryTabID": { "type": "string", "description": "The library tab the selection below is from: the active one, or the one used last" },
-					"libraryID": { "type": "integer", "description": "The library selected in the library tab" },
-					"libraryName": { "type": "string" },
-					"collections": {
+					"libraries": {
 						"type": "array",
+						"description": "The libraries of the rows selected in the library tab",
 						"items": {
 							"type": "object",
-							"properties": { "key": { "type": "string" }, "name": { "type": "string" } },
-							"required": ["key", "name"]
+							"properties": { "libraryID": { "type": "integer" }, "name": { "type": "string" } },
+							"required": ["libraryID", "name"]
+						}
+					},
+					"collections": {
+						"type": "array",
+						"description": "Collections selected in the library tab",
+						"items": {
+							"type": "object",
+							"properties": { "libraryID": { "type": "integer" }, "key": { "type": "string" }, "name": { "type": "string" } },
+							"required": ["libraryID", "key", "name"]
 						}
 					},
 					"savedSearches": {
 						"type": "array",
+						"description": "Saved searches selected in the library tab",
 						"items": {
 							"type": "object",
-							"properties": { "key": { "type": "string" }, "name": { "type": "string" } },
-							"required": ["key", "name"]
+							"properties": { "libraryID": { "type": "integer" }, "key": { "type": "string" }, "name": { "type": "string" } },
+							"required": ["libraryID", "key", "name"]
 						}
 					},
 					"selectedItemCount": { "type": "integer", "description": "Absent when 0" },
@@ -1629,6 +1638,7 @@
 						"items": {
 							"type": "object",
 							"properties": {
+								"libraryID": { "type": "integer" },
 								"key": { "type": "string" },
 								"itemType": { "type": "string" },
 								"parentItem": { "type": "string" },
@@ -1646,7 +1656,7 @@
 								"annotationCount": { "type": "integer", "description": "In all its files. Absent when 0." },
 								"link": { "type": "string" }
 							},
-							"required": ["key", "itemType", "title", "link"]
+							"required": ["libraryID", "key", "itemType", "title", "link"]
 						}
 					},
 					"reader": {
@@ -1719,7 +1729,7 @@
 										"type": "object",
 										"properties": {
 											"tabID": { "type": "string" },
-											"type": { "type": "string", "description": "library, reader, note or another kind" },
+											"type": { "type": "string", "description": "As tabType" },
 											"title": { "type": "string" },
 											"selected": { "type": "boolean" },
 											"libraryID": { "type": "integer" },

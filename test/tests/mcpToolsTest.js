@@ -1655,8 +1655,9 @@ describe("MCP tools", function () {
 			
 			let context = await call('zotero_get_context', {});
 			assert.equal(context.tabType, 'library');
-			assert.equal(context.libraryID, Zotero.Libraries.userLibraryID);
-			assert.deepEqual(context.collections, [{ key: collection.key, name: collection.name }]);
+			let libraryID = Zotero.Libraries.userLibraryID;
+			assert.deepEqual(context.libraries, [{ libraryID, name: Zotero.Libraries.get(libraryID).name }]);
+			assert.deepEqual(context.collections, [{ libraryID, key: collection.key, name: collection.name }]);
 			assert.equal(context.selectedItemCount, 2);
 			assert.sameMembers(context.selectedItems.map(item => item.key), [items[0].key, items[2].key]);
 			assert.notProperty(context, 'reader');

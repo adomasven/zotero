@@ -2477,24 +2477,31 @@ Zotero.MCP.Tools = new function () {
 		};
 		// A window can have only reader and note tabs
 		if (ZoteroPane.libraryView?.loaded) {
-			let libraryID = ZoteroPane.getSelectedLibraryIDs()[0];
 			let items = ZoteroPane.getSelectedItems(false, { libraryTabOnly: true });
+			// Rows from several libraries can be selected
 			Object.assign(result, {
 				libraryTabID: ZoteroPane.libraryView.tabID,
-				libraryID,
-				libraryName: libraryID ? Zotero.Libraries.get(libraryID).name : undefined,
+				libraries: nonEmpty(ZoteroPane.getSelectedLibraryIDs().map(libraryID => ({
+					libraryID,
+					name: Zotero.Libraries.get(libraryID).name,
+				}))),
 				collections: nonEmpty(ZoteroPane.getSelectedCollections().map(collection => ({
+					libraryID: collection.libraryID,
 					key: collection.key,
 					name: collection.name,
 				}))),
 				savedSearches: nonEmpty(ZoteroPane.getSelectedSavedSearches().map(search => ({
+					libraryID: search.libraryID,
 					key: search.key,
 					name: search.name,
 				}))),
 				selectedItemCount: items.length || undefined,
 				// Only when the user is looking at them
 				selectedItems: Zotero_Tabs.selectedType == 'library'
-					? nonEmpty(await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(describeItem)))
+					? nonEmpty(await Promise.all(items.slice(0, MAX_CONTEXT_ITEMS).map(async item => ({
+						libraryID: item.libraryID,
+						...await describeItem(item),
+					}))))
 					: undefined,
 			});
 		}
@@ -2877,7 +2884,7 @@ Zotero.MCP.Tools = new function () {
 		let info = Zotero_Tabs.getTabInfo(tabID);
 		let tab = {
 			tabID,
-			type: Zotero_Tabs.parseTabType(info.type).tabContentType,
+			type: info.type,
 			title: info.title,
 			selected: tabID == Zotero_Tabs.selectedID || undefined,
 		};
