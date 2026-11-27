@@ -1471,7 +1471,7 @@
 					"libraryID": { "type": "integer" },
 					"parentItem": { "type": "string" },
 					"status": { "enum": ["attached", "pending"], "description": "pending: Zotero is still downloading the file" },
-					"identified": { "type": "boolean", "description": "Without parentItem, whether Zotero identified the file and created its parent item. Absent while Zotero is still identifying it." },
+					"identification": { "enum": ["pending", "notFound"], "description": "For a file added without parentItem: pending while Zotero identifies it, notFound if it couldn't. Absent once Zotero created its parent, given in parentItem and parent." },
 					"parent": {
 						"type": "object",
 						"description": "The item Zotero created for the file",
