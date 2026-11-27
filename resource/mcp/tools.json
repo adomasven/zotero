@@ -129,6 +129,7 @@
 					"collectionKey": { "type": "string", "description": "Only items in this collection. Not with savedSearchKey." },
 					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also items in the collection's subcollections, at any depth" },
 					"savedSearchKey": { "type": "string", "description": "Only items this saved search finds. Not with collectionKey." },
+					"inTrash": { "type": "boolean", "default": false, "description": "Search only the trash, e.g. for zotero_restore_from_trash. Not with collectionKey or savedSearchKey." },
 					"sortField": { "enum": ["dateModified", "dateAdded", "date", "title", "creator"], "default": "dateModified", "description": "What to order items by" },
 					"sortDirection": { "enum": ["asc", "desc"], "description": "Defaults to newest first for dates, A to Z otherwise" },
 					"limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 25 },
@@ -178,7 +179,7 @@
 		{
 			"name": "zotero_get_items",
 			"title": "Get Zotero items",
-			"description": "Get the full data of items, in Zotero web API JSON, with their attachments and notes.",
+			"description": "Get the full data of items, in Zotero web API JSON, with their attachments and notes. Items in the trash have deleted: true.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
@@ -189,7 +190,6 @@
 						"maxItems": 50,
 						"description": "Also notes, attachments and annotations"
 					},
-					"includeTrashed": { "type": "boolean", "default": false, "description": "Also get items in the trash, which have deleted: true" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
 				"required": ["itemKeys"],
@@ -240,7 +240,7 @@
 							"required": ["key", "itemType", "link"]
 						}
 					},
-					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys with no item, or of items in the trash without includeTrashed" }
+					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys with no item" }
 				},
 				"required": ["libraryID", "items"]
 			},
@@ -585,7 +585,8 @@
 				"properties": {
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
 					"collectionKey": { "type": "string", "description": "List this collection's subcollections" },
-					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Count the items in each collection's subcollections too" }
+					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Count the items in each collection's subcollections too" },
+					"inTrash": { "type": "boolean", "default": false, "description": "List only collections in the trash" }
 				},
 				"additionalProperties": false
 			},
@@ -831,7 +832,8 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
+					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
+					"inTrash": { "type": "boolean", "default": false, "description": "List only saved searches in the trash" }
 				},
 				"additionalProperties": false
 			},

@@ -319,19 +319,23 @@ describe("MCP tools", function () {
 			assert.notProperty(items[0], 'annotationPageLabel');
 		});
 		
-		it("should leave out items in the trash unless asked for them", async function () {
-			let item = await createArticle();
+		it("should mark items in the trash, and find them with zotero_search inTrash", async function () {
+			let title = randomWord();
+			let item = await createArticle({ title });
+			await createArticle({ title });
 			item.deleted = true;
 			await item.saveTx();
 			
 			let { items, missing } = await call('zotero_get_items', { itemKeys: [item.key] });
-			assert.lengthOf(items, 0);
-			assert.deepEqual(missing, [item.key]);
-			
-			({ items, missing } = await call('zotero_get_items', { itemKeys: [item.key], includeTrashed: true }));
 			assert.equal(items[0].key, item.key);
 			assert.isTrue(items[0].deleted);
 			assert.isUndefined(missing);
+			
+			let conditions = [{ condition: 'title', operator: 'is', value: title }];
+			({ items } = await call('zotero_search', { conditions, inTrash: true }));
+			assert.deepEqual(items.map(each => each.key), [item.key]);
+			({ items } = await call('zotero_search', { conditions }));
+			assert.notInclude(items.map(each => each.key), item.key);
 		});
 	});
 	
@@ -925,6 +929,8 @@ describe("MCP tools", function () {
 			let result = await call('zotero_trash', { savedSearchKeys: [created.key] });
 			assert.deepEqual(result.savedSearchKeys, [created.key]);
 			assert.isTrue(search.deleted);
+			({ savedSearches } = await call('zotero_list_saved_searches', { inTrash: true }));
+			assert.include(savedSearches.map(each => each.key), created.key);
 		});
 		
 		it("should give back a search made in Zotero as the tools take it, and keep its options when updated", async function () {
@@ -1623,6 +1629,8 @@ describe("MCP tools", function () {
 			assert.isTrue(parent.deleted);
 			assert.isTrue(child.deleted);
 			assert.isFalse(item.deleted);
+			let { collections } = await call('zotero_list_collections', { inTrash: true });
+			assert.includeMembers(collections.map(each => each.key), [parent.key, child.key]);
 			
 			await call('zotero_restore_from_trash', { collectionKeys: [parent.key] });
 			assert.isFalse(parent.deleted);

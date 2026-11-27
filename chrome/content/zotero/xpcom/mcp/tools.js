@@ -148,12 +148,15 @@ Zotero.MCP.Tools = new function () {
 	 * matches in notes, attachments and annotations standing for the item they belong to
 	 */
 	this.search = async function ({
-		conditions = [], libraryID, collectionKey,
-		includeSubcollectionItems = false, savedSearchKey, sortField = 'dateModified', sortDirection, limit = 25, offset = 0,
+		conditions = [], libraryID, collectionKey, includeSubcollectionItems = false, savedSearchKey,
+		inTrash = false, sortField = 'dateModified', sortDirection, limit = 25, offset = 0,
 	}) {
 		libraryID = getLibraryID(libraryID);
 		if (collectionKey && savedSearchKey) {
 			throw new Zotero.MCP.ToolError('Give collectionKey or savedSearchKey, not both');
+		}
+		if (inTrash && (collectionKey || savedSearchKey)) {
+			throw new Zotero.MCP.ToolError('The trash is searched on its own, without collectionKey or savedSearchKey');
 		}
 		
 		let items;
@@ -168,7 +171,8 @@ Zotero.MCP.Tools = new function () {
 			// The scope, as in Zotero.CollectionTreeRow#getSearchObject()
 			let scope = new Zotero.Search();
 			scope.libraryID = libraryID;
-			scope.addCondition('noChildren', 'true');
+			// The trash has notes and attachments trashed on their own too
+			scope.addCondition(inTrash ? 'deleted' : 'noChildren', 'true');
 			if (collectionKey) {
 				let collection = getCollection(libraryID, collectionKey);
 				scope.addCondition('collectionID', 'is', collection.id);
@@ -185,12 +189,24 @@ Zotero.MCP.Tools = new function () {
 				built.setScope(search, true);
 				search = built;
 			}
+			// A search leaves out the trash unless told otherwise, so each search over it is
+			// told, as in the trash's view (Zotero.CollectionTreeRow#getSearchObject())
+			if (inTrash) {
+				for (let each = search; each != scope; each = each.scope) {
+					each.addCondition('deleted', 'true');
+				}
+			}
 			items = await Zotero.Items.getAsync(await search.search());
 		}
-		if (resultLevel == 'item') {
-			items = Zotero.Items.getTopLevel(items);
+		if (inTrash) {
+			items = items.filter(item => item.deleted);
 		}
-		items = items.filter(item => !item.deleted);
+		else {
+			if (resultLevel == 'item') {
+				items = Zotero.Items.getTopLevel(items);
+			}
+			items = items.filter(item => !item.deleted);
+		}
 		sortItems(items, sortField, sortDirection);
 		let page = items.slice(offset, offset + limit);
 		return Zotero.MCP.jsonResult({
@@ -250,9 +266,9 @@ Zotero.MCP.Tools = new function () {
 	 * Items, notes and attachments as Zotero item JSON, with a regular item's attachments and
 	 * notes, and an attachment's file
 	 */
-	this.getItems = async function ({ itemKeys, includeTrashed = false, libraryID }) {
+	this.getItems = async function ({ itemKeys, libraryID }) {
 		libraryID = getLibraryID(libraryID);
-		let { items: found, missing } = await getItemsByKey(libraryID, itemKeys, { includeTrashed });
+		let { items: found, missing } = await getItemsByKey(libraryID, itemKeys, { includeTrashed: true });
 		let items = [];
 		for (let item of found) {
 			// No tool takes the version, and pages are by index only
@@ -772,15 +788,20 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * All the library's collections, or all those inside a collection, at every depth
 	 */
-	this.listCollections = async function ({ libraryID, collectionKey, includeSubcollectionItems = false }) {
+	this.listCollections = async function ({
+		libraryID, collectionKey, includeSubcollectionItems = false, inTrash = false,
+	}) {
 		libraryID = getLibraryID(libraryID);
 		let collections;
 		if (collectionKey) {
 			let parent = getCollection(libraryID, collectionKey);
-			collections = Zotero.Collections.getByParent(parent.id, true);
+			collections = Zotero.Collections.getByParent(parent.id, true, inTrash);
 		}
 		else {
-			collections = Zotero.Collections.getByLibrary(libraryID, true);
+			collections = Zotero.Collections.getByLibrary(libraryID, true, inTrash);
+		}
+		if (inTrash) {
+			collections = collections.filter(collection => collection.deleted);
 		}
 		return Zotero.MCP.jsonResult({
 			libraryID,
@@ -1046,9 +1067,9 @@ Zotero.MCP.Tools = new function () {
 	 * Saved searches, with their conditions. Not how many items each finds, which would run
 	 * every saved search.
 	 */
-	this.listSavedSearches = async function ({ libraryID }) {
+	this.listSavedSearches = async function ({ libraryID, inTrash = false }) {
 		libraryID = getLibraryID(libraryID);
-		let searches = Zotero.Searches.getByLibrary(libraryID).filter(search => !search.deleted);
+		let searches = Zotero.Searches.getByLibrary(libraryID).filter(search => search.deleted == inTrash);
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			savedSearches: searches.map(search => ({
