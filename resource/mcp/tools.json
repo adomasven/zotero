@@ -1781,9 +1781,11 @@
 					"libraryID": { "type": "integer" },
 					"selectedItemCount": { "type": "integer", "description": "Absent when 0" },
 					"notShown": { "type": "array", "items": { "type": "string" }, "description": "Items that aren't in the collection or saved search, so weren't selected" },
-					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" }
+					"missing": { "type": "array", "items": { "type": "string" }, "description": "Keys that don't exist or are in the trash" },
+					"status": { "const": "pending", "description": "Zotero is still opening the library tab, so what's selected is missing" },
+					"notice": { "type": "string", "description": "Present when the result is incomplete: why, and what to do next" }
 				},
-				"required": ["windowID", "tabID", "libraryID"]
+				"required": ["libraryID"]
 			},
 			"annotations": {
 				"readOnlyHint": false,

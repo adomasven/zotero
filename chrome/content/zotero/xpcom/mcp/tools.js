@@ -2567,32 +2567,50 @@ Zotero.MCP.Tools = new function () {
 		
 		// By default, the most recently used window, or a new one if there's none
 		let win = newWindow ? null : getWindowByID(windowID, tabID) ?? Zotero.getMainWindow();
-		let view;
+		let viewTabID;
+		let restore = false;
 		if (!win) {
 			win = Zotero.openMainWindow({ libraryTabState: state });
-			view = await waitForLibraryView(win, null, deadline);
 		}
 		else {
 			let { Zotero_Tabs, ZoteroPane } = win;
 			if (tabID && !Zotero_Tabs.isLibraryTab(tabID)) {
 				throw new Zotero.MCP.ToolError(`${tabID} isn't a library tab`);
 			}
-			let viewTabID = tabID ?? ZoteroPane.libraryView?.tabID;
+			viewTabID = tabID ?? ZoteroPane.libraryView?.tabID;
 			if (newTab || !viewTabID) {
 				Zotero_Tabs.addLibraryTab({ state, select: true });
-				view = await waitForLibraryView(win, Zotero_Tabs.selectedID, deadline);
+				viewTabID = Zotero_Tabs.selectedID;
 			}
 			else {
 				Zotero_Tabs.select(viewTabID);
-				view = await waitForLibraryView(win, viewTabID, deadline);
-				await view.restoreLibraryTabState(state);
+				restore = true;
 			}
-		}
-		if (allItems) {
-			view.itemsView.selection.selectAll();
 		}
 		if (focus) {
 			Zotero.Utilities.Internal.activate(win);
+		}
+		// Finished also when the tab outlasts the call
+		let showing = (async () => {
+			let view = await waitForLibraryView(win, viewTabID);
+			if (restore) {
+				await view.restoreLibraryTabState(state);
+			}
+			if (allItems) {
+				view.itemsView.selection.selectAll();
+			}
+			return view;
+		})();
+		let view = await untilDeadline(showing, deadline);
+		if (view === TIMED_OUT) {
+			return Zotero.MCP.jsonResult({
+				windowID: win.Zotero_Tabs?.windowID,
+				tabID: viewTabID,
+				libraryID,
+				status: 'pending',
+				notice: 'Zotero is still opening the library tab, and shows the items once it has. '
+					+ 'Call zotero_get_context later to see them.',
+			});
 		}
 		let selected = view.itemsView.getSelectedObjects();
 		return Zotero.MCP.jsonResult({
@@ -2913,19 +2931,13 @@ Zotero.MCP.Tools = new function () {
 	/**
 	 * A library tab's view once it shows what it was opened with
 	 *
-	 * @param {String|null} tabID - Null for the library tab of a new window
-	 * @param {Number} deadline - Date.now() time to stop waiting at
+	 * @param {String|undefined} tabID - Undefined for the library tab of a new window
 	 */
-	async function waitForLibraryView(win, tabID, deadline) {
+	async function waitForLibraryView(win, tabID) {
 		let view;
 		while (!(view = tabID ? win.ZoteroPane?.getLibraryView(tabID) : win.ZoteroPane?.libraryView)?.loaded) {
 			if (win.closed) {
 				throw new Zotero.MCP.ToolError('The window was closed before the library tab opened');
-			}
-			if (Date.now() > deadline) {
-				throw new Zotero.MCP.ToolError(
-					'Zotero is still opening the library tab. Call zotero_get_context later for it.'
-				);
 			}
 			await Zotero.Promise.delay(20);
 		}

@@ -1863,10 +1863,14 @@ describe("MCP tools", function () {
 		});
 		
 		it("should say when a library tab is still opening at the deadline", async function () {
-			sinon.stub(win.ZoteroPane, 'getLibraryView').returns(null);
-			let error = await withBudget(300, () => callForError('zotero_select', { allItems: true, newTab: true }));
-			assert.match(error, /still opening the library tab/);
-			sinon.restore();
+			let getLibraryView = sinon.stub(win.ZoteroPane, 'getLibraryView').returns(null);
+			let result = await withBudget(300, () => call('zotero_select', { allItems: true, newTab: true }));
+			assert.equal(result.status, 'pending');
+			assert.equal(result.tabID, win.Zotero_Tabs.selectedID);
+			assert.match(result.notice, /still opening the library tab/);
+			// Selected once the tab is open
+			getLibraryView.restore();
+			await waitForCallback(() => win.ZoteroPane.getLibraryView(result.tabID)?.itemsView.getSelectedObjects().length);
 			win.Zotero_Tabs.close(win.Zotero_Tabs.selectedID);
 		});
 		
