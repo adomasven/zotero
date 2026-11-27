@@ -212,6 +212,39 @@ describe("MCP tools", function () {
 			assert.deepEqual(items.map(each => [each.key, each.parentItem]), [[annotation.key, pdf.key]]);
 		});
 		
+		it("should return a saved search's results at its own level, unless the conditions name one", async function () {
+			sinon.stub(Permissions, '_ask').resolves('allow');
+			let word = randomWord();
+			let item = await createArticle();
+			let matching = await createDataObject('item', { itemType: 'note', parentID: item.id, note: `<p>${word} one</p>` });
+			await createDataObject('item', { itemType: 'note', parentID: item.id, note: `<p>${word} two</p>` });
+			await createDataObject('item', { itemType: 'note', parentID: item.id, note: '<p>other</p>' });
+			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
+			let annotation = await createAnnotation('highlight', attachment);
+			let { key, itemCount } = await call('zotero_add_saved_search', {
+				name: randomWord(),
+				conditions: [
+					{ condition: 'itemType', operator: 'is', value: 'note' },
+					{ condition: 'note', operator: 'contains', value: word },
+				],
+			});
+			assert.equal(itemCount, 2);
+			
+			let { items } = await call('zotero_search', { savedSearchKey: key });
+			assert.lengthOf(items, 2);
+			assert.isTrue(items.every(each => each.itemType == 'note'));
+			({ items } = await call('zotero_search', {
+				savedSearchKey: key,
+				conditions: [{ condition: 'note', operator: 'contains', value: 'one' }],
+			}));
+			assert.deepEqual(items.map(each => each.key), [matching.key]);
+			({ items } = await call('zotero_search', {
+				savedSearchKey: key,
+				conditions: [{ condition: 'itemType', operator: 'is', value: 'annotation' }],
+			}));
+			assert.deepEqual(items.map(each => each.key), [annotation.key]);
+		});
+		
 		it("should list a collection's items, sorted and in pages", async function () {
 			let collection = await createDataObject('collection');
 			let prefix = Zotero.Utilities.randomString();

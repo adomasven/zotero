@@ -156,13 +156,17 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError('Give collectionKey or savedSearchKey, not both');
 		}
 		
-		// The scope, as in Zotero.CollectionTreeRow#getSearchObject()
-		let scope;
+		let items;
+		// Conditions that name a child type (itemType is note) return those, not their items
+		let resultLevel = 'item';
 		if (savedSearchKey) {
-			scope = getSavedSearch(libraryID, savedSearchKey);
+			({ items, resultLevel } = await searchSavedSearch(
+				getSavedSearch(libraryID, savedSearchKey), conditions
+			));
 		}
 		else {
-			scope = new Zotero.Search();
+			// The scope, as in Zotero.CollectionTreeRow#getSearchObject()
+			let scope = new Zotero.Search();
 			scope.libraryID = libraryID;
 			scope.addCondition('noChildren', 'true');
 			if (collectionKey) {
@@ -172,19 +176,17 @@ Zotero.MCP.Tools = new function () {
 					scope.addCondition('recursive', 'true');
 				}
 			}
+			let search = new Zotero.Search();
+			search.libraryID = libraryID;
+			search.setScope(scope, true);
+			if (conditions.length) {
+				let built;
+				({ search: built, resultLevel } = buildSearch(libraryID, conditions));
+				built.setScope(search, true);
+				search = built;
+			}
+			items = await Zotero.Items.getAsync(await search.search());
 		}
-		let search = new Zotero.Search();
-		search.libraryID = libraryID;
-		search.setScope(scope, true);
-		// Conditions that name a child type (itemType is note) return those, not their items
-		let resultLevel = 'item';
-		if (conditions.length) {
-			let built;
-			({ search: built, resultLevel } = buildSearch(libraryID, conditions));
-			built.setScope(search, true);
-			search = built;
-		}
-		let items = await Zotero.Items.getAsync(await search.search());
 		if (resultLevel == 'item') {
 			items = Zotero.Items.getTopLevel(items);
 		}
@@ -198,6 +200,51 @@ Zotero.MCP.Tools = new function () {
 			nextOffset: offset + limit < items.length ? offset + limit : undefined,
 		});
 	};
+	
+	/**
+	 * A saved search's results, narrowed by conditions. They're at the level the conditions
+	 * name, e.g. the notes of the items it finds, or else at the saved search's own level.
+	 */
+	async function searchSavedSearch(savedSearch, conditions) {
+		let savedLevel = getResultLevel(savedSearch);
+		let found = await Zotero.Items.getAsync(await savedSearch.search());
+		if (!conditions.length) {
+			return { items: found, resultLevel: savedLevel };
+		}
+		let { search, resultLevel } = buildSearch(savedSearch.libraryID, conditions, savedLevel);
+		let items = await Zotero.Items.getAsync(await search.search());
+		// The same notes, attachments or annotations, or else those of the same items
+		if (resultLevel == savedLevel && resultLevel != 'item') {
+			let ids = new Set(found.map(item => item.id));
+			items = items.filter(item => ids.has(item.id));
+		}
+		else {
+			let topLevel = new Set(Zotero.Items.getTopLevel(found));
+			items = items.filter(item => topLevel.has(item.topLevelItem));
+		}
+		return { items, resultLevel };
+	}
+	
+	/**
+	 * The kind of item a search returns: attachment, note or annotation, or else item, with
+	 * matches in children standing for their items
+	 */
+	function getResultLevel(search) {
+		let depth = 0;
+		for (let { condition, operator } of Object.values(search.getConditions())) {
+			if (condition == 'groupStart') {
+				depth++;
+			}
+			else if (condition == 'groupEnd') {
+				depth--;
+			}
+			else if (depth == 0 && condition == 'resultLevel'
+					&& ['attachment', 'note', 'annotation'].includes(operator)) {
+				return operator;
+			}
+		}
+		return 'item';
+	}
 	
 	/**
 	 * Items, notes and attachments as Zotero item JSON, with a regular item's attachments and
@@ -1175,11 +1222,15 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * The items a saved search shows, as in its view: top-level, and not in the trash
+	 * What a saved search finds, as zotero_search returns it: the notes, attachments or
+	 * annotations it's for, or else top-level items, and not in the trash
 	 */
 	async function countSearchItems(search) {
 		let items = await Zotero.Items.getAsync(await search.search());
-		return Zotero.Items.getTopLevel(items).filter(item => !item.deleted).length;
+		if (getResultLevel(search) == 'item') {
+			items = Zotero.Items.getTopLevel(items);
+		}
+		return items.filter(item => !item.deleted).length;
 	}
 	
 	//
@@ -3378,7 +3429,7 @@ Zotero.MCP.Tools = new function () {
 	 *
 	 * @return {Object} { search, resultLevel }, where resultLevel is the kind of item it returns
 	 */
-	function buildSearch(libraryID, conditions) {
+	function buildSearch(libraryID, conditions, defaultLevel = 'item') {
 		let toNode = (node) => {
 			if (node.conditions) {
 				return { joinMode: node.joinMode, level: node.level, children: node.conditions.map(toNode) };
@@ -3411,7 +3462,7 @@ Zotero.MCP.Tools = new function () {
 		let tree = { joinMode: 'all', children: conditions.map(toNode) };
 		// A child type names the rows to return rather than filtering items, as in
 		// Zotero.SearchQuery.getSearch()
-		let resultLevel = 'item';
+		let resultLevel = defaultLevel;
 		let pins = tree.children.filter(node => node.condition == 'itemType' && node.operator == 'is'
 			&& ['attachment', 'note', 'annotation'].includes(node.value));
 		if (pins.length && new Set(pins.map(pin => pin.value)).size == 1) {
