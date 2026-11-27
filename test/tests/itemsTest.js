@@ -803,4 +803,56 @@ describe("Zotero.Items", function () {
 			assert.include(ids, att.id);
 		});
 	});
+
+	describe("#restoreFromTrash()", function () {
+		it("should restore items, children, standalone attachments, collections, and searches", async function () {
+			let parent = await createDataObject('item', { itemType: 'journalArticle' });
+			let note1 = await createDataObject('item', { itemType: 'note', parentID: parent.id });
+			let note2 = await createDataObject('item', { itemType: 'note', parentID: parent.id });
+			let childAtt = await importFileAttachment('test.pdf', { parentID: parent.id });
+			let standaloneAtt = await importFileAttachment('test.pdf');
+			let col = await createDataObject('collection');
+			let subcol = await createDataObject('collection', { parentID: col.id });
+			let search = await createDataObject('search');
+
+			await Zotero.DB.executeTransaction(async () => {
+				for (let obj of [parent, note1, note2, childAtt, standaloneAtt, col, subcol, search]) {
+					obj.deleted = true;
+					await obj.save();
+				}
+			});
+
+			// Passing parent + one child restores only that child, leaving siblings trashed
+			let restored = await Zotero.DB.executeTransaction(
+				() => Zotero.Items.restoreFromTrash([parent, note1])
+			);
+			assert.sameMembers(restored, [parent, note1]);
+			assert.isFalse(parent.deleted);
+			assert.isFalse(note1.deleted);
+			assert.isTrue(note2.deleted);
+			assert.isTrue(childAtt.deleted);
+
+			// Passing just the parent restores remaining trashed children
+			await Zotero.DB.executeTransaction(async () => {
+				parent.deleted = true;
+				await parent.save();
+			});
+			restored = await Zotero.DB.executeTransaction(
+				() => Zotero.Items.restoreFromTrash([parent])
+			);
+			assert.sameMembers(restored, [parent, note2, childAtt]);
+			assert.isFalse(note2.deleted);
+			assert.isFalse(childAtt.deleted);
+
+			// Standalone attachment, collection with subcollection, and search restore cleanly
+			restored = await Zotero.DB.executeTransaction(
+				() => Zotero.Items.restoreFromTrash([standaloneAtt, col, search])
+			);
+			assert.sameMembers(restored, [standaloneAtt, col, subcol, search]);
+			assert.isFalse(standaloneAtt.deleted);
+			assert.isFalse(col.deleted);
+			assert.isFalse(subcol.deleted);
+			assert.isFalse(search.deleted);
+		});
+	});
 });

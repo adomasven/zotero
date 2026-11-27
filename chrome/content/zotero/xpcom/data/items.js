@@ -1146,6 +1146,66 @@ Zotero.Items = function () {
 	
 	
 	/**
+	 * Restore trashed items, collections, and saved searches from the trash.
+	 *
+	 * Restoring a collection also restores its trashed subcollections. Restoring a
+	 * parent item also restores all of its trashed children unless one or more of
+	 * its children are also in `objects`, in which case only those children are
+	 * restored.
+	 *
+	 * Requires an active transaction; callers stage their own undo action label.
+	 *
+	 * @param {Array<Zotero.Item|Zotero.Collection|Zotero.Search>} objects
+	 * @return {Promise<Array<Zotero.Item|Zotero.Collection|Zotero.Search>>} Objects that were restored
+	 */
+	this.restoreFromTrash = async function (objects) {
+		Zotero.DB.requireTransaction();
+
+		let selected = new Set(objects);
+		let changed = [];
+		let restore = async (object) => {
+			if (object.deleted) {
+				object.deleted = false;
+				await object.save();
+				changed.push(object);
+			}
+		};
+
+		// Restore parents before children
+		let ordered = [...selected].sort((a, b) => (a.parentID ? 1 : 0) - (b.parentID ? 1 : 0));
+		for (let object of ordered) {
+			await restore(object);
+
+			if (object instanceof Zotero.Collection) {
+				let subcollections = Zotero.Collections.get(
+					object.getDescendents(false, 'collection', true).map(col => col.id)
+				);
+				for (let subcollection of subcollections) {
+					await restore(subcollection);
+				}
+			}
+			else if (object instanceof Zotero.Item && !object.isAnnotation()) {
+				let childIDs = [];
+				if (!object.isNote()) {
+					childIDs.push(...object.getNotes(true));
+					if (!object.isAttachment()) {
+						childIDs.push(...object.getAttachments(true));
+					}
+				}
+				let childItems = Zotero.Items.get(childIDs);
+				if (!childItems.some(child => selected.has(child))) {
+					for (let child of childItems) {
+						await restore(child);
+					}
+				}
+			}
+		}
+
+		return changed;
+	};
+	
+	
+	/**
 	 * @param {Integer} libraryID - Library to delete from
 	 * @param {Object} [options]
 	 * @param {Function} [options.onProgress] - fn(progress, progressMax)

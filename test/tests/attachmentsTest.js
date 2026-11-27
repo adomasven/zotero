@@ -3089,5 +3089,69 @@ describe("Zotero.Attachments", function () {
 				}
 			}
 		});
+		it("should support opt-in autoRename on importFromFile and linkFromFile", async function () {
+			let item = createUnsavedDataObject('item', { itemType: 'journalArticle' });
+			item.setField('title', 'Auto Rename Test');
+			await item.saveTx();
+			let tempDir = await getTempDirectory();
+			let pdfSrc = PathUtils.join(getTestDataDirectory().path, 'test.pdf');
+			let file1 = PathUtils.join(tempDir, 'orig1.pdf');
+			let file2 = PathUtils.join(tempDir, 'orig2.pdf');
+			let file3 = PathUtils.join(tempDir, 'orig3.pdf');
+			await IOUtils.copy(pdfSrc, file1);
+			await IOUtils.copy(pdfSrc, file2);
+			await IOUtils.copy(pdfSrc, file3);
+
+			let att1, att2, att3;
+			try {
+				// First imported attachment with autoRename: true is renamed
+				att1 = await Zotero.Attachments.importFromFile({
+					file: file1,
+					parentItemID: item.id,
+					autoRename: true,
+				});
+				assert.equal(att1.attachmentFilename, 'Auto Rename Test.pdf');
+
+				// Second attachment on same parent isn't auto-renamed because parent already has a non-HTML file
+				att2 = await Zotero.Attachments.importFromFile({
+					file: file2,
+					parentItemID: item.id,
+					autoRename: true,
+				});
+				assert.equal(att2.attachmentFilename, 'orig2.pdf');
+
+				// Explicit fileBaseName overrides autoRename
+				await att1.eraseTx();
+				await att2.eraseTx();
+				att1 = att2 = null;
+				att1 = await Zotero.Attachments.importFromFile({
+					file: file1,
+					parentItemID: item.id,
+					fileBaseName: 'Explicit Name',
+					autoRename: true,
+				});
+				assert.equal(att1.attachmentFilename, 'Explicit Name.pdf');
+
+				// Linked file with autoRename: true renames on disk when autoRenameFiles.linked is enabled
+				await att1.eraseTx();
+				att1 = null;
+				Zotero.Prefs.set('autoRenameFiles.linked', true);
+				att3 = await Zotero.Attachments.linkFromFile({
+					file: file3,
+					parentItemID: item.id,
+					autoRename: true,
+				});
+				assert.equal(PathUtils.filename(att3.getFilePath()), 'Auto Rename Test.pdf');
+				assert.isTrue(await IOUtils.exists(att3.getFilePath()));
+			}
+			finally {
+				Zotero.Prefs.clear('autoRenameFiles.linked');
+				for (let obj of [att1, att2, att3, item]) {
+					if (obj) {
+						await obj.eraseTx();
+					}
+				}
+			}
+		});
 	});
 })

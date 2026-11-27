@@ -55,6 +55,9 @@ Zotero.Attachments = new function () {
 	 * @param {String} [options.title]
 	 * @param {Integer[]} [options.collections] - Collection keys or ids to add new item to
 	 * @param {String} [options.fileBaseName]
+	 * @param {Boolean} [options.autoRename] - Automatically rename the file if enabled by prefs,
+	 *     the parent has no other non-HTML file attachments, and the type is allowed (ignored if
+	 *     fileBaseName is given)
 	 * @param {String} [options.contentType]
 	 * @param {String} [options.charset]
 	 * @param {Object} [options.saveOptions] - Options to pass to Zotero.Item::save()
@@ -75,19 +78,28 @@ Zotero.Attachments = new function () {
 		var charset = options.charset;
 		var saveOptions = options.saveOptions;
 		
+		if (leafName.endsWith(".lnk")) {
+			throw new Error("Cannot add Windows shortcut");
+		}
+		if (parentItemID && collections) {
+			throw new Error("parentItemID and collections cannot both be provided");
+		}
+		
+		if (!fileBaseName && options.autoRename && parentItemID) {
+			let parentItem = await Zotero.Items.getAsync(parentItemID);
+			if (parentItem
+					&& this.shouldAutoRenameFile(false, parentItem.libraryID)
+					&& !parentItem.numNonHTMLFileAttachments()) {
+				fileBaseName = await this.getRenamedFileBaseNameIfAllowedType(parentItem, path);
+			}
+		}
+		
 		if (fileBaseName) {
 			let ext = Zotero.File.getExtension(path);
 			var newName = fileBaseName + (ext != '' ? '.' + ext : '');
 		}
 		else {
 			var newName = Zotero.File.getValidFileName(leafName);
-		}
-		
-		if (leafName.endsWith(".lnk")) {
-			throw new Error("Cannot add Windows shortcut");
-		}
-		if (parentItemID && collections) {
-			throw new Error("parentItemID and collections cannot both be provided");
 		}
 		
 		var attachmentItem, newFile, destDir;
@@ -179,6 +191,10 @@ Zotero.Attachments = new function () {
 	 * @param {Integer[]|String[]} [options.parentItemID] - Parent item to add item to
 	 * @param {String} [options.title]
 	 * @param {Integer[]} [options.collections] - Collection keys or ids to add new item to
+	 * @param {String} [options.fileBaseName] - Rename linked file on disk to this base name
+	 * @param {Boolean} [options.autoRename] - Automatically rename the linked file on disk if
+	 *     enabled by prefs, the parent has no other non-HTML file attachments, and the type is
+	 *     allowed (ignored if fileBaseName is given)
 	 * @param {String} [options.contentType] - Content type
 	 * @param {String} [options.charset] - Character set
 	 * @param {Object} [options.saveOptions] - Options to pass to Zotero.Item::save()
@@ -191,13 +207,42 @@ Zotero.Attachments = new function () {
 		var parentItemID = options.parentItemID;
 		var title = options.title;
 		var collections = options.collections;
-		var contentType = options.contentType || ((await Zotero.MIME.getMIMETypeFromFile(file)));
+		var fileBaseName = options.fileBaseName;
 		var charset = options.charset;
 		var saveOptions = options.saveOptions;
 		
 		if (parentItemID && collections) {
 			throw new Error("parentItemID and collections cannot both be provided");
 		}
+		
+		if (!fileBaseName && options.autoRename && parentItemID) {
+			let parentItem = await Zotero.Items.getAsync(parentItemID);
+			if (parentItem
+					&& this.shouldAutoRenameFile(true, parentItem.libraryID)
+					&& !parentItem.numNonHTMLFileAttachments()) {
+				fileBaseName = await this.getRenamedFileBaseNameIfAllowedType(parentItem, file.path);
+			}
+		}
+		if (fileBaseName) {
+			// Rename linked file, with unique suffix if necessary
+			try {
+				let ext = Zotero.File.getExtension(file.path);
+				let newName = await Zotero.File.rename(
+					file.path,
+					fileBaseName + (ext ? '.' + ext : ''),
+					{
+						unique: true
+					}
+				);
+				// Update path in case the name was changed to be unique
+				file = Zotero.File.pathToFile(PathUtils.join(PathUtils.parent(file.path), newName));
+			}
+			catch (e) {
+				Zotero.logError(e);
+			}
+		}
+		
+		var contentType = options.contentType || ((await Zotero.MIME.getMIMETypeFromFile(file)));
 		
 		var item = await _addToDB({
 			file,

@@ -1796,59 +1796,19 @@ class CollectionViewItemTree extends ItemTree {
 			let addedItems = [];
 			var notifierQueue = new Zotero.Notifier.Queue;
 			try {
-				// If there's a single file being added to a parent, automatic renaming is enabled,
-				// and there are no other non-HTML attachments, we'll rename the file as long as it's
-				// an allowed type. The dragged data could be a URL, so we don't yet know the file type.
-				// This should be kept in sync with ZoteroPane.addAttachmentFromDialog().
-				let renameIfAllowedType = false;
-				let parentItem;
-				if (parentItemID
-					&& data.length == 1
-					&& Zotero.Attachments.shouldAutoRenameFile(dropEffect == 'link', targetLibraryID)) {
-					parentItem = Zotero.Items.get(parentItemID);
-					if (!parentItem.numNonHTMLFileAttachments()) {
-						renameIfAllowedType = true;
-					}
-				}
-
 				// If we have more than one file, we only want to call setAutoAttachmentTitle()
 				// at the end, once the attachments know whether they have siblings
 				let delaySetAutoAttachmentTitle = data.length > 1;
+				let autoRename = data.length == 1;
 
 				for (var i = 0; i < data.length; i++) {
 					var file = data[i].path;
 
-					// Rename file if it's an allowed type
-					let fileBaseName = false;
-					if (renameIfAllowedType) {
-						fileBaseName = await Zotero.Attachments.getRenamedFileBaseNameIfAllowedType(
-							parentItem, file
-						);
-					}
-
 					let item;
 					if (dropEffect == 'link') {
-						// Rename linked file, with unique suffix if necessary
-						try {
-							if (fileBaseName) {
-								let ext = Zotero.File.getExtension(file);
-								let newName = await Zotero.File.rename(
-									file,
-									fileBaseName + (ext ? '.' + ext : ''),
-									{
-										unique: true
-									}
-								);
-								// Update path in case the name was changed to be unique
-								file = PathUtils.join(PathUtils.parent(file), newName);
-							}
-						}
-						catch (e) {
-							Zotero.logError(e);
-						}
-
 						item = await Zotero.Attachments.linkFromFile({
 							file,
+							autoRename,
 							title: delaySetAutoAttachmentTitle ? '' : undefined,
 							parentItemID,
 							collections: parentCollectionIDs || undefined,
@@ -1865,8 +1825,8 @@ class CollectionViewItemTree extends ItemTree {
 
 						item = await Zotero.Attachments.importFromFile({
 							file,
+							autoRename,
 							title: delaySetAutoAttachmentTitle ? '' : undefined,
-							fileBaseName,
 							libraryID: targetLibraryID,
 							parentItemID,
 							collections: parentCollectionIDs || undefined,

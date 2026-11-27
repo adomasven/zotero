@@ -2682,14 +2682,10 @@ var ZoteroPane = new function () {
 	 * @return {Promise}
 	 */
 	this.restoreSelectedItems = async function () {
-		// The rows to restore from, which the transaction reads once it runs
-		let itemsView = this.itemsView;
 		let selectedObjects = this.getSelectedObjects();
 		if (!selectedObjects.length) {
 			return;
 		}
-
-		let isSelected = object => selectedObjects.includes(object);
 
 		await Zotero.DB.executeTransaction(async () => {
 			let undoAction;
@@ -2704,55 +2700,7 @@ var ZoteroPane = new function () {
 			}
 			Zotero.UndoHistory.stageAction(undoAction, { count: selectedObjects.length });
 
-			for (let row = 0; row < itemsView.rowCount; row++) {
-				// Only look at top-level items
-				if (itemsView.getLevel(row) !== 0
-						|| !itemsView.getRow(row).isObjectRow) {
-					continue;
-				}
-
-				let parent = itemsView.getRow(row).ref;
-				let childIDs = [];
-				let subcollections = [];
-				if (parent instanceof Zotero.Collection) {
-					// If the restored item is a collection, restore its subcollections too
-					if (isSelected(parent)) {
-						subcollections = parent.getDescendents(false, 'collection', true).map(col => col.id);
-					}
-				}
-				else {
-					if (!parent.isNote()) {
-						childIDs.push(...parent.getNotes(true));
-					}
-					if (!parent.isAttachment()) {
-						childIDs.push(...parent.getAttachments(true));
-					}
-				}
-				let childItems = Zotero.Items.get(childIDs);
-				if (isSelected(parent)) {
-					if (parent.deleted) {
-						parent.deleted = false;
-						await parent.save();
-					}
-
-					let noneSelected = !childItems.some(isSelected);
-					let allChildren = childItems.concat(Zotero.Collections.get(subcollections));
-					for (let child of allChildren) {
-						if ((noneSelected || isSelected(child)) && child.deleted) {
-							child.deleted = false;
-							await child.save();
-						}
-					}
-				}
-				else {
-					for (let child of childItems) {
-						if (isSelected(child) && child.deleted) {
-							child.deleted = false;
-							await child.save();
-						}
-					}
-				}
-			}
+			await Zotero.Items.restoreFromTrash(selectedObjects);
 		});
 	};
 	
@@ -5139,56 +5087,25 @@ var ZoteroPane = new function () {
 		var addedItems = [];
 		var notifierQueue = new Zotero.Notifier.Queue();
 		var collections;
-		var fileBaseName;
 
 		try {
-			if (parentItemID) {
-				// If only one item is being added, automatic renaming is enabled, and the parent item
-				// doesn't have any other non-HTML file attachments, rename the file.
-				// This should be kept in sync with itemTreeView::drop().
-				if (files.length == 1 && Zotero.Attachments.shouldAutoRenameFile(link, libraryID)) {
-					let parentItem = Zotero.Items.get(parentItemID);
-					if (!parentItem.numNonHTMLFileAttachments()) {
-						fileBaseName = await Zotero.Attachments.getRenamedFileBaseNameIfAllowedType(
-							parentItem, files[0]
-						);
-					}
-				}
-			}
 			// If not adding to an item, add to all selected collections
-			else {
+			if (!parentItemID) {
 				collections = this.getSelectedCollections(true);
 			}
 
 			// If we have more than one file, we only want to call setAutoAttachmentTitle()
 			// at the end, once the attachments know whether they have siblings
 			let delaySetAutoAttachmentTitle = files.length > 1;
+			let autoRename = files.length == 1;
 
 			for (let file of files) {
 				let item;
 
 				if (link) {
-					// Rename linked file, with unique suffix if necessary
-					try {
-						if (fileBaseName) {
-							let ext = Zotero.File.getExtension(file);
-							let newName = await Zotero.File.rename(
-								file,
-								fileBaseName + (ext ? '.' + ext : ''),
-								{
-									unique: true
-								}
-							);
-							// Update path in case the name was changed to be unique
-							file = PathUtils.join(PathUtils.parent(file), newName);
-						}
-					}
-					catch (e) {
-						Zotero.logError(e);
-					}
-
 					item = await Zotero.Attachments.linkFromFile({
 						file,
+						autoRename,
 						title: delaySetAutoAttachmentTitle ? '' : undefined,
 						parentItemID,
 						collections: collections && collections.length ? collections : undefined,
@@ -5206,7 +5123,7 @@ var ZoteroPane = new function () {
 					item = await Zotero.Attachments.importFromFile({
 						file,
 						libraryID,
-						fileBaseName,
+						autoRename,
 						title: delaySetAutoAttachmentTitle ? '' : undefined,
 						parentItemID,
 						collections: collections && collections.length ? collections : undefined,
