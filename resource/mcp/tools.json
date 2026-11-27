@@ -793,7 +793,7 @@
 		{
 			"name": "zotero_set_tag_color",
 			"title": "Set a Zotero tag's color",
-			"description": "Set or remove a tag's color, or move it to another number key. Colored tags show first in the tag selector and as colored dots on items; at most 9 tags can have colors. Color changes can't be undone.",
+			"description": "Set or remove a tag's color, or move it to another number key. Colored tags show first in the tag selector and as colored dots on items; at most 9 tags can have colors.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {

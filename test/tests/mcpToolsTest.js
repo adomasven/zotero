@@ -865,6 +865,9 @@ describe("MCP tools", function () {
 			assert.equal(result.color, 'green');
 			assert.equal(Zotero.Tags.getColor(libraryID, tag).color, '#5FB236');
 			assert.isAbove(result.position, 0);
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isFalse(Zotero.Tags.getColor(libraryID, tag));
+			result = await call('zotero_set_tag_color', { tag, color: 'green' });
 			
 			// A position alone moves the color to another number key and keeps it
 			let position = result.position == 9 ? 8 : 9;

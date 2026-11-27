@@ -941,10 +941,9 @@ Zotero.MCP.Tools = new function () {
 	};
 	
 	/**
-	 * Set or remove a tag's color, or its number key. Colors are a synced setting, outside the
-	 * undo history.
+	 * Set or remove a tag's color, or its number key
 	 */
-	this.setTagColor = async function ({ tag, color, position, libraryID }) {
+	this.setTagColor = async function ({ tag, color, position, libraryID }, { clientID }) {
 		libraryID = getLibraryID(libraryID);
 		tag = tag.trim();
 		if (!tag) {
@@ -967,7 +966,7 @@ Zotero.MCP.Tools = new function () {
 					+ 'Remove the color of another tag first.'
 			);
 		}
-		await Zotero.Tags.setColor(libraryID, tag, color || false, position && position - 1);
+		await edit(clientID, () => Zotero.Tags.setColor(libraryID, tag, color || false, position && position - 1));
 		let set = Zotero.Tags.getColor(libraryID, tag);
 		return Zotero.MCP.jsonResult({
 			libraryID,
