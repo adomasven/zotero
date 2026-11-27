@@ -595,6 +595,196 @@ Zotero.Search.prototype.getConditions = function (){
 }
 
 
+/**
+ * Return the top-level result level of this search ('item', 'attachment', 'note',
+ * 'annotation', or 'any' when unset).
+ *
+ * @return {String}
+ */
+Zotero.Search.prototype.getResultLevel = function () {
+	this._requireData('conditions');
+	let resultLevel = 'any';
+	let depth = 0;
+	for (let cond of Object.values(this._conditions)) {
+		if (cond.condition == 'groupStart') {
+			depth++;
+		}
+		else if (cond.condition == 'groupEnd') {
+			depth--;
+		}
+		else if (depth == 0 && cond.condition == 'resultLevel') {
+			resultLevel = cond.operator;
+		}
+	}
+	return resultLevel;
+};
+
+
+/**
+ * Parse the search's flat condition list into a nested tree.
+ *
+ * @return {Object} { joinMode, level, children, options }
+ */
+Zotero.Search.prototype.getConditionTree = function () {
+	let root = { joinMode: 'all', children: [], options: [] };
+	let stack = [root];
+	let foundRootJoinMode = false;
+	for (let { condition, mode, operator, value } of Object.values(this.getConditions())) {
+		let group = stack[stack.length - 1];
+		if (condition == 'groupStart') {
+			let child = { children: [] };
+			group.children.push(child);
+			stack.push(child);
+		}
+		else if (condition == 'groupEnd') {
+			if (stack.length > 1) {
+				let closed = stack.pop();
+				let parent = stack[stack.length - 1];
+				// A condition on a child is saved as a group of one at the child's level
+				// without a joinMode
+				if (closed.level && !closed.joinMode
+						&& closed.children.length == 1 && !closed.children[0].children
+						&& !closed.children[0].level) {
+					parent.children[parent.children.length - 1] = {
+						...closed.children[0],
+						level: closed.level,
+					};
+				}
+				else if (!closed.joinMode) {
+					closed.joinMode = 'all';
+				}
+			}
+		}
+		else if (condition == 'joinMode') {
+			if (group == root) {
+				if (!foundRootJoinMode) {
+					root.joinMode = operator;
+					foundRootJoinMode = true;
+				}
+			}
+			else {
+				group.joinMode = operator;
+			}
+		}
+		else if (condition == 'resultLevel') {
+			group.level = operator;
+		}
+		// Legacy top-level noChildren means item level when no explicit resultLevel is set
+		else if (condition == 'noChildren' && operator == 'true' && group == root) {
+			if (!root.level) {
+				root.level = 'item';
+			}
+		}
+		else if (group == root && Zotero.SearchConditions.get(condition)?.option) {
+			root.options.push({ condition, operator, value });
+		}
+		else {
+			let leaf = { condition, operator, value };
+			if (mode) {
+				leaf.mode = mode;
+			}
+			group.children.push(leaf);
+		}
+	}
+	while (stack.length > 1) {
+		let unclosed = stack.pop();
+		if (!unclosed.joinMode) {
+			unclosed.joinMode = 'all';
+		}
+	}
+	return root;
+};
+
+
+/**
+ * Append conditions from a condition tree to this search.
+ *
+ * @param {Object} tree - { joinMode, level, children, options }
+ */
+Zotero.Search.prototype.addConditionTree = function (tree) {
+	if (!tree) {
+		return;
+	}
+	if (tree.level) {
+		this.addCondition('resultLevel', tree.level);
+	}
+	if (tree.joinMode && tree.joinMode !== 'all') {
+		this.addCondition('joinMode', tree.joinMode);
+	}
+	let addNode = (node) => {
+		if (node.children) {
+			this.addCondition('groupStart', 'true', '');
+			// A group that matches at a child level is scoped to it, so all of
+			// its conditions match the same child
+			if (node.level) {
+				this.addCondition('resultLevel', node.level);
+			}
+			this.addCondition('joinMode', node.joinMode || 'all');
+			for (let child of node.children) {
+				addNode(child);
+			}
+			this.addCondition('groupEnd', 'true', '');
+			return;
+		}
+		let condition = node.mode ? `${node.condition}/${node.mode}` : node.condition;
+		// A condition that matches at a child level is scoped to it, so the
+		// match maps up to the item the search returns
+		if (node.level) {
+			this.addCondition('groupStart', 'true', '');
+			this.addCondition('resultLevel', node.level);
+			this.addCondition(condition, node.operator, node.value);
+			this.addCondition('groupEnd', 'true', '');
+			return;
+		}
+		this.addCondition(condition, node.operator, node.value);
+	};
+	for (let child of tree.children || []) {
+		addNode(child);
+	}
+	for (let option of tree.options || []) {
+		this.addCondition(option.condition, option.operator, option.value);
+	}
+};
+
+
+/**
+ * Replace all conditions on this search with those from a condition tree.
+ *
+ * @param {Object} tree - { joinMode, level, children, options }
+ */
+Zotero.Search.prototype.setConditionTree = function (tree) {
+	this._requireData('conditions');
+	while (Object.keys(this._conditions).length) {
+		this.removeCondition(Object.keys(this._conditions)[0]);
+	}
+	this.addConditionTree(tree);
+};
+
+
+/**
+ * Extract a child-type pin (`itemType is attachment|note|annotation`) at the root of an
+ * "all" condition tree into the search's result level, returning `{ tree, resultLevel }`.
+ * Conflicting pins stay as conditions so the search matches nothing.
+ *
+ * @param {Object} tree
+ * @param {String} [defaultLevel='item']
+ * @return {{ tree: Object, resultLevel: String }}
+ */
+Zotero.Search.extractResultLevel = function (tree, defaultLevel = 'item') {
+	let resultLevel = defaultLevel;
+	if (tree.joinMode === 'all') {
+		let pins = tree.children.filter(child => !child.children
+			&& child.condition === 'itemType' && child.operator === 'is'
+			&& ['attachment', 'note', 'annotation'].includes(child.value));
+		if (pins.length && new Set(pins.map(pin => pin.value)).size === 1) {
+			resultLevel = pins[0].value;
+			tree = { ...tree, children: tree.children.filter(child => !pins.includes(child)) };
+		}
+	}
+	return { tree, resultLevel };
+};
+
+
 Zotero.Search.prototype.hasPostSearchFilter = function () {
 	this._requireData('conditions');
 	for (let i of Object.values(this._conditions)) {
@@ -1087,9 +1277,8 @@ Zotero.Search.prototype._buildQuery = async function () {
 	// The result level the whole search returns. A top-level 'resultLevel' condition sets it;
 	// the default 'any' keeps the existing mixed-level behavior (no mapping, no
 	// level constraint on the result set).
-	let resultLevel = 'any';
+	let resultLevel = this.getResultLevel();
 	let groupDepth = 0;
-	let foundJoinMode = false;
 	for (let cond of conditionsToProcess) {
 		if (cond.condition == 'groupStart') {
 			groupDepth++;
@@ -1097,12 +1286,9 @@ Zotero.Search.prototype._buildQuery = async function () {
 		else if (cond.condition == 'groupEnd') {
 			groupDepth--;
 		}
-		else if (groupDepth == 0 && cond.condition == 'joinMode' && !foundJoinMode) {
+		else if (groupDepth == 0 && cond.condition == 'joinMode') {
 			this._joinMode = cond.operator;
-			foundJoinMode = true;
-		}
-		else if (groupDepth == 0 && cond.condition == 'resultLevel') {
-			resultLevel = cond.operator;
+			break;
 		}
 	}
 	

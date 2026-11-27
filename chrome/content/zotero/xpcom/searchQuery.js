@@ -1485,17 +1485,8 @@ Zotero.SearchQuery = new function () {
 		// level instead of being a condition: the level is the type filter,
 		// and the other conditions map to it -- `type:attachment by:smith`
 		// means Smith's attachments.
-		let resultLevel = 'item';
-		if (tree.joinMode === 'all') {
-			let pins = tree.children.filter(child => !child.children
-				&& child.condition === 'itemType' && child.operator === 'is'
-				&& ['attachment', 'note', 'annotation'].includes(child.value));
-			// Conflicting types stay conditions, and honestly match nothing
-			if (pins.length && new Set(pins.map(pin => pin.value)).size === 1) {
-				resultLevel = pins[0].value;
-				tree = { ...tree, children: tree.children.filter(child => !pins.includes(child)) };
-			}
-		}
+		let resultLevel;
+		({ tree, resultLevel } = Zotero.Search.extractResultLevel(tree));
 		search.addCondition('resultLevel', resultLevel);
 		// Free text is joined to the clauses with "all", so an "any" query
 		// becomes a group rather than something the text is OR'd into
@@ -1523,43 +1514,8 @@ Zotero.SearchQuery = new function () {
 	 * @param {Object} tree - From parse()
 	 */
 	this.addToSearch = function (search, tree) {
-		if (!tree) {
-			return;
-		}
-		if (tree.joinMode && tree.joinMode !== 'all') {
-			search.addCondition('joinMode', tree.joinMode);
-		}
-		for (let child of tree.children) {
-			_addNode(search, child);
-		}
+		search.addConditionTree(tree);
 	};
-
-	function _addNode(search, node) {
-		if (node.children) {
-			search.addCondition('groupStart', 'true', '');
-			// A group that matches at a child level is scoped to it, so all of
-			// its conditions match the same child
-			if (node.level) {
-				search.addCondition('resultLevel', node.level);
-			}
-			search.addCondition('joinMode', node.joinMode);
-			for (let child of node.children) {
-				_addNode(search, child);
-			}
-			search.addCondition('groupEnd', 'true', '');
-			return;
-		}
-		// A condition that matches at a child level is scoped to it, so the
-		// match maps up to the item the search returns
-		if (node.level) {
-			search.addCondition('groupStart', 'true', '');
-			search.addCondition('resultLevel', node.level);
-			search.addCondition(node.condition, node.operator, node.value);
-			search.addCondition('groupEnd', 'true', '');
-			return;
-		}
-		search.addCondition(node.condition, node.operator, node.value);
-	}
 
 	// Read a bare or quoted word, returning where it ends
 	function _readWord(text, pos) {

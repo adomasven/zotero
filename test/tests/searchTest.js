@@ -2314,4 +2314,65 @@ describe("Zotero.Search", function () {
 			assert.throws(f, /^Unknown search property/);
 		});
 	});
+
+	describe("#getConditionTree() / #setConditionTree() / #getResultLevel()", function () {
+		it("should round-trip nested groups, child-scoped leaves, and options", function () {
+			let s = new Zotero.Search();
+			let tree = {
+				joinMode: 'any',
+				level: 'item',
+				children: [
+					{ condition: 'title', operator: 'contains', value: 'climate' },
+					{ condition: 'annotationComment', operator: 'contains', value: 'check', level: 'annotation' },
+					{
+						joinMode: 'all',
+						level: 'attachment',
+						children: [
+							{ condition: 'fulltextContent', mode: 'regexp', operator: 'contains', value: 'foo.*bar' },
+							{ condition: 'tag', operator: 'is', value: 'important' },
+						],
+					},
+				],
+				options: [
+					{ condition: 'recursive', operator: 'true', value: '' },
+				],
+			};
+			s.setConditionTree(tree);
+			assert.equal(s.getResultLevel(), 'item');
+			assert.deepEqual(s.getConditionTree(), tree);
+		});
+
+		it("should map legacy noChildren to level 'item' and keep getResultLevel() 'any'", function () {
+			let s = new Zotero.Search();
+			s.addCondition('title', 'contains', 'test');
+			s.addCondition('noChildren', 'true');
+			assert.equal(s.getResultLevel(), 'any');
+			assert.equal(s.getConditionTree().level, 'item');
+		});
+
+		it("should extract a single child-type pin with extractResultLevel()", function () {
+			let { tree, resultLevel } = Zotero.Search.extractResultLevel({
+				joinMode: 'all',
+				children: [
+					{ condition: 'itemType', operator: 'is', value: 'note' },
+					{ condition: 'note', operator: 'contains', value: 'hello' },
+				],
+			});
+			assert.equal(resultLevel, 'note');
+			assert.deepEqual(tree.children, [
+				{ condition: 'note', operator: 'contains', value: 'hello' },
+			]);
+
+			// Conflicting pins stay as conditions
+			let conflict = Zotero.Search.extractResultLevel({
+				joinMode: 'all',
+				children: [
+					{ condition: 'itemType', operator: 'is', value: 'note' },
+					{ condition: 'itemType', operator: 'is', value: 'attachment' },
+				],
+			});
+			assert.equal(conflict.resultLevel, 'item');
+			assert.lengthOf(conflict.tree.children, 2);
+		});
+	});
 });

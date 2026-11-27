@@ -70,6 +70,7 @@ Zotero.SearchConditions = new function () {
 	 *  - special (don't show in search window menu)
 	 *  - template (special handling)
 	 *  - noLoad (can't load from saved search)
+	 *  - option (search option rather than a match condition)
 	 */
 	this.init = async function () {
 		var conditions = [
@@ -81,7 +82,8 @@ Zotero.SearchConditions = new function () {
 				operators: {
 					true: true,
 					false: true
-				}
+				},
+				option: true
 			},
 
 			{
@@ -89,7 +91,8 @@ Zotero.SearchConditions = new function () {
 				operators: {
 					true: true,
 					false: true
-				}
+				},
+				option: true
 			},
 			
 			// Don't include child items
@@ -106,7 +109,8 @@ Zotero.SearchConditions = new function () {
 				operators: {
 					true: true,
 					false: true
-				}
+				},
+				option: true
 			},
 			
 			{
@@ -114,7 +118,8 @@ Zotero.SearchConditions = new function () {
 				operators: {
 					true: true,
 					false: true
-				}
+				},
+				option: true
 			},
 			
 			{
@@ -122,7 +127,8 @@ Zotero.SearchConditions = new function () {
 				operators: {
 					true: true,
 					false: true
-				}
+				},
+				option: true
 			},
 
 			{
@@ -130,7 +136,8 @@ Zotero.SearchConditions = new function () {
 				operators: {
 					true: true,
 					false: true
-				}
+				},
+				option: true
 			},
 			
 			{
@@ -138,7 +145,8 @@ Zotero.SearchConditions = new function () {
 				operators: {
 					true: true,
 					false: true
-				}
+				},
+				option: true
 			},
 			
 			{
@@ -146,7 +154,8 @@ Zotero.SearchConditions = new function () {
 				operators: {
 					true: true,
 					false: true
-				}
+				},
+				option: true
 			},
 			
 			{
@@ -154,7 +163,8 @@ Zotero.SearchConditions = new function () {
 				operators: {
 					true: true,
 					false: true
-				}
+				},
+				option: true
 			},
 			
 			// Search recursively within collections
@@ -163,7 +173,8 @@ Zotero.SearchConditions = new function () {
 				operators: {
 					true: true,
 					false: true
-				}
+				},
+				option: true
 			},
 			
 			// Join mode
