@@ -30,6 +30,21 @@
 Zotero.Tags = new function () {
 	this.MAX_COLORED_TAGS = 9;
 	this.MAX_SYNC_LENGTH = 255;
+
+	// The tag color palette, as [l10n key, hex] pairs
+	Zotero.defineProperty(this, 'COLORS', {
+		value: [
+			['general.red', '#FF6666'],
+			['general.orange', '#FF8C19'],
+			['general.gray', '#999999'],
+			['general.green', '#5FB236'],
+			['general.teal', '#009980'],
+			['general.blue', '#2EA8E5'],
+			['general.purple', '#576DD9'],
+			['general.violet', '#A28AE5'],
+			['general.maroon', '#A6507B'],
+		]
+	});
 	
 	var _initialized = false;
 	var _tagsByID = new Map();

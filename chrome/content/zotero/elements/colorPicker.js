@@ -52,17 +52,7 @@
 				return this.getAttribute('colors').split(',');
 			}
 			else {
-				return [
-					'#FF6666',
-					'#FF8C19',
-					'#999999',
-					'#5FB236',
-					'#009980',
-					'#2EA8E5',
-					'#576DD9',
-					'#A28AE5',
-					'#A6507B'
-				];
+				return Zotero.Tags.COLORS.map(([, color]) => color);
 			}
 		}
 
@@ -90,17 +80,7 @@
 				if (this.hasAttribute('colors')) {
 					Zotero.debug('WARNING: <color-picker> CE: Set color-labels when setting colors');
 				}
-				return [
-					'general.red',
-					'general.orange',
-					'general.gray',
-					'general.green',
-					'general.teal',
-					'general.blue',
-					'general.purple',
-					'general.violet',
-					'general.maroon'
-				].map(label => Zotero.getString(label));
+				return Zotero.Tags.COLORS.map(([label]) => Zotero.getString(label));
 			}
 		}
 
