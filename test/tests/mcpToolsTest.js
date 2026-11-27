@@ -1609,7 +1609,8 @@ describe("MCP tools", function () {
 			// Restoring an item restores its trashed children
 			note.deleted = true;
 			await note.saveTx();
-			await call('zotero_restore_from_trash', { itemKeys: [item.key] });
+			let { itemKeys } = await call('zotero_restore_from_trash', { itemKeys: [item.key] });
+			assert.deepEqual(itemKeys, [item.key, note.key]);
 			assert.isTrue(ask.secondCall.calledWith('test-client', Permissions.EDIT_LIBRARY, item.libraryID));
 			assert.isFalse(item.deleted);
 			assert.isFalse(note.deleted);
@@ -1624,15 +1625,16 @@ describe("MCP tools", function () {
 			let child = await createDataObject('collection', { parentID: parent.id });
 			let item = await createArticle({ collections: [child.id] });
 			
-			let { collectionKeys } = await call('zotero_trash', { collectionKeys: [child.key, parent.key] });
-			assert.deepEqual(collectionKeys, [parent.key]);
+			let { collectionKeys } = await call('zotero_trash', { collectionKeys: [parent.key] });
+			assert.deepEqual(collectionKeys, [parent.key, child.key]);
 			assert.isTrue(parent.deleted);
 			assert.isTrue(child.deleted);
 			assert.isFalse(item.deleted);
 			let { collections } = await call('zotero_list_collections', { inTrash: true });
 			assert.includeMembers(collections.map(each => each.key), [parent.key, child.key]);
 			
-			await call('zotero_restore_from_trash', { collectionKeys: [parent.key] });
+			({ collectionKeys } = await call('zotero_restore_from_trash', { collectionKeys: [parent.key] }));
+			assert.deepEqual(collectionKeys, [parent.key, child.key]);
 			assert.isFalse(parent.deleted);
 			assert.isFalse(child.deleted);
 		});

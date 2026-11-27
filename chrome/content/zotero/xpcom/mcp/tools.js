@@ -2379,6 +2379,13 @@ Zotero.MCP.Tools = new function () {
 	 */
 	this.trash = async function (args, { clientID }) {
 		let { libraryID, items, collections, searches } = await getTrashObjects(args, false);
+		// Subcollections go to the trash with their collection
+		let trashed = new Set(collections);
+		for (let collection of collections) {
+			for (let descendant of collection.getDescendents(false, 'collection')) {
+				trashed.add(Zotero.Collections.get(descendant.id));
+			}
+		}
 		await edit(clientID, async () => {
 			await Zotero.Items.trash(items.map(item => item.id));
 			for (let object of [...collections, ...searches]) {
@@ -2386,7 +2393,7 @@ Zotero.MCP.Tools = new function () {
 				await object.save();
 			}
 		});
-		return trashResult(libraryID, items, collections, searches);
+		return trashResult(libraryID, [...items, ...trashed, ...searches]);
 	};
 	
 	/**
@@ -2394,33 +2401,36 @@ Zotero.MCP.Tools = new function () {
 	 */
 	this.restoreFromTrash = async function (args, { clientID }) {
 		let { libraryID, items, collections, searches } = await getTrashObjects(args, true);
-		await edit(clientID, async () => {
+		let restored = await edit(clientID, async () => {
 			// As when the user restores only parent items and collections in the trash
 			// (ZoteroPane.restoreSelectedItems()), their children come back too
-			let restored = [...items, ...collections, ...searches];
+			let objects = [...items, ...collections, ...searches];
 			for (let item of items) {
 				if (item.isRegularItem()) {
-					restored.push(...Zotero.Items.get([...item.getNotes(true), ...item.getAttachments(true)]));
+					objects.push(...Zotero.Items.get([...item.getNotes(true), ...item.getAttachments(true)]));
 				}
 			}
 			for (let collection of collections) {
-				restored.push(...Zotero.Collections.get(
+				objects.push(...Zotero.Collections.get(
 					collection.getDescendents(false, 'collection', true).map(descendant => descendant.id)
 				));
 			}
-			for (let object of new Set(restored)) {
+			let changed = [];
+			for (let object of new Set(objects)) {
 				if (object.deleted) {
 					object.deleted = false;
 					await object.save();
+					changed.push(object);
 				}
 			}
+			return changed;
 		});
-		return trashResult(libraryID, items, collections, searches);
+		return trashResult(libraryID, restored);
 	};
 	
 	/**
 	 * The objects zotero_trash or zotero_restore_from_trash was given, which must be in the trash
-	 * or not, without subcollections of collections given
+	 * or not
 	 */
 	async function getTrashObjects({ itemKeys = [], collectionKeys = [], savedSearchKeys = [], libraryID }, inTrash) {
 		libraryID = getLibraryID(libraryID);
@@ -2457,19 +2467,19 @@ Zotero.MCP.Tools = new function () {
 			.map(key => check(Zotero.Collections.getByLibraryAndKey(libraryID, key), 'collection', key));
 		let searches = [...new Set(savedSearchKeys)]
 			.map(key => check(Zotero.Searches.getByLibraryAndKey(libraryID, key), 'saved search', key));
-		// Subcollections go with their collection
-		collections = collections.filter(collection => !collections.some(
-			other => other != collection && other.hasDescendent('collection', collection.id)
-		));
 		return { libraryID, items, collections, searches };
 	}
 	
-	function trashResult(libraryID, items, collections, searches) {
+	/**
+	 * @param {Zotero.DataObject[]} objects - Each object that went to the trash or came back
+	 */
+	function trashResult(libraryID, objects) {
+		let keys = type => nonEmpty(objects.filter(object => object.objectType == type).map(object => object.key));
 		return Zotero.MCP.jsonResult({
 			libraryID,
-			itemKeys: nonEmpty(items.map(item => item.key)),
-			collectionKeys: nonEmpty(collections.map(collection => collection.key)),
-			savedSearchKeys: nonEmpty(searches.map(search => search.key)),
+			itemKeys: keys('item'),
+			collectionKeys: keys('collection'),
+			savedSearchKeys: keys('search'),
 		});
 	}
 	

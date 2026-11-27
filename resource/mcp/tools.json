@@ -1541,7 +1541,7 @@
 				"properties": {
 					"libraryID": { "type": "integer" },
 					"itemKeys": { "type": "array", "items": { "type": "string" } },
-					"collectionKeys": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
+					"collectionKeys": { "type": "array", "items": { "type": "string" }, "description": "With subcollections that went with them" },
 					"savedSearchKeys": { "type": "array", "items": { "type": "string" } }
 				},
 				"required": ["libraryID"]
@@ -1574,8 +1574,8 @@
 				"type": "object",
 				"properties": {
 					"libraryID": { "type": "integer" },
-					"itemKeys": { "type": "array", "items": { "type": "string" } },
-					"collectionKeys": { "type": "array", "items": { "type": "string" }, "description": "Without subcollections of other collections given, which went with them" },
+					"itemKeys": { "type": "array", "items": { "type": "string" }, "description": "With notes and attachments that came back with them" },
+					"collectionKeys": { "type": "array", "items": { "type": "string" }, "description": "With subcollections that came back with them" },
 					"savedSearchKeys": { "type": "array", "items": { "type": "string" } }
 				},
 				"required": ["libraryID"]
