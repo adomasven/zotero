@@ -84,9 +84,9 @@ describe("MCP tools", function () {
 	
 	let randomWord = () => Zotero.Utilities.randomString(12, 'abcdefghijklmnopqrstuvwxyz');
 	
-	describe("zotero_list_item_types", function () {
+	describe("zotero_get_item_types", function () {
 		it("should list each item type's fields and creator types", async function () {
-			let { itemTypes } = await call('zotero_list_item_types', { itemTypes: ['bookSection'] });
+			let { itemTypes } = await call('zotero_get_item_types', { itemTypes: ['bookSection'] });
 			assert.lengthOf(itemTypes, 1);
 			let [type] = itemTypes;
 			assert.equal(type.itemType, 'bookSection');
@@ -103,7 +103,7 @@ describe("MCP tools", function () {
 				.map(type => type.name)
 				.filter(name => !['note', 'attachment', 'annotation'].includes(name))
 				.sort();
-			let { itemTypes } = await call('zotero_list_item_types', { itemTypes: expected });
+			let { itemTypes } = await call('zotero_get_item_types', { itemTypes: expected });
 			assert.sameMembers(itemTypes.map(type => type.itemType), expected);
 			
 			// Every list of item types in an input schema, e.g. after a schema update adds a type
