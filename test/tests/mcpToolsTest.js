@@ -887,6 +887,31 @@ describe("MCP tools", function () {
 			assert.deepEqual(result.savedSearchKeys, [created.key]);
 			assert.isTrue(search.deleted);
 		});
+		
+		it("should give back a search made in Zotero as the tools take it, and keep its options when updated", async function () {
+			let collection = await createDataObject('collection');
+			let search = new Zotero.Search({ libraryID: Zotero.Libraries.userLibraryID });
+			search.name = Zotero.Utilities.randomString();
+			search.addCondition('collection', 'is', collection.key);
+			search.addCondition('fileTypeID', 'is', String(Zotero.FileTypes.getID('pdf')));
+			search.addCondition('fulltextContent/regexp', 'contains', 'a.c');
+			search.addCondition('recursive', 'true');
+			await search.saveTx();
+			
+			let { savedSearches } = await call('zotero_list_saved_searches', {});
+			let { conditions } = savedSearches.find(each => each.key == search.key);
+			assert.deepEqual(conditions, [
+				{ condition: 'collection', operator: 'is', value: collection.key },
+				{ condition: 'fileType', operator: 'is', value: 'pdf' },
+				{ condition: 'fulltextContent', operator: 'contains', value: 'a.c', mode: 'regexp' },
+			]);
+			
+			await call('zotero_update_saved_search', { savedSearchKey: search.key, conditions });
+			let saved = search.toJSON().conditions;
+			assert.deepInclude(saved, { condition: 'recursive', operator: 'true', value: '' });
+			assert.deepInclude(saved, { condition: 'fulltextContent/regexp', operator: 'contains', value: 'a.c' });
+			assert.deepInclude(saved, { condition: 'fileTypeID', operator: 'is', value: String(Zotero.FileTypes.getID('pdf')) });
+		});
 	});
 	
 	describe("zotero_get_notes", function () {

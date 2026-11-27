@@ -1041,11 +1041,17 @@ Zotero.MCP.Tools = new function () {
 		if (!search.isEditable()) {
 			throw new Zotero.MCP.ToolError(`${search.key} can't be changed`);
 		}
-		let built = conditions && buildSearch(libraryID, conditions).search;
+		let newConditions = search.toJSON().conditions;
+		if (conditions) {
+			newConditions = [
+				...buildSearch(libraryID, conditions).search.toJSON().conditions,
+				...getSearchOptions(search),
+			];
+		}
 		await edit(clientID, async () => {
 			search.fromJSON({
 				name: name || search.name,
-				conditions: (built || search).toJSON().conditions,
+				conditions: newConditions,
 			});
 			// Not selected, so as not to disturb the user
 			await search.save({ skipSelect: true });
@@ -1060,12 +1066,43 @@ Zotero.MCP.Tools = new function () {
 		});
 	}
 	
+	// Conditions that set how a search runs rather than what it matches, such as Search
+	// subcollections in Advanced Search
+	const SEARCH_OPTIONS = [
+		'recursive',
+		'includeParentsAndChildren',
+		'includeParents',
+		'includeChildren',
+		'deleted',
+		'includeDeleted',
+		'unfiled',
+		'retracted',
+		'publications',
+		'feed',
+	];
+	
+	/**
+	 * A search's options, as its toJSON() conditions
+	 */
+	function getSearchOptions(search) {
+		let depth = 0;
+		return search.toJSON().conditions.filter(({ condition }) => {
+			if (condition == 'groupStart') {
+				depth++;
+			}
+			else if (condition == 'groupEnd') {
+				depth--;
+			}
+			return depth == 0 && SEARCH_OPTIONS.includes(condition);
+		});
+	}
+	
 	/**
 	 * A saved search's conditions as zotero_search and zotero_add_saved_search take them,
 	 * read back from the flat list Zotero keeps, where a group lies between groupStart and
 	 * groupEnd, and its join mode and level are conditions of their own (see
 	 * Zotero.SearchQuery.addToSearch()). Options that aren't conditions, such as Search
-	 * subcollections, are given as conditions under their own names.
+	 * subcollections, are left out, and kept when the conditions are replaced.
 	 */
 	function describeConditions(search) {
 		let root = { joinMode: 'all', conditions: [] };
@@ -1091,6 +1128,9 @@ Zotero.MCP.Tools = new function () {
 			else if (condition == 'noChildren' && group == root) {
 				root.level = 'item';
 			}
+			else if (SEARCH_OPTIONS.includes(condition) && group == root) {
+				continue;
+			}
 			else {
 				// Annotation types are stored by number
 				if (condition == 'annotationType') {
@@ -1098,10 +1138,15 @@ Zotero.MCP.Tools = new function () {
 						.find(type => Zotero.Annotations['ANNOTATION_TYPE_' + type.toUpperCase()] == value)
 						?? value;
 				}
+				if (condition == 'fileTypeID') {
+					condition = 'fileType';
+					value = Zotero.FileTypes.getName(value) || value;
+				}
 				group.conditions.push({
-					condition: mode ? `${condition}/${mode}` : condition,
+					condition,
 					operator,
 					value: value || undefined,
+					mode: mode || undefined,
 				});
 			}
 		}
@@ -3338,7 +3383,21 @@ Zotero.MCP.Tools = new function () {
 			if (node.conditions) {
 				return { joinMode: node.joinMode, level: node.level, children: node.conditions.map(toNode) };
 			}
-			let { condition, operator, value = '', level } = node;
+			let { condition, operator, value = '', mode, level } = node;
+			if (mode && condition != 'fulltextContent') {
+				throw new Zotero.MCP.ToolError('mode is only for fulltextContent');
+			}
+			// Stored by ID, as fileTypeID
+			if (condition == 'fileType') {
+				condition = 'fileTypeID';
+				let id = Zotero.FileTypes.getID(value);
+				if (!id) {
+					throw new Zotero.MCP.ToolError(
+						`fileType takes ${Zotero.FileTypes.getTypes().map(type => type.name).join(', ')}`
+					);
+				}
+				value = String(id);
+			}
 			if (!Zotero.SearchConditions.hasOperator(condition, operator)) {
 				let operators = Object.keys(Zotero.SearchConditions.get(condition).operators);
 				throw new Zotero.MCP.ToolError(`${condition} takes the operators ${operators.join(', ')}`);
@@ -3347,7 +3406,7 @@ Zotero.MCP.Tools = new function () {
 			if (condition == 'annotationType') {
 				value = String(Zotero.Annotations['ANNOTATION_TYPE_' + value.toUpperCase()] ?? value);
 			}
-			return { condition, operator, value, level };
+			return { condition: mode ? `${condition}/${mode}` : condition, operator, value, level };
 		};
 		let tree = { joinMode: 'all', children: conditions.map(toNode) };
 		// A child type names the rows to return rather than filtering items, as in
