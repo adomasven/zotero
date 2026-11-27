@@ -1,5 +1,5 @@
 {
-	"instructions": "Zotero is the user's reference manager: their library of papers, books and other sources, with PDFs and other files, annotations, notes, collections and tags. Use these tools to find and read the user's sources, cite them in a citation style, add or organize items in their library, import and export them, and show them to the user in Zotero's windows. They work on the Zotero app on the user's computer, which is started if it isn't running. Tools that change the library ask the user for permission in Zotero unless they already granted it, and each such call is one step the user can undo with Edit → Undo, which moves anything added to the trash.",
+	"instructions": "Zotero is the user's reference manager: their library of papers, books and other sources, with PDFs and other files, annotations, notes, collections and tags. Use these tools to find and read the user's sources, cite them in a citation style, add or organize items in their library, import and export them, and show them to the user in Zotero's windows. They work on the Zotero app on the user's computer, which is started if it isn't running. Tools work in My Library unless given a libraryID from zotero_status. Tools that change the library ask the user for permission in Zotero unless they already granted it, and each such call is one step the user can undo with Edit → Undo, which moves anything added to the trash.",
 	"tools": [
 		{
 			"name": "zotero_status",
@@ -324,7 +324,7 @@
 						"type": "array",
 						"minItems": 1,
 						"maxItems": 50,
-						"description": "Item JSON in the Zotero web API format, as zotero_get_items returns, e.g. {\"itemType\": \"report\", \"title\": \"…\", \"creators\": [{\"creatorType\": \"author\", \"firstName\": \"Ann\", \"lastName\": \"Lee\"}], \"date\": \"2024\", \"institution\": \"…\", \"url\": \"…\"}. Only fields of the item type are accepted; zotero_list_item_types lists each type's fields and creator types. Notes and files aren't items here: add them with zotero_add_note and zotero_add_attachment.",
+						"description": "Item JSON in the Zotero web API format, as zotero_get_items returns, e.g. {\"itemType\": \"report\", \"title\": \"…\", \"creators\": [{\"creatorType\": \"author\", \"firstName\": \"Ann\", \"lastName\": \"Lee\"}], \"date\": \"2024\", \"institution\": \"…\", \"url\": \"…\"}. Only fields of the item type are accepted; zotero_list_item_types lists each type's fields and creator types. Properties of an existing item, such as key, collections and parentItem, are ignored: use collectionKey. Notes and files aren't items here: add them with zotero_add_note and zotero_add_attachment.",
 						"items": {
 							"type": "object",
 							"properties": {
@@ -403,6 +403,7 @@
 				"properties": {
 					"changes": {
 						"type": "array",
+						"description": "One object per item: its key, the fields to set by Zotero field name, as in item JSON (zotero_list_item_types lists each item type's), and the other changes below, e.g. {\"key\": \"…\", \"title\": \"…\", \"date\": \"2020-05\"}. An empty string clears a field.",
 						"items": {
 							"type": "object",
 							"properties": {
