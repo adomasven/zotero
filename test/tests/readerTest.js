@@ -291,11 +291,10 @@ describe("Reader", function () {
 				};
 
 				openResult = await Zotero.Reader.open(attachment.id);
-				assert.isTrue(openResult === undefined, 'should select the unloaded tab');
-				reloadedReader = await waitForCallback(
-					() => Zotero.Reader._readers.find(r => r !== reader && r.tabID === tabID),
-					50, 5
-				);
+				assert.isDefined(openResult, 'should return the reloaded reader for the unloaded tab');
+				assert.notStrictEqual(openResult, reader);
+				assert.equal(openResult.tabID, tabID);
+				reloadedReader = openResult;
 				await reloadedReader._initPromise;
 
 				await Zotero.Notifier.commit();

@@ -2950,7 +2950,10 @@ class Reader {
 				let existingTabID = win.Zotero_Tabs.getTabIDByItemID(itemID);
 				if (existingTabID) {
 					win.Zotero_Tabs.select(existingTabID, false, { location });
-					return undefined;
+					await win.Zotero_Tabs.getLoadPromise(existingTabID);
+					return this._readers.find(
+						r => (r instanceof ReaderTab) && r.tabID === existingTabID && !r._isTabClosed
+					);
 				}
 			}
 		}

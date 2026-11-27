@@ -622,9 +622,10 @@ Zotero.Fulltext = Zotero.FullText = new function () {
 	 * @param {String} filePath
 	 * @param {Number} itemID
 	 * @param {Boolean} [allPages] - If true, index all pages rather than pdfMaxPages
+	 * @param {Boolean} [isPriority] - Put extraction at the front of the PDFWorker queue
 	 * @return {Promise}
 	 */
-	this.indexPDF = async function (filePath, itemID, allPages) {
+	this.indexPDF = async function (filePath, itemID, allPages, isPriority = false) {
 		var maxPages = Zotero.Prefs.get('fulltext.pdfMaxPages');
 		if (maxPages == 0) {
 			return false;
@@ -652,7 +653,7 @@ Zotero.Fulltext = Zotero.FullText = new function () {
 				text,
 				extractedPages,
 				totalPages
-			} = await Zotero.PDFWorker.getFullText(itemID, allPages ? null : maxPages);
+			} = await Zotero.PDFWorker.getFullText(itemID, allPages ? null : maxPages, isPriority);
 		}
 		catch (e) {
 			Zotero.logError(e);
@@ -722,10 +723,12 @@ Zotero.Fulltext = Zotero.FullText = new function () {
 	 * @param {Object} [options]
 	 * @param {Boolean} [options.complete=false] - Ignore page/character limits
 	 * @param {Boolean} [options.ignoreErrors=false] - Continue on error instead of throwing
+	 * @param {Boolean} [options.isPriority=false] - Put PDF extraction at the front of the worker queue
 	 */
 	this.indexItems = async function (itemIDs, options = {}) {
 		var complete;
 		var ignoreErrors;
+		var isPriority = false;
 		if (typeof options == 'boolean') {
 			Zotero.logError("indexItems() now takes an 'options' object -- please update your code");
 			complete = options;
@@ -734,6 +737,7 @@ Zotero.Fulltext = Zotero.FullText = new function () {
 		else {
 			complete = options.complete;
 			ignoreErrors = options.ignoreErrors;
+			isPriority = !!options.isPriority;
 		}
 		
 		if (!Array.isArray(itemIDs)) {
@@ -764,7 +768,7 @@ Zotero.Fulltext = Zotero.FullText = new function () {
 			}
 			
 			try {
-				await indexItem(item, path, complete);
+				await indexItem(item, path, complete, isPriority);
 			}
 			catch (e) {
 				if (ignoreErrors) {
@@ -778,7 +782,7 @@ Zotero.Fulltext = Zotero.FullText = new function () {
 	};
 	
 	
-	var indexItem = async function (item, path, complete) {
+	var indexItem = async function (item, path, complete, isPriority = false) {
 		if (!(await OS.File.exists(path))) {
 			Zotero.debug(`${path} does not exist in indexItem()`, 2);
 			return false;
@@ -799,7 +803,7 @@ Zotero.Fulltext = Zotero.FullText = new function () {
 		}
 		
 		if (contentType == 'application/pdf') {
-			return this.indexPDF(path, item.id, complete);
+			return this.indexPDF(path, item.id, complete, isPriority);
 		}
 		
 		if (contentType == 'application/epub+zip') {
