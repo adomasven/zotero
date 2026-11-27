@@ -1647,7 +1647,7 @@ Zotero.Search.prototype._buildQuery = async function () {
 							condSQL = condSQL.substring(0, condSQL.length - 4);
 						}
 						else {
-							throw ("Invalid fileTypeID '" + condition.value + "' specified in search.js")
+							throw new Error("Invalid fileTypeID '" + condition.value + "' specified in search.js");
 						}
 						skipOperators = true;
 						break;
@@ -1675,7 +1675,7 @@ Zotero.Search.prototype._buildQuery = async function () {
 								break;
 
 							default:
-								throw ("Invalid attachmentStorageType '" + condition.value
+								throw new Error("Invalid attachmentStorageType '" + condition.value
 									+ "' specified in search.js");
 						}
 						condSQL += `linkMode IN (${linkModes.map(() => '?').join(', ')})`;
