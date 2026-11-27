@@ -742,6 +742,10 @@ describe("MCP tools", function () {
 			assert.lengthOf(
 				(await call('zotero_search', { collectionKey: child.key, includeSubcollectionItems: true })).items, 1
 			);
+			assert.match(
+				await callForError('zotero_list_collections', { collectionKey: parent.key, inTrash: true }),
+				/inTrash without collectionKey/
+			);
 		});
 	});
 	
@@ -832,6 +836,8 @@ describe("MCP tools", function () {
 			let [a, b, c] = ['ML', 'machine-learning', 'Machine Learning'].map(() => Zotero.Utilities.randomString());
 			let one = await createDataObject('item', { tags: [{ tag: a }] });
 			let two = await createDataObject('item', { tags: [{ tag: b }, { tag: c }] });
+			one.setField('dateModified', '2020-01-01 00:00:00');
+			await one.saveTx({ skipDateModifiedUpdate: true });
 			let libraryID = Zotero.Libraries.userLibraryID;
 			await Zotero.Tags.setColor(libraryID, a, '#ff6666', 0);
 			try {
@@ -839,6 +845,7 @@ describe("MCP tools", function () {
 				assert.equal(result.itemCount, 2);
 				assert.deepEqual(one.getTags(), [{ tag: c }]);
 				assert.deepEqual(two.getTags(), [{ tag: c }]);
+				assert.equal(one.dateModified, '2020-01-01 00:00:00');
 				assert.equal(Zotero.Tags.getColor(libraryID, c).color, '#ff6666');
 				assert.isFalse(Zotero.Tags.getColor(libraryID, a));
 				
@@ -959,6 +966,12 @@ describe("MCP tools", function () {
 			assert.deepInclude(saved, { condition: 'recursive', operator: 'true', value: '' });
 			assert.deepInclude(saved, { condition: 'fulltextContent/regexp', operator: 'contains', value: 'a.c' });
 			assert.deepInclude(saved, { condition: 'fileTypeID', operator: 'is', value: String(Zotero.FileTypes.getID('pdf')) });
+			assert.match(
+				await callForError('zotero_search', {
+					conditions: [{ condition: 'fileType', operator: 'contains', value: 'pdf' }],
+				}),
+				/^fileType takes the operators/
+			);
 		});
 	});
 	
@@ -1164,6 +1177,18 @@ describe("MCP tools", function () {
 			let error = await callForError('zotero_edit_note', { itemKey: note.key, markdown: 'New', mode: 'replace', dateModified });
 			assert.match(error, /has changed since/);
 			assert.equal(note.getNote(), '<p>The user\'s edit</p>');
+			// Append also checks dateModified when given, but does not require it
+			assert.match(
+				await callForError('zotero_edit_note', { itemKey: note.key, markdown: 'More', dateModified }),
+				/has changed since/
+			);
+			await call('zotero_edit_note', { itemKey: note.key, markdown: 'More' });
+			assert.include(note.getNote(), '<p>More</p>');
+			// Replace requires dateModified
+			assert.match(
+				await callForError('zotero_edit_note', { itemKey: note.key, markdown: 'Replaced', mode: 'replace' }),
+				/dateModified is required/
+			);
 		});
 		
 		it("should replace a note, but not one with highlights", async function () {
@@ -1254,18 +1279,36 @@ describe("MCP tools", function () {
 	});
 	
 	describe("zotero_search_fulltext when indexing is slow", function () {
-		it("should list files whose text isn't ready by the deadline", async function () {
-			let attachment = await importFileAttachment('test.pdf');
-			await setText(attachment, ['Some text']);
-			// In the index, but its text has to be extracted again
-			sinon.stub(Zotero.FullText, 'findItemsWithContent').resolves([attachment.id]);
-			await IOUtils.remove(Zotero.FullText.getItemCacheFile(attachment).path);
+		it("should throw when no matching file's text is ready by the deadline, and keep partial results otherwise", async function () {
+			let slow = await importFileAttachment('test.pdf');
+			let ready = await importFileAttachment('test.pdf');
+			await setText(slow, ['Some text']);
+			await setText(ready, ['Some text']);
+			await IOUtils.remove(Zotero.FullText.getItemCacheFile(slow).path);
 			let indexing = Zotero.Promise.defer();
-			sinon.stub(Zotero.FullText, 'indexItems').returns(indexing.promise);
-			
-			let result = await withBudget(300, () => call('zotero_search_fulltext', { query: 'text' }));
-			assert.deepEqual(result.files.map(file => [file.key, file.status]), [[attachment.key, 'pending']]);
-			assert.match(result.notice, /still getting the text of the files with status pending/);
+			let indexItems = sinon.stub(Zotero.FullText, 'indexItems').returns(indexing.promise);
+
+			// When all files time out, throw so the caller retries
+			let findStub = sinon.stub(Zotero.FullText, 'findItemsWithContent').resolves([slow.id]);
+			let error = await withBudget(300, () => callForError('zotero_search_fulltext', { query: 'text' }));
+			assert.match(error, /still getting the text/);
+			assert.isTrue(indexItems.calledOnceWith([slow.id], sinon.match({ isPriority: true })));
+
+			// Retrying while still indexing attaches to the in-flight job instead of queueing another
+			let error2 = await withBudget(100, () => callForError('zotero_search_fulltext', { query: 'text' }));
+			assert.match(error2, /still getting the text/);
+			assert.isTrue(indexItems.calledOnce);
+
+			// When one file is ready and another times out, preserve the ready file's passages
+			findStub.resolves([ready.id, slow.id]);
+			let result = await withBudget(100, () => call('zotero_search_fulltext', { query: 'text' }));
+			assert.equal(result.files.length, 2);
+			let readyResult = result.files.find(file => file.key == ready.key);
+			let slowResult = result.files.find(file => file.key == slow.key);
+			assert.equal(readyResult.matchCount, 1);
+			assert.notProperty(slowResult, 'passages');
+			assert.notProperty(slowResult, 'status');
+			assert.match(result.notice, /still getting the text/);
 			indexing.resolve();
 		});
 	});
@@ -1277,7 +1320,7 @@ describe("MCP tools", function () {
 		});
 		
 		afterEach(function () {
-			Zotero.MCP.Tools._structureWait = 15 * 1000;
+			Zotero.MCP.Tools._structureWait = 3 * 1000;
 		});
 		
 		it("should read a PDF by page, up to about maxChars, with the outline", async function () {
@@ -1355,34 +1398,34 @@ describe("MCP tools", function () {
 			}
 		});
 		
-		it("should return the pages it has by the deadline, and say more are coming", async function () {
+		it("should return the pages it has by the deadline, and deduplicate retries", async function () {
 			let attachment = await importFileAttachment('test.pdf');
 			await setText(attachment, ['One', 'Two'], { totalPages: 4 });
 			let extracted = Zotero.Promise.defer();
-			sinon.stub(Zotero.PDFWorker, 'getFullText').returns(extracted.promise);
+			let getFullText = sinon.stub(Zotero.PDFWorker, 'getFullText').returns(extracted.promise);
 			
 			let result = await withBudget(300, () => call('zotero_read_text', { itemKey: attachment.key }));
 			assert.deepEqual(result.pages, [{ page: 1, text: 'One' }, { page: 2, text: 'Two' }]);
 			assert.equal(result.nextPage, 3);
-			assert.equal(result.status, 'pending');
-			assert.match(result.notice, /still getting the text/);
+			assert.notProperty(result, 'status');
+			assert.match(result.notice, /nextPage/);
 			
 			extracted.resolve({ text: 'Three\fFour', totalPages: 4 });
 			result = await call('zotero_read_text', { itemKey: attachment.key, startPage: 3 });
 			assert.deepEqual(result.pages, [{ page: 3, text: 'Three' }, { page: 4, text: 'Four' }]);
 			assert.notProperty(result, 'notice');
+			assert.isTrue(getFullText.calledOnce);
 		});
 		
-		it("should say when a file's text isn't ready by the deadline", async function () {
+		it("should throw when a file's text isn't ready by the deadline", async function () {
 			let attachment = await importFileAttachment('stub.epub');
 			await IOUtils.remove(Zotero.FullText.getItemCacheFile(attachment).path, { ignoreAbsent: true });
 			let indexing = Zotero.Promise.defer();
-			sinon.stub(Zotero.FullText, 'indexItems').returns(indexing.promise);
+			let indexItems = sinon.stub(Zotero.FullText, 'indexItems').returns(indexing.promise);
 			
-			let result = await withBudget(300, () => call('zotero_read_text', { itemKey: attachment.key }));
-			assert.notProperty(result, 'text');
-			assert.equal(result.status, 'pending');
-			assert.match(result.notice, /still getting the text/);
+			let error = await withBudget(300, () => callForError('zotero_read_text', { itemKey: attachment.key }));
+			assert.match(error, /still getting the text/);
+			assert.isTrue(indexItems.calledOnceWith([attachment.id], sinon.match({ isPriority: true })));
 			indexing.resolve();
 		});
 		
@@ -1609,14 +1652,28 @@ describe("MCP tools", function () {
 			assert.isTrue(item.deleted);
 			assert.equal(Zotero.UndoHistory.getUndoAction().action, 'undo-action-mcp-changes');
 			
-			// Restoring an item restores its trashed children
+			// Restoring an item restores its trashed children, unless specific children are given
+			let note2 = await createDataObject('item', { itemType: 'note', parentID: item.id });
 			note.deleted = true;
 			await note.saveTx();
-			let { itemKeys } = await call('zotero_restore_from_trash', { itemKeys: [item.key] });
-			assert.deepEqual(itemKeys, [item.key, note.key]);
+			note2.deleted = true;
+			await note2.saveTx();
+			let { itemKeys } = await call('zotero_restore_from_trash', { itemKeys: [item.key, note.key] });
+			assert.sameMembers(itemKeys, [item.key, note.key]);
 			assert.isTrue(ask.secondCall.calledWith('test-client', Permissions.EDIT_LIBRARY, item.libraryID));
 			assert.isFalse(item.deleted);
 			assert.isFalse(note.deleted);
+			assert.isTrue(note2.deleted);
+			
+			// Restoring just the parent restores all trashed children
+			await call('zotero_trash', { itemKeys: [item.key] });
+			note.deleted = true;
+			await note.saveTx();
+			({ itemKeys } = await call('zotero_restore_from_trash', { itemKeys: [item.key] }));
+			assert.sameMembers(itemKeys, [item.key, note.key, note2.key]);
+			assert.isFalse(item.deleted);
+			assert.isFalse(note.deleted);
+			assert.isFalse(note2.deleted);
 			
 			let error = await callForError('zotero_restore_from_trash', { itemKeys: [item.key] });
 			assert.match(error, /isn't in the trash/);
@@ -1875,25 +1932,23 @@ describe("MCP tools", function () {
 			assert.match(await callForError('zotero_close', { tabIDs: ['nope'] }), /No tab nope/);
 		});
 		
-		it("should say when a library tab is still opening at the deadline", async function () {
+		it("should throw with open tab details when a library tab times out", async function () {
 			let getLibraryView = sinon.stub(win.ZoteroPane, 'getLibraryView').returns(null);
-			let result = await withBudget(300, () => call('zotero_select', { allItems: true, newTab: true }));
-			assert.equal(result.status, 'pending');
-			assert.equal(result.tabID, win.Zotero_Tabs.selectedID);
-			assert.match(result.notice, /still opening the library tab/);
-			// Selected once the tab is open
+			let error = await withBudget(300, () => callForError('zotero_select', { allItems: true, newTab: true }));
+			let openedTabID = win.Zotero_Tabs.selectedID;
+			assert.match(error, /Timed out waiting for the library tab/);
+			assert.include(error, openedTabID);
+			assert.match(error, /zotero_get_context/);
 			getLibraryView.restore();
-			await waitForCallback(() => win.ZoteroPane.getLibraryView(result.tabID)?.itemsView.getSelectedObjects().length);
-			win.Zotero_Tabs.close(win.Zotero_Tabs.selectedID);
+			win.Zotero_Tabs.close(openedTabID);
 		});
 		
-		it("should say when a file is still opening at the deadline", async function () {
+		it("should throw when a file doesn't finish opening by the deadline", async function () {
 			let attachment = await importFileAttachment('test.pdf');
-			sinon.stub(Zotero.Reader, 'open').resolves();
-			let opened = await withBudget(300, () => call('zotero_open', { itemKey: attachment.key }));
-			assert.notProperty(opened, 'tabID');
-			assert.equal(opened.status, 'pending');
-			assert.match(opened.notice, /still opening/);
+			sinon.stub(Zotero.Reader, 'open').returns(new Promise(() => {}));
+			let error = await withBudget(300, () => callForError('zotero_open', { itemKey: attachment.key }));
+			assert.match(error, /Timed out waiting for/);
+			assert.match(error, /zotero_get_context/);
 		});
 	});
 	
@@ -2125,6 +2180,13 @@ describe("MCP tools", function () {
 			assert.isTrue(ask.calledOnceWith('test-client', Permissions.WRITE_FILES));
 			assert.deepEqual(result, { libraryID: Zotero.Libraries.userLibraryID, format: 'RIS', path, status: 'written' });
 			assert.include(await Zotero.File.getContentsAsync(path), 'TI  - A study of things');
+			
+			// Non-BibTeX export shouldn't read the exported file back
+			let readUTF8 = sinon.spy(IOUtils, 'readUTF8');
+			let cslPath = PathUtils.join(await getTempDirectory(), 'export.json');
+			await call('zotero_export', { format: 'CSL JSON', itemKeys: [item.key], path: cslPath });
+			assert.isFalse(readUTF8.calledWith(cslPath));
+			readUTF8.restore();
 			
 			assert.match(await callForError('zotero_export', { format: 'RIS', itemKeys: [item.key], path }), /already exists/);
 			

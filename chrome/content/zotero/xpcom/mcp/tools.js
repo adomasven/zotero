@@ -246,20 +246,8 @@ Zotero.MCP.Tools = new function () {
 	 * matches in children standing for their items
 	 */
 	function getResultLevel(search) {
-		let depth = 0;
-		for (let { condition, operator } of Object.values(search.getConditions())) {
-			if (condition == 'groupStart') {
-				depth++;
-			}
-			else if (condition == 'groupEnd') {
-				depth--;
-			}
-			else if (depth == 0 && condition == 'resultLevel'
-					&& ['attachment', 'note', 'annotation'].includes(operator)) {
-				return operator;
-			}
-		}
-		return 'item';
+		let level = search.getResultLevel();
+		return level == 'any' ? 'item' : level;
 	}
 	
 	/**
@@ -792,6 +780,9 @@ Zotero.MCP.Tools = new function () {
 		libraryID, collectionKey, includeSubcollectionItems = false, inTrash = false,
 	}) {
 		libraryID = getLibraryID(libraryID);
+		if (inTrash && collectionKey) {
+			throw new Zotero.MCP.ToolError('Give inTrash without collectionKey');
+		}
 		let collections;
 		if (collectionKey) {
 			let parent = getCollection(libraryID, collectionKey);
@@ -875,17 +866,17 @@ Zotero.MCP.Tools = new function () {
 	// Tags -- Tags across a library
 	//
 	
-	// The tag colors Zotero's color picker offers (elements/colorPicker.js), by name
-	const TAG_COLORS = {
-		red: '#FF6666',
-		orange: '#FF8C19',
-		gray: '#999999',
-		green: '#5FB236',
-		teal: '#009980',
-		blue: '#2EA8E5',
-		indigo: '#576DD9',
-		purple: '#A28AE5',
-		plum: '#A6507B',
+	// MCP names for the tag colors in Zotero.Tags.COLORS (by l10n key)
+	const TAG_COLOR_NAMES = {
+		'general.red': 'red',
+		'general.orange': 'orange',
+		'general.gray': 'gray',
+		'general.green': 'green',
+		'general.teal': 'teal',
+		'general.blue': 'blue',
+		'general.purple': 'indigo',
+		'general.violet': 'purple',
+		'general.maroon': 'plum',
 	};
 	
 	/**
@@ -958,7 +949,7 @@ Zotero.MCP.Tools = new function () {
 			}
 		}
 		else if (color) {
-			color = TAG_COLORS[color];
+			color = Zotero.Tags.COLORS.find(([key]) => TAG_COLOR_NAMES[key] == color)?.[1];
 		}
 		if (color && !colors.has(tag) && colors.size >= Zotero.Tags.MAX_COLORED_TAGS) {
 			throw new Zotero.MCP.ToolError(
@@ -1028,7 +1019,7 @@ Zotero.MCP.Tools = new function () {
 						item.removeTag(tag);
 					}
 				}
-				await item.save({ skipSelect: true });
+				await item.save({ skipSelect: true, skipDateModifiedUpdate: true });
 			}
 			for (let tag of tags) {
 				if (colors.has(tag)) {
@@ -1038,7 +1029,7 @@ Zotero.MCP.Tools = new function () {
 			if (keptColor) {
 				await Zotero.Tags.setColor(libraryID, newName, keptColor.color, keptColor.position);
 			}
-		});
+		}, items);
 		// Removes the tags no item has anymore
 		Zotero.Prefs.set('purge.tags', true);
 		return Zotero.MCP.jsonResult({
@@ -1048,14 +1039,15 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * A tag color's name in TAG_COLORS, or its hex value if it isn't one of them, e.g. one
-	 * set by a plugin
+	 * A tag color's MCP name from Zotero.Tags.COLORS, or its hex value if it isn't one of them,
+	 * e.g. one set by a plugin
 	 */
 	function getTagColorName(hex) {
 		if (!hex) {
 			return undefined;
 		}
-		return Object.keys(TAG_COLORS).find(name => TAG_COLORS[name] == hex.toUpperCase()) ?? hex;
+		let entry = Zotero.Tags.COLORS.find(([, color]) => color.toUpperCase() == hex.toUpperCase());
+		return (entry && TAG_COLOR_NAMES[entry[0]]) ?? hex;
 	}
 	
 	//
@@ -1108,18 +1100,15 @@ Zotero.MCP.Tools = new function () {
 		if (!search.isEditable()) {
 			throw new Zotero.MCP.ToolError(`${search.key} can't be changed`);
 		}
-		let newConditions = search.toJSON().conditions;
-		if (conditions) {
-			newConditions = [
-				...buildSearch(libraryID, conditions).search.toJSON().conditions,
-				...getSearchOptions(search),
-			];
-		}
+		let newTree = conditions && buildSearch(libraryID, conditions).search.getConditionTree();
+		let existingOptions = search.getConditionTree().options;
 		await edit(clientID, async () => {
-			search.fromJSON({
-				name: name || search.name,
-				conditions: newConditions,
-			});
+			if (name) {
+				search.name = name;
+			}
+			if (newTree) {
+				search.setConditionTree({ ...newTree, options: existingOptions });
+			}
 			// Not selected, so as not to disturb the user
 			await search.save({ skipSelect: true });
 		}, [search]);
@@ -1133,110 +1122,45 @@ Zotero.MCP.Tools = new function () {
 		});
 	}
 	
-	// Conditions that set how a search runs rather than what it matches, such as Search
-	// subcollections in Advanced Search
-	const SEARCH_OPTIONS = [
-		'recursive',
-		'includeParentsAndChildren',
-		'includeParents',
-		'includeChildren',
-		'deleted',
-		'includeDeleted',
-		'unfiled',
-		'retracted',
-		'publications',
-		'feed',
-	];
-	
-	/**
-	 * A search's options, as its toJSON() conditions
-	 */
-	function getSearchOptions(search) {
-		let depth = 0;
-		return search.toJSON().conditions.filter(({ condition }) => {
-			if (condition == 'groupStart') {
-				depth++;
-			}
-			else if (condition == 'groupEnd') {
-				depth--;
-			}
-			return depth == 0 && SEARCH_OPTIONS.includes(condition);
-		});
-	}
-	
 	/**
 	 * A saved search's conditions as zotero_search and zotero_add_saved_search take them,
-	 * read back from the flat list Zotero keeps, where a group lies between groupStart and
-	 * groupEnd, and its join mode and level are conditions of their own (see
-	 * Zotero.SearchQuery.addToSearch()). Options that aren't conditions, such as Search
-	 * subcollections, are left out, and kept when the conditions are replaced.
+	 * converted from Zotero.Search.prototype.getConditionTree(). Search options such as Search
+	 * subcollections are left out, and kept when the conditions are replaced.
 	 */
 	function describeConditions(search) {
-		let root = { joinMode: 'all', conditions: [] };
-		let stack = [root];
-		for (let { condition, mode, operator, value } of Object.values(search.getConditions())) {
-			let group = stack[stack.length - 1];
-			if (condition == 'groupStart') {
-				let child = { joinMode: 'all', conditions: [] };
-				group.conditions.push(child);
-				stack.push(child);
-			}
-			else if (condition == 'groupEnd') {
-				stack.pop();
-			}
-			else if (condition == 'joinMode') {
-				group.joinMode = operator;
-				group.joined = true;
-			}
-			else if (condition == 'resultLevel') {
-				group.level = operator;
-			}
-			// The item level, as before result levels
-			else if (condition == 'noChildren' && group == root) {
-				root.level = 'item';
-			}
-			else if (SEARCH_OPTIONS.includes(condition) && group == root) {
-				continue;
-			}
-			else {
-				// Annotation types are stored by number
-				if (condition == 'annotationType') {
-					value = ['highlight', 'underline', 'note', 'text', 'image', 'ink']
-						.find(type => Zotero.Annotations['ANNOTATION_TYPE_' + type.toUpperCase()] == value)
-						?? value;
-				}
-				if (condition == 'fileTypeID') {
-					condition = 'fileType';
-					value = Zotero.FileTypes.getName(value) || value;
-				}
-				group.conditions.push({
-					condition,
-					operator,
-					value: value || undefined,
-					mode: mode || undefined,
-				});
-			}
-		}
+		let tree = search.getConditionTree();
 		let toNode = (node) => {
-			if (!node.conditions) {
-				return node;
+			if (node.children) {
+				let level = node.level == 'item' ? undefined : node.level;
+				return { joinMode: node.joinMode, level, conditions: node.children.map(toNode) };
 			}
-			let conditions = node.conditions.map(toNode);
-			// A condition on a child is saved as a group of one at the child's level
-			if (node.level && !node.joined && conditions.length == 1 && !conditions[0].conditions) {
-				return { ...conditions[0], level: node.level };
+			let { condition, operator, value, mode, level } = node;
+			// Annotation types are stored by number
+			if (condition == 'annotationType') {
+				value = ['highlight', 'underline', 'note', 'text', 'image', 'ink']
+					.find(type => Zotero.Annotations['ANNOTATION_TYPE_' + type.toUpperCase()] == value)
+					?? value;
 			}
-			let level = node.level == 'item' ? undefined : node.level;
-			return { joinMode: node.joinMode, level, conditions };
+			if (condition == 'fileTypeID') {
+				condition = 'fileType';
+				value = Zotero.FileTypes.getName(value) || value;
+			}
+			return {
+				condition,
+				operator,
+				value: value || undefined,
+				mode: mode || undefined,
+				level: level == 'item' ? undefined : level,
+			};
 		};
-		let conditions = root.conditions.map(toNode);
-		if (root.joinMode == 'any') {
+		let conditions = tree.children.map(toNode);
+		if (tree.joinMode == 'any') {
 			conditions = [{ joinMode: 'any', conditions }];
 		}
 		// The level of the whole search is the kind of item it finds, as zotero_search takes it,
 		// so it goes outside a match-any group
-		if (root.level && root.level != 'item') {
-			conditions.unshift({ condition: 'itemType', operator: 'is', value: root.level });
+		if (tree.level && tree.level != 'item') {
+			conditions.unshift({ condition: 'itemType', operator: 'is', value: tree.level });
 		}
 		return conditions;
 	}
@@ -1465,7 +1389,12 @@ Zotero.MCP.Tools = new function () {
 		if (!note.isEditable()) {
 			throw new Zotero.MCP.ToolError(`${note.key} can't be edited`);
 		}
-		if (Zotero.Date.sqlToISO8601(note.dateModified) != dateModified) {
+		if (mode == 'replace' && dateModified === undefined) {
+			throw new Zotero.MCP.ToolError(
+				'dateModified is required when mode is replace. Get it from zotero_get_notes first.'
+			);
+		}
+		if (dateModified !== undefined && Zotero.Date.sqlToISO8601(note.dateModified) != dateModified) {
 			throw new Zotero.MCP.ToolError(
 				`The note has changed since ${dateModified}, maybe because the user edited it. `
 					+ 'Get it again with zotero_get_notes, then make the edit to what it is now.'
@@ -1484,7 +1413,7 @@ Zotero.MCP.Tools = new function () {
 			// Inside the note's own wrapper, which carries its schema version and citation data
 			let [, wrapper, content] = note.getNote()
 				.match(/^\s*(<div\b[^>]*\bdata-schema-version="[^"]*"[^>]*>)([\s\S]*)<\/div>\s*$/)
-				?? [null, '<div data-schema-version="9">', note.getNote()];
+				?? [null, `<div data-schema-version="${NOTE_SCHEMA_VERSION}">`, note.getNote()];
 			html = wrapper + content + html.replace(/^<div[^>]*>|<\/div>$/g, '') + '</div>';
 		}
 		await edit(clientID, () => {
@@ -1513,11 +1442,18 @@ Zotero.MCP.Tools = new function () {
 		return markdown.replace(/\r\n/g, '\n').trim();
 	}
 	
+	// Keep in sync with editorInstance.js
+	const NOTE_SCHEMA_VERSION = 9;
+	
 	let _markdownIt;
 	
 	/**
 	 * Note HTML from Markdown, as the note editor makes from pasted Markdown (CommonMark with
-	 * tables, strikethrough and TeX math, and no raw HTML), and with bare URLs made links
+	 * tables, strikethrough and TeX math, and no raw HTML), and with bare URLs made links.
+	 *
+	 * TODO: Deliberate on how to share/merge this Markdown-to-note-HTML conversion (and its
+	 * TeX math heuristics) with note-editor (note-editor/src/core/plugins/markdown-parser.js),
+	 * e.g. via a headless export from the note-editor module.
 	 */
 	function markdownToNoteHTML(markdown) {
 		if (!_markdownIt) {
@@ -1534,7 +1470,7 @@ Zotero.MCP.Tools = new function () {
 				return `<a href="${src}">${_markdownIt.utils.escapeHtml(alt) || src}</a>`;
 			};
 		}
-		return `<div data-schema-version="9">${_markdownIt.render(markdown)}</div>`;
+		return `<div data-schema-version="${NOTE_SCHEMA_VERSION}">${_markdownIt.render(markdown)}</div>`;
 	}
 	
 	/**
@@ -1637,8 +1573,14 @@ Zotero.MCP.Tools = new function () {
 	// Pages zotero_read_text extracts at a time beyond those Zotero indexed
 	const EXTRACT_PAGES = 10;
 	
-	const TEXT_PENDING = "Zotero is still getting the text from the file, so it isn't all here. "
-		+ 'Call zotero_read_text again shortly, from nextPage for a PDF.';
+	// How long a completed on-demand page extraction stays cached so retries after a timeout
+	// don't re-extract the same batch
+	const EXTRACT_CACHE_TTL = 10 * 1000;
+	
+	// In-flight indexing and on-demand page extraction promises, so retries attach instead of
+	// queueing duplicate PDFWorker jobs
+	let _indexingPromises = new Map();
+	let _extractPromises = new Map();
 	
 	// Characters of context around a zotero_search_fulltext match, and the longest a passage
 	// of nearby matches grows
@@ -1648,9 +1590,9 @@ Zotero.MCP.Tools = new function () {
 	
 	const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 	
-	// Longest a call waits for structured document text (see getOutline()), within its
-	// deadline
-	this._structureWait = 15 * 1000;
+	// Longest a call waits for uncached structured document text (see getOutline()) after pages
+	// are read, within its deadline
+	this._structureWait = 3 * 1000;
 	
 	/**
 	 * Where words or phrases occur in the full text of attachments, with the passage around
@@ -1661,7 +1603,6 @@ Zotero.MCP.Tools = new function () {
 		query, itemKeys, collectionKey, includeSubcollectionItems = false, libraryID, limit = 10, offset = 0,
 		passagesPerFile = 3,
 	}, { deadline }) {
-		let textPending = false;
 		libraryID = getLibraryID(libraryID);
 		let terms = Zotero.SearchConditions.parseSearchString(query)
 			.map(part => part.text.trim())
@@ -1691,6 +1632,7 @@ Zotero.MCP.Tools = new function () {
 		
 		let regExps = terms.map(getTermRegExp).filter(Boolean);
 		let results = [];
+		let timedOutCount = 0;
 		for (let attachment of attachments.slice(offset, offset + limit)) {
 			let text = await getIndexedText(attachment, deadline);
 			let summary = {
@@ -1700,8 +1642,8 @@ Zotero.MCP.Tools = new function () {
 				contentType: attachment.attachmentContentType,
 			};
 			if (text === TIMED_OUT) {
-				textPending = true;
-				results.push({ ...summary, status: 'pending' });
+				timedOutCount++;
+				results.push(summary);
 				continue;
 			}
 			text ??= '';
@@ -1738,16 +1680,20 @@ Zotero.MCP.Tools = new function () {
 				passages: nonEmpty(passages.slice(0, passagesPerFile).map(({ termCount: _termCount, ...passage }) => passage)),
 			});
 		}
+		if (results.length && timedOutCount == results.length) {
+			throw new Zotero.MCP.ToolError(
+				'Zotero is still getting the text of the matching files. Search again shortly.'
+			);
+		}
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			total: attachments.length,
 			files: results,
 			nextOffset: offset + limit < attachments.length ? offset + limit : undefined,
 			missing: nonEmpty(missing),
-			notice: [
-				textPending && 'Zotero is still getting the text of the files with status pending, so their '
-					+ 'passages are missing. Search again shortly.',
-			].filter(Boolean).join(' ') || undefined,
+			notice: timedOutCount
+				? 'Zotero is still getting the text of the files without passages. Search again shortly.'
+				: undefined,
 		});
 	};
 	
@@ -1771,7 +1717,9 @@ Zotero.MCP.Tools = new function () {
 		};
 		// A PDF's pages can still be read from the file
 		if (text === TIMED_OUT && !attachment.isPDFAttachment()) {
-			return Zotero.MCP.jsonResult({ ...result, status: 'pending', notice: TEXT_PENDING });
+			throw new Zotero.MCP.ToolError(
+				`Zotero is still getting the text from ${attachment.key}. Call zotero_read_text again shortly.`
+			);
 		}
 		if (text === null && !(fileExists && attachment.isPDFAttachment())) {
 			throw new Zotero.MCP.ToolError(fileExists
@@ -1821,7 +1769,9 @@ Zotero.MCP.Tools = new function () {
 		if (!totalPages) {
 			let extracted = await extractPages(attachment, [0], deadline);
 			if (extracted === TIMED_OUT) {
-				return Zotero.MCP.jsonResult({ ...result, status: 'pending', notice: TEXT_PENDING });
+				throw new Zotero.MCP.ToolError(
+					`Zotero is still getting the text from ${attachment.key}. Call zotero_read_text again shortly.`
+				);
 			}
 			totalPages = extracted.totalPages;
 			pages[0] = extracted.texts[0];
@@ -1834,15 +1784,10 @@ Zotero.MCP.Tools = new function () {
 		if (endPage < startPage) {
 			throw new Zotero.MCP.ToolError('endPage is before startPage');
 		}
-		// Only the first call has the outline
-		let structure = startPage == 1 && await getOutline(
-			attachment,
-			Math.min(deadline, Date.now() + Zotero.MCP.Tools._structureWait)
-		);
 		let pageResults = [];
 		let chars = 0;
 		let page = startPage;
-		let textPending = false;
+		let partialTimeout = false;
 		for (; page <= endPage && (!pageResults.length || chars < maxChars); page++) {
 			// Such as pages past the index limit (the fulltext.pdfMaxPages pref), a batch at a time
 			if (pages[page - 1] === undefined) {
@@ -1852,7 +1797,13 @@ Zotero.MCP.Tools = new function () {
 				}
 				let extracted = await extractPages(attachment, pageIndexes, deadline);
 				if (extracted === TIMED_OUT) {
-					textPending = true;
+					if (!pageResults.length) {
+						throw new Zotero.MCP.ToolError(
+							`Zotero is still getting the text from ${attachment.key}. `
+								+ 'Call zotero_read_text again shortly with the same arguments.'
+						);
+					}
+					partialTimeout = true;
 					break;
 				}
 				pageIndexes.forEach((pageIndex, i) => {
@@ -1863,9 +1814,16 @@ Zotero.MCP.Tools = new function () {
 			chars += pageText.length;
 			pageResults.push({ page, text: pageText });
 		}
+		// Only the first call has the outline, fetched after pages so SDT doesn't block extraction
+		let structure = startPage == 1 && !partialTimeout && Date.now() < deadline
+			&& await getOutline(
+				attachment,
+				Math.min(deadline, Date.now() + Zotero.MCP.Tools._structureWait)
+			);
 		let notice;
-		if (textPending) {
-			notice = TEXT_PENDING;
+		if (partialTimeout) {
+			notice = 'Stopped early because extracting further pages took too long. '
+				+ 'Call zotero_read_text again from nextPage.';
 		}
 		else if (pageResults.every(({ text }) => !text)) {
 			notice = 'These pages have no text. If the PDF is scanned, it may need OCR.';
@@ -1875,7 +1833,6 @@ Zotero.MCP.Tools = new function () {
 				+ 'from startPage 1 may include it.';
 		}
 		Object.assign(result, {
-			status: textPending ? 'pending' : undefined,
 			totalPages,
 			pages: pageResults,
 			nextPage: page <= endPage ? page : undefined,
@@ -2045,19 +2002,15 @@ Zotero.MCP.Tools = new function () {
 				attachment = await finish(await Zotero.Attachments.linkFromFile({
 					file: path,
 					parentItemID: parent.id,
+					autoRename: true,
 					saveOptions: { skipSelect: true },
 				}));
 			}
 			else {
-				// Renamed as when the user adds the item's first file (ZoteroPane.addAttachmentFromDialog())
-				let fileBaseName;
-				if (Zotero.Attachments.shouldAutoRenameFile(false, libraryID) && !parent.numNonHTMLFileAttachments()) {
-					fileBaseName = await Zotero.Attachments.getRenamedFileBaseNameIfAllowedType(parent, path);
-				}
 				attachment = await finish(await Zotero.Attachments.importFromFile({
 					file: path,
 					parentItemID: parent.id,
-					fileBaseName,
+					autoRename: true,
 					saveOptions: { skipSelect: true },
 				}));
 			}
@@ -2213,9 +2166,19 @@ Zotero.MCP.Tools = new function () {
 			return path ? Zotero.File.getContentsAsync(path, attachment.attachmentCharset) : null;
 		}
 		let path = Zotero.FullText.getItemCacheFile(attachment).path;
-		if (!await IOUtils.exists(path) && await attachment.fileExists()
-				&& await untilDeadline(Zotero.FullText.indexItems([attachment.id]), deadline) === TIMED_OUT) {
-			return TIMED_OUT;
+		if (!await IOUtils.exists(path) && await attachment.fileExists()) {
+			let indexing = _indexingPromises.get(attachment.id);
+			if (!indexing) {
+				if (Date.now() >= deadline) {
+					return TIMED_OUT;
+				}
+				indexing = Zotero.FullText.indexItems([attachment.id], { isPriority: true })
+					.finally(() => _indexingPromises.delete(attachment.id));
+				_indexingPromises.set(attachment.id, indexing);
+			}
+			if (await untilDeadline(indexing, deadline) === TIMED_OUT) {
+				return TIMED_OUT;
+			}
 		}
 		return await IOUtils.exists(path) ? Zotero.File.getContentsAsync(path) : null;
 	}
@@ -2229,7 +2192,33 @@ Zotero.MCP.Tools = new function () {
 	 *     pageIndexes, or TIMED_OUT
 	 */
 	async function extractPages(attachment, pageIndexes, deadline) {
-		let result = await untilDeadline(Zotero.PDFWorker.getFullText(attachment.id, pageIndexes, true), deadline);
+		let now = Date.now();
+		for (let [key, entry] of _extractPromises) {
+			if (entry.settledAt && now - entry.settledAt > EXTRACT_CACHE_TTL) {
+				_extractPromises.delete(key);
+			}
+		}
+		let key = `${attachment.id}:${pageIndexes[0]}-${pageIndexes[pageIndexes.length - 1]}`;
+		let entry = _extractPromises.get(key);
+		if (!entry) {
+			if (now >= deadline) {
+				return TIMED_OUT;
+			}
+			entry = { settledAt: null };
+			entry.promise = Zotero.PDFWorker.getFullText(attachment.id, pageIndexes, true)
+				.then(
+					(result) => {
+						entry.settledAt = Date.now();
+						return result;
+					},
+					(err) => {
+						_extractPromises.delete(key);
+						throw err;
+					}
+				);
+			_extractPromises.set(key, entry);
+		}
+		let result = await untilDeadline(entry.promise, deadline);
 		if (result === TIMED_OUT) {
 			return result;
 		}
@@ -2400,30 +2389,8 @@ Zotero.MCP.Tools = new function () {
 	 */
 	this.restoreFromTrash = async function (args, { clientID }) {
 		let { libraryID, items, collections, searches } = await getTrashObjects(args, true);
-		let restored = await edit(clientID, async () => {
-			// As when the user restores only parent items and collections in the trash
-			// (ZoteroPane.restoreSelectedItems()), their children come back too
-			let objects = [...items, ...collections, ...searches];
-			for (let item of items) {
-				if (item.isRegularItem()) {
-					objects.push(...Zotero.Items.get([...item.getNotes(true), ...item.getAttachments(true)]));
-				}
-			}
-			for (let collection of collections) {
-				objects.push(...Zotero.Collections.get(
-					collection.getDescendents(false, 'collection', true).map(descendant => descendant.id)
-				));
-			}
-			let changed = [];
-			for (let object of new Set(objects)) {
-				if (object.deleted) {
-					object.deleted = false;
-					await object.save();
-					changed.push(object);
-				}
-			}
-			return changed;
-		});
+		let objects = [...items, ...collections, ...searches];
+		let restored = await edit(clientID, () => Zotero.Items.restoreFromTrash(objects), objects);
 		return trashResult(libraryID, restored);
 	};
 	
@@ -2620,27 +2587,22 @@ Zotero.MCP.Tools = new function () {
 		if (focus) {
 			Zotero.Utilities.Internal.activate(win);
 		}
-		// Finished also when the tab outlasts the call
-		let showing = (async () => {
-			let view = await waitForLibraryView(win, viewTabID);
-			if (restore) {
-				await view.restoreLibraryTabState(state);
-			}
-			if (allItems) {
-				view.itemsView.selection.selectAll();
-			}
-			return view;
-		})();
-		let view = await untilDeadline(showing, deadline);
-		if (view === TIMED_OUT) {
-			return Zotero.MCP.jsonResult({
-				windowID: win.Zotero_Tabs?.windowID,
-				tabID: viewTabID,
-				libraryID,
-				status: 'pending',
-				notice: 'Zotero is still opening the library tab, and shows the items once it has. '
-					+ 'Call zotero_get_context later to see them.',
-			});
+		let view = await waitForLibraryView(win, viewTabID, deadline);
+		if (view === TIMED_OUT
+				|| (restore && await untilDeadline(view.restoreLibraryTabState(state), deadline) === TIMED_OUT)) {
+			let knownTabID = view !== TIMED_OUT ? view.tabID : viewTabID;
+			let opened = [
+				win.Zotero_Tabs?.windowID && `window ${win.Zotero_Tabs.windowID}`,
+				knownTabID && `tab ${knownTabID}`,
+			].filter(Boolean).join(', ');
+			throw new Zotero.MCP.ToolError(
+				'Timed out waiting for the library tab to load'
+					+ (opened ? ` (${opened} is already open)` : '')
+					+ '. Do not repeat newTab or newWindow; check zotero_get_context.'
+			);
+		}
+		if (allItems) {
+			view.itemsView.selection.selectAll();
 		}
 		let selected = view.itemsView.getSelectedObjects();
 		return Zotero.MCP.jsonResult({
@@ -2702,50 +2664,63 @@ Zotero.MCP.Tools = new function () {
 		// Zotero gives an item a window of its own only if no window has a tab for it, and
 		// otherwise selects that tab. A tab in another window isn't a duplicate, so a new window
 		// is opened first and the item opened in it.
+		let openedWindow;
 		if (newWindow && Zotero.getMainWindows().some(win => win.Zotero_Tabs && getTabIDs(win, item).length)) {
 			let win = Zotero.openMainWindow();
-			await new Promise(resolve => win.addEventListener('load', resolve, { once: true }));
-			await win.ZoteroPane.loadedPromise;
+			openedWindow = win;
+			let ready = (async () => {
+				await new Promise(resolve => win.addEventListener('load', resolve, { once: true }));
+				await win.ZoteroPane.loadedPromise;
+			})();
+			if (await untilDeadline(ready, deadline) === TIMED_OUT) {
+				throw new Zotero.MCP.ToolError(
+					'Timed out waiting for the new window to load'
+						+ (win.Zotero_Tabs?.windowID ? ` (window ${win.Zotero_Tabs.windowID} is already open)` : '')
+						+ '. Do not repeat newWindow; check zotero_get_context.'
+				);
+			}
 			options = { window: win };
 		}
+		let openPromise;
 		if (item.isNote()) {
 			if (location) {
 				throw new Zotero.MCP.ToolError(`${item.key} is a note, which has no pages or annotations`);
 			}
-			await Zotero.Notes.open(item.id, null, options);
+			openPromise = Zotero.Notes.open(item.id, null, options);
 		}
 		else if (item.isAttachment() && item.attachmentReaderType) {
 			if (!await item.fileExists()) {
 				throw new Zotero.MCP.ToolError(`The file of ${item.key} isn't on this computer`);
 			}
-			await Zotero.Reader.open(item.id, location, options);
+			openPromise = Zotero.Reader.open(item.id, location, options);
 		}
 		else {
 			throw new Zotero.MCP.ToolError(
 				`${item.key} can't be opened in Zotero: only PDFs, EPUBs, web page snapshots and notes can`
 			);
 		}
-		// A new window adds its tab as it loads
-		while (!Zotero.getMainWindows().some(win => win.Zotero_Tabs && getTabIDs(win, item).length)
-				&& Date.now() < deadline) {
-			await Zotero.Promise.delay(20);
+		let opened;
+		try {
+			opened = await untilDeadline(openPromise, deadline);
 		}
-		// The tab that's showing it: the selected one in its window, or else the newest
-		let win, tabID;
-		for (let mainWindow of Zotero.getMainWindows().filter(win => win.Zotero_Tabs)) {
-			let tabIDs = getTabIDs(mainWindow, item);
-			if (!tabIDs.length) {
-				continue;
+		catch (e) {
+			if (/Timed out/i.test(e.message)) {
+				throw new Zotero.MCP.ToolError(
+					`Timed out waiting for ${item.key} to open. Do not repeat newTab or newWindow; check zotero_get_context.`
+				);
 			}
-			let selected = tabIDs.find(id => id == mainWindow.Zotero_Tabs.selectedID);
-			if (selected || !win || mainWindow == options.window) {
-				win = mainWindow;
-				tabID = selected ?? tabIDs.at(-1);
-			}
-			if (selected && mainWindow == options.window) {
-				break;
-			}
+			throw e;
 		}
+		if (opened === TIMED_OUT || !opened) {
+			let knownWin = openedWindow?.Zotero_Tabs?.windowID || options.window?.Zotero_Tabs?.windowID;
+			throw new Zotero.MCP.ToolError(
+				`Timed out waiting for ${item.key} to open`
+					+ (knownWin ? ` (in window ${knownWin})` : '')
+					+ '. Do not repeat newTab or newWindow; check zotero_get_context.'
+			);
+		}
+		let win = opened._window;
+		let { tabID } = opened;
 		if (focus && win) {
 			Zotero.Utilities.Internal.activate(win);
 		}
@@ -2755,8 +2730,6 @@ Zotero.MCP.Tools = new function () {
 			title: item.isNote() ? item.getNoteTitle() : getTitle(item),
 			windowID: win?.Zotero_Tabs.windowID,
 			tabID,
-			status: win ? undefined : 'pending',
-			notice: win ? undefined : 'Zotero is still opening it. Call zotero_get_context later for its tab.',
 		});
 	};
 	
@@ -2959,19 +2932,25 @@ Zotero.MCP.Tools = new function () {
 	}
 	
 	/**
-	 * A library tab's view once it shows what it was opened with
+	 * A library tab's view once it shows what it was opened with, or TIMED_OUT if the deadline
+	 * passes first
 	 *
 	 * @param {String|undefined} tabID - Undefined for the library tab of a new window
 	 */
-	async function waitForLibraryView(win, tabID) {
+	async function waitForLibraryView(win, tabID, deadline) {
 		let view;
 		while (!(view = tabID ? win.ZoteroPane?.getLibraryView(tabID) : win.ZoteroPane?.libraryView)?.loaded) {
 			if (win.closed) {
 				throw new Zotero.MCP.ToolError('The window was closed before the library tab opened');
 			}
+			if (Date.now() >= deadline) {
+				return TIMED_OUT;
+			}
 			await Zotero.Promise.delay(20);
 		}
-		await view.waitForLibraryTabState();
+		if (await untilDeadline(view.waitForLibraryTabState(), deadline) === TIMED_OUT) {
+			return TIMED_OUT;
+		}
 		return view;
 	}
 	
@@ -3294,7 +3273,7 @@ Zotero.MCP.Tools = new function () {
 				status: result === TIMED_OUT ? 'pending' : 'written',
 				citationKeys: result === TIMED_OUT
 					? undefined
-					: getCitationKeys(translator, items, await IOUtils.readUTF8(file)),
+					: await getCitationKeys(translator, items, undefined, file),
 				notice: result === TIMED_OUT
 					? "Zotero is still writing the file, which is incomplete until it's done. Wait a "
 						+ 'minute before using it.'
@@ -3310,7 +3289,7 @@ Zotero.MCP.Tools = new function () {
 			libraryID,
 			format: translator.label,
 			output: translation.string,
-			citationKeys: getCitationKeys(translator, items, translation.string),
+			citationKeys: await getCitationKeys(translator, items, translation.string),
 		});
 	};
 	
@@ -3323,15 +3302,29 @@ Zotero.MCP.Tools = new function () {
 	 * the keys can't be matched to items, so there are none.
 	 *
 	 * @param {Zotero.Item[]} items - The items exported
-	 * @return {Object|undefined} Item keys to citation keys
+	 * @param {String} [output] - Exported text, or omit to read from `file` if needed
+	 * @param {String} [file] - Path to exported file
+	 * @return {Promise<Object|undefined>} Item keys to citation keys
 	 */
-	function getCitationKeys(translator, items, output) {
+	async function getCitationKeys(translator, items, output, file) {
 		if (![BIBTEX_TRANSLATOR_ID, BIBLATEX_TRANSLATOR_ID].includes(translator.translatorID)) {
 			return undefined;
 		}
 		let regular = items.filter(item => item.isRegularItem()).sort((a, b) => a.id - b.id);
+		if (regular.length > MAX_CITATION_KEYS) {
+			return undefined;
+		}
+		if (output === undefined) {
+			try {
+				output = await IOUtils.readUTF8(file);
+			}
+			catch (e) {
+				Zotero.logError(e);
+				return undefined;
+			}
+		}
 		let citationKeys = [...output.matchAll(/^@\w+\{([^,\s]*),/gm)].map(match => match[1]);
-		if (regular.length > MAX_CITATION_KEYS || citationKeys.length != regular.length) {
+		if (citationKeys.length != regular.length) {
 			return undefined;
 		}
 		return Object.fromEntries(regular.map((item, i) => [item.key, citationKeys[i]]));
@@ -3489,8 +3482,12 @@ Zotero.MCP.Tools = new function () {
 				throw new Zotero.MCP.ToolError('mode is only for fulltextContent');
 			}
 			// Stored by ID, as fileTypeID
+			let internalCondition = condition == 'fileType' ? 'fileTypeID' : condition;
+			if (!Zotero.SearchConditions.hasOperator(internalCondition, operator)) {
+				let operators = Object.keys(Zotero.SearchConditions.get(internalCondition).operators);
+				throw new Zotero.MCP.ToolError(`${condition} takes the operators ${operators.join(', ')}`);
+			}
 			if (condition == 'fileType') {
-				condition = 'fileTypeID';
 				let id = Zotero.FileTypes.getID(value);
 				if (!id) {
 					throw new Zotero.MCP.ToolError(
@@ -3499,29 +3496,21 @@ Zotero.MCP.Tools = new function () {
 				}
 				value = String(id);
 			}
-			if (!Zotero.SearchConditions.hasOperator(condition, operator)) {
-				let operators = Object.keys(Zotero.SearchConditions.get(condition).operators);
-				throw new Zotero.MCP.ToolError(`${condition} takes the operators ${operators.join(', ')}`);
-			}
+			condition = internalCondition;
 			// Annotation types are stored by number
 			if (condition == 'annotationType') {
 				value = String(Zotero.Annotations['ANNOTATION_TYPE_' + value.toUpperCase()] ?? value);
 			}
-			return { condition: mode ? `${condition}/${mode}` : condition, operator, value, level };
+			return { condition, mode, operator, value, level };
 		};
-		let tree = { joinMode: 'all', children: conditions.map(toNode) };
 		// A child type names the rows to return rather than filtering items, as in
 		// Zotero.SearchQuery.getSearch()
-		let resultLevel = defaultLevel;
-		let pins = tree.children.filter(node => node.condition == 'itemType' && node.operator == 'is'
-			&& ['attachment', 'note', 'annotation'].includes(node.value));
-		if (pins.length && new Set(pins.map(pin => pin.value)).size == 1) {
-			resultLevel = pins[0].value;
-			tree.children = tree.children.filter(node => !pins.includes(node));
-		}
+		let { tree, resultLevel } = Zotero.Search.extractResultLevel(
+			{ joinMode: 'all', children: conditions.map(toNode) },
+			defaultLevel
+		);
 		let search = new Zotero.Search({ libraryID });
-		search.addCondition('resultLevel', resultLevel);
-		Zotero.SearchQuery.addToSearch(search, tree);
+		search.addConditionTree({ ...tree, level: resultLevel });
 		return { search, resultLevel };
 	}
 	

@@ -1215,17 +1215,17 @@
 		{
 			"name": "zotero_edit_note",
 			"title": "Edit a Zotero note",
-			"description": "Append Markdown to a note or replace it (same Markdown as zotero_add_note). Requires dateModified from zotero_get_notes to prevent overwriting concurrent edits. Replacing refuses notes with highlights, citations or images; append instead.",
+			"description": "Append Markdown to a note or replace it (same Markdown as zotero_add_note). For replace, requires dateModified from zotero_get_notes to prevent overwriting concurrent edits (optional for append, checked if given). Replacing refuses notes with highlights, citations or images; append instead.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"itemKey": { "type": "string", "description": "Note key" },
 					"markdown": { "type": "string", "minLength": 1 },
 					"mode": { "enum": ["append", "replace"], "default": "append", "description": "replace overwrites the whole note (first line becomes title)" },
-					"dateModified": { "type": "string", "description": "From zotero_get_notes" },
+					"dateModified": { "type": "string", "description": "From zotero_get_notes (required for replace)" },
 					"libraryID": { "type": "integer" }
 				},
-				"required": ["itemKey", "markdown", "dateModified"],
+				"required": ["itemKey", "markdown"],
 				"additionalProperties": false
 			},
 			"outputSchema": {
@@ -1290,7 +1290,6 @@
 								"title": { "type": "string", "description": "Parent item's title" },
 								"contentType": { "type": "string" },
 								"matchCount": { "type": "integer" },
-								"status": { "const": "pending" },
 								"passages": {
 									"type": "array",
 									"description": "Most matching terms first",
@@ -1375,7 +1374,6 @@
 					"offset": { "type": "integer" },
 					"text": { "type": "string" },
 					"nextOffset": { "type": "integer" },
-					"status": { "const": "pending" },
 					"notice": { "type": "string" }
 				},
 				"required": ["libraryID", "key", "title", "link"]
@@ -1452,7 +1450,7 @@
 					"parentItem": { "type": "string", "description": "Regular item key (omit for standalone local file)" },
 					"url": { "type": "string", "description": "http(s) PDF/EPUB or linking page (requires parentItem; not with path; uses institutional access)" },
 					"path": { "type": "string", "description": "Absolute local file path" },
-					"linkFile": { "type": "boolean", "default": false, "description": "Link to path instead of copying" },
+					"linkFile": { "type": "boolean", "default": false, "description": "Link to path instead of copying (auto-renames on disk if enabled in Zotero)" },
 					"collectionKey": { "type": "string", "minLength": 1, "description": "Collection for standalone file (only without parentItem)" },
 					"title": { "type": "string", "description": "Custom title (default: Zotero's name)" },
 					"libraryID": { "type": "integer" }
@@ -1768,11 +1766,9 @@
 					"libraryID": { "type": "integer" },
 					"selectedItemCount": { "type": "integer" },
 					"notShown": { "type": "array", "items": { "type": "string" }, "description": "Keys not in the collection/saved search" },
-					"missing": { "type": "array", "items": { "type": "string" } },
-					"status": { "const": "pending" },
-					"notice": { "type": "string" }
+					"missing": { "type": "array", "items": { "type": "string" } }
 				},
-				"required": ["libraryID"]
+				"required": ["windowID", "tabID", "libraryID"]
 			},
 			"annotations": {
 				"readOnlyHint": false,
@@ -1807,11 +1803,9 @@
 					"key": { "type": "string" },
 					"title": { "type": "string", "description": "Parent item's title" },
 					"windowID": { "type": "string" },
-					"tabID": { "type": "string" },
-					"status": { "const": "pending" },
-					"notice": { "type": "string" }
+					"tabID": { "type": "string" }
 				},
-				"required": ["libraryID", "key", "title"]
+				"required": ["libraryID", "key", "title", "windowID", "tabID"]
 			},
 			"annotations": {
 				"readOnlyHint": false,
