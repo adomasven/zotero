@@ -311,6 +311,12 @@ describe("MCP tools", function () {
 				link: `zotero://open/library/items/${attachment.key}`,
 			}]);
 			assert.deepEqual(items[0].notes, [{ key: note.key, title: 'My note' }]);
+			
+			// Pages only by index
+			let annotation = await createAnnotation('highlight', attachment);
+			({ items } = await call('zotero_get_items', { itemKeys: [annotation.key] }));
+			assert.property(items[0], 'annotationPosition');
+			assert.notProperty(items[0], 'annotationPageLabel');
 		});
 		
 		it("should leave out items in the trash unless asked for them", async function () {
@@ -805,9 +811,9 @@ describe("MCP tools", function () {
 			let { tags, total } = await call('zotero_list_tags', { query: prefix.toLowerCase() });
 			assert.equal(total, 3);
 			assert.deepEqual(tags, [
-				{ name: colored, itemCount: 0, color: 'red' },
-				{ name: two, itemCount: 2 },
-				{ name: one, itemCount: 1 },
+				{ tag: colored, itemCount: 0, color: 'red' },
+				{ tag: two, itemCount: 2 },
+				{ tag: one, itemCount: 1 },
 			]);
 		});
 	});

@@ -255,8 +255,8 @@ Zotero.MCP.Tools = new function () {
 		let { items: found, missing } = await getItemsByKey(libraryID, itemKeys, { includeTrashed });
 		let items = [];
 		for (let item of found) {
-			// No tool takes the version
-			let { version: _version, ...json } = item.toJSON();
+			// No tool takes the version, and pages are by index only
+			let { version: _version, annotationPageLabel: _pageLabel, ...json } = item.toJSON();
 			json.link = getSelectLink(item);
 			json.relations = nonEmpty(json.relations);
 			if (item.isRegularItem()) {
@@ -885,18 +885,18 @@ Zotero.MCP.Tools = new function () {
 		// Colored tags show in the tag selector even when no item has them
 		let names = new Set([...counts.keys(), ...colors.keys()]);
 		let tags = [...names].map(name => ({
-			name,
+			tag: name,
 			itemCount: counts.get(name) ?? 0,
 			color: getTagColorName(colors.get(name)?.color),
 		}));
 		if (query) {
 			query = Zotero.Utilities.Internal.normalizeForSearch(query);
-			tags = tags.filter(tag => Zotero.Utilities.Internal.normalizeForSearch(tag.name).includes(query));
+			tags = tags.filter(tag => Zotero.Utilities.Internal.normalizeForSearch(tag.tag).includes(query));
 		}
 		let position = name => colors.get(name)?.position ?? Infinity;
-		tags.sort((a, b) => position(a.name) - position(b.name)
+		tags.sort((a, b) => position(a.tag) - position(b.tag)
 			|| b.itemCount - a.itemCount
-			|| Zotero.localeCompare(a.name, b.name));
+			|| Zotero.localeCompare(a.tag, b.tag));
 		return Zotero.MCP.jsonResult({
 			libraryID,
 			total: tags.length,

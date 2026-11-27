@@ -710,11 +710,11 @@
 						"items": {
 							"type": "object",
 							"properties": {
-								"name": { "type": "string" },
+								"tag": { "type": "string" },
 								"itemCount": { "type": "integer" },
 								"color": { "type": "string", "description": "red, orange, gray, green, teal, blue, indigo, purple or plum, or #rrggbb if it isn't one of the colors Zotero offers" }
 							},
-							"required": ["name", "itemCount"]
+							"required": ["tag", "itemCount"]
 						}
 					},
 					"nextOffset": { "type": "integer" }
