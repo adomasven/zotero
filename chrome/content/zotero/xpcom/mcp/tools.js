@@ -3053,6 +3053,13 @@ Zotero.MCP.Tools = new function () {
 			throw new Zotero.MCP.ToolError('includeFiles needs a path to write the files to');
 		}
 		let translator = await getExportTranslator(format);
+		if (includeFiles && !canExportFiles(translator)) {
+			let formats = (await Zotero.Translators.getAllForType('export')).filter(canExportFiles);
+			throw new Zotero.MCP.ToolError(
+				`${translator.label} can't include files. Formats that can: `
+					+ formats.map(each => each.label).sort().join(', ') + '.'
+			);
+		}
 		let translation = new Zotero.Translate.Export();
 		let items;
 		if (itemKeys) {
@@ -3108,17 +3115,18 @@ Zotero.MCP.Tools = new function () {
 			translation.setLocation(Zotero.File.pathToFile(path));
 			// With its files, the export is a folder named by the path, as with File → Export
 			if (includeFiles) {
-				translation.setDisplayOptions({
-					...translator.displayOptions,
-					exportFileData: true,
-					includeAnnotations: true,
-				});
 				file = PathUtils.join(path, PathUtils.filename(path) + '.' + translator.target);
 			}
 			else {
 				file = path;
 			}
 		}
+		// Always set, as some formats copy files unless told not to, e.g. RefWorks Tagged
+		translation.setDisplayOptions({
+			...translator.displayOptions,
+			exportFileData: includeFiles,
+			includeAnnotations: includeFiles || undefined,
+		});
 		let exporting = new Promise((resolve, reject) => {
 			translation.setHandler('done', (_, worked) => (worked ? resolve() : reject(new Error('Export failed'))));
 			translation.setHandler('error', (_, error) => reject(error));
@@ -3187,6 +3195,11 @@ Zotero.MCP.Tools = new function () {
 	 * An export translator by its label, ignoring case, spaces and punctuation (e.g. "csljson"
 	 * for CSL JSON), or by its ID
 	 */
+	// Formats that can copy the items' files declare the option for it
+	function canExportFiles(translator) {
+		return 'exportFileData' in (translator.displayOptions || {});
+	}
+	
 	async function getExportTranslator(format) {
 		let normalize = label => label.toLowerCase().replace(/[^a-z0-9]/g, '');
 		let translators = await Zotero.Translators.getAllForType('export');

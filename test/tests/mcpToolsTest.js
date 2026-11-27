@@ -2111,6 +2111,20 @@ describe("MCP tools", function () {
 			await attachment.eraseTx();
 		});
 		
+		it("should write only the file without includeFiles, for a format that includes files by default", async function () {
+			let attachment = await importFileAttachment('test.pdf', { parentID: item.id });
+			let path = PathUtils.join(await getTempDirectory(), 'refworks.txt');
+			let result = await call('zotero_export', { format: 'RefWorks Tagged', itemKeys: [item.key], path });
+			assert.equal(result.path, path);
+			assert.equal((await IOUtils.stat(path)).type, 'regular');
+			
+			let error = await callForError('zotero_export', {
+				format: 'CSL JSON', itemKeys: [item.key], path: PathUtils.join(await getTempDirectory(), 'x'), includeFiles: true,
+			});
+			assert.match(error, /CSL JSON can't include files\. Formats that can: .*Zotero RDF/);
+			await attachment.eraseTx();
+		});
+		
 		it("should list the formats when it doesn't know one", async function () {
 			let error = await callForError('zotero_export', { format: 'nope', itemKeys: [item.key] });
 			assert.match(error, /Zotero has no export format nope\. Its formats are .*BibTeX/);
