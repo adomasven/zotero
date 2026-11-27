@@ -126,9 +126,9 @@
 						}
 					},
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
-					"collectionKey": { "type": "string", "description": "Only items in this collection. Not with savedSearchKey." },
+					"collectionKey": { "type": "string", "minLength": 1, "description": "Only items in this collection. Not with savedSearchKey." },
 					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also items in the collection's subcollections, at any depth" },
-					"savedSearchKey": { "type": "string", "description": "Only items this saved search finds. Not with collectionKey." },
+					"savedSearchKey": { "type": "string", "minLength": 1, "description": "Only items this saved search finds. Not with collectionKey." },
 					"inTrash": { "type": "boolean", "default": false, "description": "Search only the trash, e.g. for zotero_restore_from_trash. Not with collectionKey or savedSearchKey." },
 					"sortField": { "enum": ["dateModified", "dateAdded", "date", "title", "creator"], "default": "dateModified", "description": "What to order items by" },
 					"sortDirection": { "enum": ["asc", "desc"], "description": "Defaults to newest first for dates, A to Z otherwise" },
@@ -333,7 +333,7 @@
 							"required": ["itemType"]
 						}
 					},
-					"collectionKey": { "type": "string", "description": "A collection to add the items to" },
+					"collectionKey": { "type": "string", "minLength": 1, "description": "A collection to add the items to" },
 					"findFiles": { "type": "boolean", "default": true, "description": "Look for PDFs and EPUBs" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
@@ -585,7 +585,7 @@
 				"type": "object",
 				"properties": {
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
-					"collectionKey": { "type": "string", "description": "List this collection's subcollections" },
+					"collectionKey": { "type": "string", "minLength": 1, "description": "List this collection's subcollections" },
 					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Count the items in each collection's subcollections too" },
 					"inTrash": { "type": "boolean", "default": false, "description": "List only collections in the trash" }
 				},
@@ -659,7 +659,7 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"collectionKey": { "type": "string" },
+					"collectionKey": { "type": "string", "minLength": 1 },
 					"name": { "type": "string", "minLength": 1, "description": "A new name" },
 					"parentCollection": { "type": ["string", "null"], "description": "The collection to move it into, or null for the top level" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
@@ -1009,7 +1009,7 @@
 					}
 				},
 				"properties": {
-					"savedSearchKey": { "type": "string" },
+					"savedSearchKey": { "type": "string", "minLength": 1 },
 					"name": { "type": "string", "minLength": 1, "description": "A new name" },
 					"conditions": {
 						"type": "array",
@@ -1190,7 +1190,7 @@
 				"properties": {
 					"markdown": { "type": "string", "minLength": 1, "description": "The note. Its first line becomes its title, so start with a heading." },
 					"parentItem": { "type": "string", "description": "The regular item (e.g. a journal article) to add the note under" },
-					"collectionKey": { "type": "string", "description": "For a standalone note, a collection to put it in" },
+					"collectionKey": { "type": "string", "minLength": 1, "description": "For a standalone note, a collection to put it in" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
 				"required": ["markdown"],
@@ -1271,7 +1271,7 @@
 						"maxItems": 100,
 						"description": "Only these items' files, given by item or attachment keys. Not with collectionKey."
 					},
-					"collectionKey": { "type": "string", "description": "Only the files of items in this collection" },
+					"collectionKey": { "type": "string", "minLength": 1, "description": "Only the files of items in this collection" },
 					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also items in the collection's subcollections, at any depth" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" },
 					"limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Files per call" },
@@ -1460,7 +1460,7 @@
 					"url": { "type": "string", "description": "http or https, with parentItem: a PDF or EPUB, or a page that links to one. Downloaded from the user's computer, so their institution's access applies. Not with path." },
 					"path": { "type": "string", "description": "The absolute path of a file on this computer" },
 					"linkFile": { "type": "boolean", "default": false, "description": "Link to the file at path where it is, instead of copying it into Zotero" },
-					"collectionKey": { "type": "string", "description": "Without parentItem, a collection to add the file and the item Zotero creates for it to" },
+					"collectionKey": { "type": "string", "minLength": 1, "description": "Without parentItem, a collection to add the file and the item Zotero creates for it to" },
 					"title": { "type": "string", "description": "The attachment's title. By default Zotero names it, e.g. \"Full Text PDF\"." },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
 				},
@@ -1763,8 +1763,8 @@
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"collectionKey": { "type": "string", "description": "Defaults to the whole library. Not with savedSearchKey." },
-					"savedSearchKey": { "type": "string" },
+					"collectionKey": { "type": "string", "minLength": 1, "description": "Defaults to the whole library. Not with savedSearchKey." },
+					"savedSearchKey": { "type": "string", "minLength": 1 },
 					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 500, "description": "Items to select. Only items in the collection or saved search can be selected. Without itemKeys or allItems, nothing is selected, even if the collection was already shown with a selection." },
 					"allItems": { "type": "boolean", "default": false, "description": "Select every item shown. Not with itemKeys." },
 					"windowID": { "type": "string", "description": "A window from zotero_get_context. Defaults to the window the user used last." },
@@ -1943,7 +1943,7 @@
 				"properties": {
 					"path": { "type": "string", "description": "The file's absolute path. Not with text." },
 					"text": { "type": "string" },
-					"collectionKey": { "type": "string", "description": "A collection to add the items to" },
+					"collectionKey": { "type": "string", "minLength": 1, "description": "A collection to add the items to" },
 					"newCollection": { "type": "boolean", "description": "Put the items in a new collection. Defaults to true for a file and false for text." },
 					"linkFiles": { "type": "boolean", "default": false, "description": "Link to the files a file refers to where they are, instead of copying them into Zotero" },
 					"libraryID": { "type": "integer", "description": "Defaults to My Library" }
@@ -2005,7 +2005,7 @@
 				"properties": {
 					"format": { "type": "string", "description": "An export format's name, e.g. \"BibTeX\" or \"CSL JSON\"" },
 					"itemKeys": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Items to export. Not with collectionKey. Without either, the whole library." },
-					"collectionKey": { "type": "string" },
+					"collectionKey": { "type": "string", "minLength": 1 },
 					"includeSubcollectionItems": { "type": "boolean", "default": false, "description": "Also the items in the collection's subcollections, at any depth. Formats that keep collections, such as Zotero RDF, then also export the subcollections." },
 					"path": { "type": "string", "description": "An absolute path to write to, where nothing exists yet, which asks the user for permission. Without it, the export is returned as text." },
 					"includeFiles": { "type": "boolean", "default": false, "description": "Also copy the items' files, with their annotations. path is then a new folder, with the export file inside it." },
