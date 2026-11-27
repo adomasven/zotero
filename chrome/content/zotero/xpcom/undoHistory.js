@@ -28,7 +28,8 @@
  *
  * Hooks into DB transaction lifecycle to batch all saves within a single
  * executeTransaction() into one undo step. Tracks modifications to existing
- * objects, and the creation of new ones, which undo moves to the trash.
+ * objects, the creation of new ones, which undo moves to the trash, and
+ * changes to synced settings, such as tag colors.
  *
  * Capture is opt-in via a two-call staging protocol within a transaction:
  *   - stageChange(record) -- append a change record to the pending entry
@@ -247,6 +248,10 @@ Zotero.UndoHistory = {
 					return;
 				}
 				for (let change of entry.changes) {
+					if (change.objectType === 'setting') {
+						await this._applySettingValue(change, change.fields.value[applySide]);
+						continue;
+					}
 					let obj = this._getObject(change);
 					if (!obj) continue;
 					// Apply itemTypeID first so setType() migrates fields before
@@ -410,6 +415,41 @@ Zotero.UndoHistory = {
 	},
 
 	/**
+	 * Stage a change to a synced setting, such as a library's tag colors. Zotero.SyncedSettings
+	 * calls it for local changes made inside a transaction.
+	 *
+	 * @param {Integer} libraryID
+	 * @param {String} setting
+	 * @param {*} oldValue -- null if the setting wasn't set
+	 * @param {*} newValue -- null if the setting is cleared
+	 */
+	stageSettingChange(libraryID, setting, oldValue, newValue) {
+		this.stageChange({
+			objectType: 'setting',
+			id: libraryID + '/' + setting,
+			libraryID,
+			setting,
+			fields: {
+				value: { old: oldValue, new: newValue }
+			}
+		});
+	},
+	
+	async _applySettingValue(change, value) {
+		if (value === null) {
+			await Zotero.SyncedSettings.clear(change.libraryID, change.setting);
+		}
+		else {
+			await Zotero.SyncedSettings.set(change.libraryID, change.setting, value);
+		}
+	},
+	
+	_settingMatches(change, side) {
+		let current = Zotero.SyncedSettings.get(change.libraryID, change.setting);
+		return JSON.stringify(current) === JSON.stringify(change.fields.value[side]);
+	},
+	
+	/**
 	 * Realign in-memory state with the DB after a failed apply. The apply runs
 	 * many saves in one transaction; if a later one throws, the transaction
 	 * rolls back, but objects saved earlier already hold their reverted values
@@ -420,6 +460,15 @@ Zotero.UndoHistory = {
 	 */
 	async _reloadEntryObjects(entry) {
 		for (let change of entry.changes) {
+			if (change.objectType === 'setting') {
+				try {
+					await Zotero.SyncedSettings.loadAll(change.libraryID);
+				}
+				catch (e) {
+					Zotero.debug('UndoHistory: failed to reload synced settings after apply failure: ' + e);
+				}
+				continue;
+			}
 			let obj = this._getObject(change);
 			if (!obj) {
 				continue;
@@ -521,6 +570,12 @@ Zotero.UndoHistory = {
 	 */
 	_entryIsStale(entry, side) {
 		for (let change of entry.changes) {
+			if (change.objectType === 'setting') {
+				if (!this._settingMatches(change, side)) {
+					return true;
+				}
+				continue;
+			}
 			let obj = this._getObject(change);
 			if (!obj) {
 				continue;

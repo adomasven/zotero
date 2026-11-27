@@ -266,6 +266,12 @@ Zotero.SyncedSettings = (function () {
 			
 			var id = libraryID + '/' + setting;
 			
+			// A local change in a transaction can be part of an undo step, e.g. renaming a tag
+			// along with its color
+			if (!synced && Zotero.DB.inTransaction()) {
+				Zotero.UndoHistory.stageSettingChange(libraryID, setting, currentValue, value);
+			}
+			
 			if (hasCurrentValue) {
 				var extraData = {};
 				extraData[id] = {
@@ -331,6 +337,10 @@ Zotero.SyncedSettings = (function () {
 			}
 			
 			var id = libraryID + '/' + setting;
+			
+			if (Zotero.DB.inTransaction()) {
+				Zotero.UndoHistory.stageSettingChange(libraryID, setting, currentValue, null);
+			}
 			
 			var extraData = {};
 			extraData[id] = {

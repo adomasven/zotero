@@ -41,6 +41,37 @@ describe("Zotero.UndoHistory", function () {
 		});
 	});
 	
+	describe("synced setting change", function () {
+		it("should undo and redo a tag's color along with the tag", async function () {
+			let libraryID = Zotero.Libraries.userLibraryID;
+			let oldName = Zotero.Utilities.randomString();
+			let newName = Zotero.Utilities.randomString();
+			let item = await createDataObject('item', { tags: [{ tag: oldName }] });
+			await Zotero.Tags.setColor(libraryID, oldName, '#FF6666');
+			
+			await Zotero.DB.executeTransaction(async () => {
+				Zotero.UndoHistory.stageAction('undo-action-edit-metadata', { count: 1 });
+				item.replaceTag(oldName, newName);
+				await item.save();
+				await Zotero.Tags.setColor(libraryID, oldName, false);
+				await Zotero.Tags.setColor(libraryID, newName, '#FF6666');
+			});
+			assert.isFalse(Zotero.Tags.getColors(libraryID).has(oldName));
+			
+			assert.isTrue(await Zotero.UndoHistory.undo());
+			assert.isTrue(item.hasTag(oldName));
+			assert.equal(Zotero.Tags.getColor(libraryID, oldName).color, '#FF6666');
+			assert.isFalse(Zotero.Tags.getColors(libraryID).has(newName));
+			
+			assert.isTrue(await Zotero.UndoHistory.redo());
+			assert.isTrue(item.hasTag(newName));
+			assert.equal(Zotero.Tags.getColor(libraryID, newName).color, '#FF6666');
+			assert.isFalse(Zotero.Tags.getColors(libraryID).has(oldName));
+			
+			await Zotero.Tags.setColor(libraryID, newName, false);
+		});
+	});
+	
 	describe("trashing a collection", function () {
 		it("should undo and redo trashing a collection", async function () {
 			let collection = await createDataObject('collection');
